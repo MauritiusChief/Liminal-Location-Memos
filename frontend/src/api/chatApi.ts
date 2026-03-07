@@ -7,6 +7,10 @@ export interface ChatResponse {
   reply: string;
 }
 
+export interface OverpassResponse {
+  data: unknown;
+}
+
 interface ErrorResponse {
   error: string;
 }
@@ -47,3 +51,19 @@ export async function postChatMessage(message: string): Promise<ChatResponse> {
   return response.json() as Promise<ChatResponse>;
 }
 
+export async function postOverpassQuery(query: string): Promise<OverpassResponse> {
+  const response = await fetch('/api/overpass', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ query }),
+  });
+
+  if (!response.ok) {
+    const errorPayload = (await response.json().catch(() => ({ error: 'Request failed.' }))) as ErrorResponse;
+    throw new Error(errorPayload.error || 'Request failed.');
+  }
+
+  return response.json() as Promise<OverpassResponse>;
+}

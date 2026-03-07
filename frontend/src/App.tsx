@@ -1,7 +1,7 @@
 import { SubmitEvent, useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from './app/hooks';
-import { submitMessage, updateInput } from './features/chat/chatSlice';
 import { fetchHealth } from './api/chatApi';
+import { submitMessage, updateInput } from './features/chat/chatSlice';
 
 function App() {
   const dispatch = useAppDispatch();
@@ -21,7 +21,7 @@ function App() {
 
   return (
     <main>
-      <h1>React + Redux + TypeScript Template</h1>
+      <h1>Temporary Overpass QL Playground</h1>
       <p>Backend status: {health}</p>
 
       <form onSubmit={handleSubmit}>
@@ -56,4 +56,3 @@ function App() {
 }
 
 export default App;
-

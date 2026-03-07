@@ -1,5 +1,5 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { postChatMessage } from '../../api/chatApi';
+import { postChatMessage, postOverpassQuery } from '../../api/chatApi';
 
 // ChatState 描述了 chat 这块状态分片的结构。
 // 因为 store.ts 里把它注册为 chat，所以它最终会出现在 state.chat 中。
@@ -17,7 +17,8 @@ interface ChatState {
 // initialState 是 chat 这块状态的初始值。
 // 当应用第一次加载时，Redux 会先使用这里的默认数据。
 const initialState: ChatState = {
-  input: '',
+  // input: '',
+  input: '[out:json];\nnwr["amenity"="restaurant"](34.0, -84.1, 34.1, -84.0);\nout;',
   loading: false,
   response: '',
   error: null,
@@ -39,10 +40,12 @@ export const submitMessage = createAsyncThunk<string, string, { rejectValue: str
     }
 
     try {
+      const result = await postOverpassQuery(trimmedMessage);
+      return JSON.stringify(result.data, null, 2);
       // 调用 API，把用户输入发送到后端。
-      const result = await postChatMessage(trimmedMessage);
+      // const result = await postChatMessage(trimmedMessage);
       // fulfilled 时，这个返回值会成为 action.payload。
-      return result.reply;
+      // return result.reply;
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
     }
@@ -68,6 +71,7 @@ const chatSlice = createSlice({
       .addCase(submitMessage.pending, (state) => {
         state.loading = true;
         state.error = null;
+        state.response = '';
       })
       .addCase(submitMessage.fulfilled, (state, action) => {
         state.loading = false;
