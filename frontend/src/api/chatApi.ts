@@ -11,6 +11,10 @@ interface ErrorResponse {
   error: string;
 }
 
+/**
+ * fetch 后端的状态
+ * @returns
+ */
 export async function fetchHealth(): Promise<HealthResponse> {
   const response = await fetch('/api/health');
 
@@ -21,6 +25,11 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return response.json() as Promise<HealthResponse>;
 }
 
+/**
+ * post 一个消息
+ * @param message
+ * @returns
+ */
 export async function postChatMessage(message: string): Promise<ChatResponse> {
   const response = await fetch('/api/chat', {
     method: 'POST',
