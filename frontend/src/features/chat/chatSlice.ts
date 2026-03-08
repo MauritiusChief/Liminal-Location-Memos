@@ -18,7 +18,7 @@ interface ChatState {
 // 当应用第一次加载时，Redux 会先使用这里的默认数据。
 const initialState: ChatState = {
   // input: '',
-  input: '[out:json];\nnwr["amenity"="restaurant"](34.0, -84.1, 34.1, -84.0);\nout;',
+  input: '[out:json];\nnwr["amenity"="restaurant"](34.0, -84.1, 34.1, -84.0);\nout center;',
   loading: false,
   response: '',
   error: null,
@@ -59,7 +59,7 @@ const chatSlice = createSlice({
   initialState,
   reducers: {
     // reducers 里放同步状态更新逻辑。
-    // 这里的 updateInput 表示：用户输入变化时，更新 state.input。
+    // 这里定义 updateInput ，其表示：用户输入变化时，更新 state.input。
     updateInput(state, action: PayloadAction<string>) {
       state.input = action.payload;
     },
