@@ -3,9 +3,9 @@ import {
   computeBoundingBox,
   extractPointCoordinate,
   getPolygonalFeatureArea,
+  isLinearGeometryType,
   isPointInBoundingBox,
   isPolygonalGeometry,
-  isLinearGeometryType,
   lineIntersectsBoundingBox,
   metersToLatitudeDegrees,
   metersToLongitudeDegrees,
@@ -14,14 +14,17 @@ import {
 } from './overpassGeometry.js';
 import type { ContainedPoi, NormalizedFeature, NormalizedFeatureProperties } from './overpassNormalization.js';
 
-export type MicroGridCellKind = 'building' | 'poi' | 'road' | 'area' | 'empty';
+export type MicroGridCellKind = 'building' | 'area' | 'empty';
 
 export interface NormalizedMicroGridCell {
   row: number;
   col: number;
   center: [number, number];
+  baseKind: MicroGridCellKind;
+  baseLabel: string;
+  poiLabels: string[];
+  roadLabels: string[];
   label: string;
-  kind: MicroGridCellKind;
   sourceFeatureIds: string[];
 }
 
@@ -49,6 +52,7 @@ const GRID_HALF_EXTENT_METERS = GRID_EXTENT_METERS / 2;
 const POI_TAG_KEYS = ['shop', 'amenity', 'office', 'tourism', 'leisure', 'craft', 'healthcare'] as const;
 const AREA_TAG_KEYS = ['landuse', 'natural', 'leisure', 'amenity'] as const;
 const ROAD_TAG_KEYS = ['highway', 'railway', 'waterway'] as const;
+const POI_LABEL_LIMIT = 1;
 
 type PolygonCandidate = {
   feature: Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>;
@@ -176,7 +180,7 @@ export function buildNormalizedMicroGrid(
 }
 
 // 单个格子的决策顺序是整个微网格可读性的核心：
-// 先建筑，再 POI，再道路，再其他区域，最后空白。
+// 面层只负责 building -> area -> empty，而 POI / ROAD 会作为叠加层始终保留。
 function buildMicroGridCell(input: {
   row: number;
   col: number;
@@ -188,52 +192,40 @@ function buildMicroGridCell(input: {
   areaCandidates: PolygonCandidate[];
 }): NormalizedMicroGridCell {
   const buildingMatch = selectSmallestContainingPolygon(input.buildingCandidates, input.center);
-  if (buildingMatch) {
-    return {
-      row: input.row,
-      col: input.col,
-      center: input.center,
-      ...buildBuildingCellPayload(buildingMatch.feature),
-    };
-  }
-
-  const poiMatch = selectPoiForCell(input.poiCandidates, input.cellBoundingBox);
-  if (poiMatch) {
-    return {
-      row: input.row,
-      col: input.col,
-      center: input.center,
-      ...buildPoiCellPayload(poiMatch),
-    };
-  }
-
-  const roadMatch = selectRoadForCell(input.roadCandidates, input.cellBoundingBox);
-  if (roadMatch) {
-    return {
-      row: input.row,
-      col: input.col,
-      center: input.center,
-      ...buildRoadCellPayload(roadMatch.feature),
-    };
-  }
-
   const areaMatch = selectSmallestContainingPolygon(input.areaCandidates, input.center);
-  if (areaMatch) {
-    return {
-      row: input.row,
-      col: input.col,
-      center: input.center,
-      ...buildAreaCellPayload(areaMatch.feature),
-    };
+  const poiMatches = selectPoisForCell(input.poiCandidates, input.cellBoundingBox);
+  const roadMatches = selectRoadsForCell(input.roadCandidates, input.cellBoundingBox);
+
+  let baseKind: MicroGridCellKind = 'empty';
+  let baseLabel = '.';
+  let sourceFeatureIds: string[] = [];
+
+  if (buildingMatch) {
+    baseKind = 'building';
+    baseLabel = buildBuildingCellLabel(buildingMatch.feature);
+    sourceFeatureIds.push(toFeatureId(buildingMatch.feature));
+  } else if (areaMatch) {
+    baseKind = 'area';
+    baseLabel = getAreaDisplayLabel(areaMatch.feature.properties.tags);
+    sourceFeatureIds.push(toFeatureId(areaMatch.feature));
   }
+
+  const poiLabels = poiMatches.map((feature) => getPoiDisplayLabel(feature.properties.tags));
+  const roadLabels = roadMatches.map((candidate) => getRoadDisplayLabel(candidate.feature.properties.tags));
+
+  sourceFeatureIds.push(...poiMatches.map((feature) => toFeatureId(feature)));
+  sourceFeatureIds.push(...roadMatches.map((candidate) => toFeatureId(candidate.feature)));
 
   return {
     row: input.row,
     col: input.col,
     center: input.center,
-    label: '.',
-    kind: 'empty',
-    sourceFeatureIds: [],
+    baseKind,
+    baseLabel,
+    poiLabels,
+    roadLabels,
+    label: buildCellLabel(baseKind, baseLabel, poiLabels, roadLabels),
+    sourceFeatureIds: [...new Set(sourceFeatureIds)],
   };
 }
 
@@ -244,7 +236,7 @@ function isBuildingFeature(
   return isPolygonalGeometry(feature.geometry) && typeof feature.properties.tags.building === 'string';
 }
 
-// 独立 POI 只在没有建筑命中的格子里展示。
+// 独立 POI 无论如何都会显示，只不过会与其他元素重叠显示。
 // 这里沿用和 containedPois 相同的一组功能分类键。
 function isPoiPointFeature(feature: NormalizedFeature): boolean {
   const coordinate = extractPointCoordinate(feature.geometry);
@@ -265,7 +257,7 @@ function isRoadFeature(
   );
 }
 
-// “其他面”是兜底层，主要为了在没有建筑/道路/POI 时仍能给格子一点环境语义。
+// “其他面”是兜底层，主要为了在没有建筑时仍能给格子一点环境语义。
 function isOtherAreaFeature(
   feature: NormalizedFeature,
 ): feature is Feature<Polygon | MultiPolygon, NormalizedFeatureProperties> {
@@ -299,23 +291,19 @@ function selectSmallestContainingPolygon(candidates: PolygonCandidate[], point: 
 }
 
 // POI 的命中规则是“点落在格子边界内”；
-// 多个点同时落入时，优先有 name/brand 的，再按 osmId 稳定排序。
-function selectPoiForCell(features: NormalizedFeature[], cellBoundingBox: BoundingBox): NormalizedFeature | null {
+// 多个点同时落入时全部保留，只做稳定排序，不在这里截断。
+function selectPoisForCell(features: NormalizedFeature[], cellBoundingBox: BoundingBox): NormalizedFeature[] {
   const matches = features.filter((feature) => {
     const coordinate = extractPointCoordinate(feature.geometry);
     return coordinate ? isPointInBoundingBox(coordinate, cellBoundingBox) : false;
   });
 
-  if (matches.length === 0) {
-    return null;
-  }
-
-  return [...matches].sort(comparePoiFeatures)[0] || null;
+  return [...matches].sort(comparePoiFeatures);
 }
 
 // 道路不要求穿过格子中心；
 // 只要线段与格子 bbox 有接触，就认为这个格子能反映出道路存在。
-function selectRoadForCell(candidates: LineCandidate[], cellBoundingBox: BoundingBox): LineCandidate | null {
+function selectRoadsForCell(candidates: LineCandidate[], cellBoundingBox: BoundingBox): LineCandidate[] {
   const matches = candidates.filter((candidate) => {
     if (
       candidate.boundingBox.maxX < cellBoundingBox.minX ||
@@ -329,85 +317,52 @@ function selectRoadForCell(candidates: LineCandidate[], cellBoundingBox: Boundin
     return lineIntersectsBoundingBox(candidate.feature.geometry, cellBoundingBox);
   });
 
-  if (matches.length === 0) {
-    return null;
-  }
-
-  return [...matches].sort((left, right) => compareNamedFeatures(left.feature, right.feature))[0] || null;
+  return [...matches].sort((left, right) => compareNamedFeatures(left.feature, right.feature));
 }
 
-// 建筑格的 label 生成逻辑优先体现“可被人和 LLM 读懂”的语义：
-// 建筑名 > 建筑内 POI 名/品牌 > 建筑内 POI 类型 > building 值。
-function buildBuildingCellPayload(
-  feature: Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>,
-): Pick<NormalizedMicroGridCell, 'label' | 'kind' | 'sourceFeatureIds'> {
-  const sourceFeatureIds = [toFeatureId(feature)];
+// 建筑格的 baseLabel 只负责反映“这个建筑本身是谁”；
+// POI / ROAD 的叠加信息会在后面统一拼到整格 label 里。
+function buildBuildingCellLabel(feature: Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>): string {
   const buildingName = trimTagValue(feature.properties.tags.name);
+  const fallbackBuildingLabel = getFallbackBuildingLabel(feature.properties.tags.building);
+  const containedPois = getDisplayableContainedPois(feature.properties.containedPois);
+  const containedPoiLabels = containedPois.map((poi) => getContainedPoiDisplayLabel(poi));
+  const containedPoiLabel = containedPoiLabels.length > 0 ? containedPoiLabels.join('&') : null;
 
   if (buildingName) {
-    return {
-      label: buildingName,
-      kind: 'building',
-      sourceFeatureIds,
-    };
+    return `${buildingName} | ${containedPoiLabel || fallbackBuildingLabel}`;
   }
 
-  const containedPoi = feature.properties.containedPois?.[0];
-  const containedPoiName = containedPoi ? trimTagValue(containedPoi.tags.name) || trimTagValue(containedPoi.tags.brand) : null;
-  if (containedPoiName) {
-    return {
-      label: containedPoiName,
-      kind: 'building',
-      sourceFeatureIds: containedPoi ? [...sourceFeatureIds, containedPoi.sourceFeatureId] : sourceFeatureIds,
-    };
+  if (containedPoiLabel) {
+    return `${containedPoiLabel} | ${fallbackBuildingLabel}`;
   }
 
-  const containedPoiCategory = containedPoi ? getPrimaryPoiLabel(containedPoi.tags) : null;
-  if (containedPoiCategory) {
-    return {
-      label: containedPoiCategory,
-      kind: 'building',
-      sourceFeatureIds: containedPoi ? [...sourceFeatureIds, containedPoi.sourceFeatureId] : sourceFeatureIds,
-    };
+  return fallbackBuildingLabel;
+}
+
+// 最终整格 label 仍保留为单字符串，方便前端直接渲染；
+// 但内部先分出 base / poi / road，再用稳定格式拼接起来。
+function buildCellLabel(
+  baseKind: MicroGridCellKind,
+  baseLabel: string,
+  poiLabels: string[],
+  roadLabels: string[],
+): string {
+  const segments: string[] = [];
+
+  if (baseKind !== 'empty' || (poiLabels.length === 0 && roadLabels.length === 0)) {
+    segments.push(baseLabel);
   }
 
-  const buildingValue = trimTagValue(feature.properties.tags.building);
-  return {
-    label: buildingValue && buildingValue !== 'yes' ? buildingValue : 'building',
-    kind: 'building',
-    sourceFeatureIds,
-  };
-}
+  if (poiLabels.length > 0) {
+    segments.push(`${poiLabels.join('&')}`);
+  }
 
-// 独立 POI 格优先显示 name / brand，其次退回主分类值。
-function buildPoiCellPayload(feature: NormalizedFeature): Pick<NormalizedMicroGridCell, 'label' | 'kind' | 'sourceFeatureIds'> {
-  return {
-    label: getPoiDisplayLabel(feature.properties.tags),
-    kind: 'poi',
-    sourceFeatureIds: [toFeatureId(feature)],
-  };
-}
+  if (roadLabels.length > 0) {
+    segments.push(`${roadLabels.join('&')}`);
+  }
 
-// 道路格优先给出路名，否则退回 highway / railway / waterway 的类型值。
-function buildRoadCellPayload(
-  feature: Feature<LineString | MultiLineString, NormalizedFeatureProperties>,
-): Pick<NormalizedMicroGridCell, 'label' | 'kind' | 'sourceFeatureIds'> {
-  return {
-    label: getRoadDisplayLabel(feature.properties.tags),
-    kind: 'road',
-    sourceFeatureIds: [toFeatureId(feature)],
-  };
-}
-
-// 其他面格只是环境提示，因此标签生成保持简单直接。
-function buildAreaCellPayload(
-  feature: Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>,
-): Pick<NormalizedMicroGridCell, 'label' | 'kind' | 'sourceFeatureIds'> {
-  return {
-    label: getAreaDisplayLabel(feature.properties.tags),
-    kind: 'area',
-    sourceFeatureIds: [toFeatureId(feature)],
-  };
+  return segments.filter(Boolean).join(' - ');
 }
 
 // 这个排序器专门服务“一个格子里有多个 POI 点”的情况。
@@ -449,7 +404,9 @@ function getPoiSortPriority(tags: Record<string, string>): number {
 
 // 这几个 display helper 都是在把“原始 tags”压成适合单元格展示的短文本。
 function getPoiDisplayLabel(tags: Record<string, string>): string {
-  return trimTagValue(tags.name) || trimTagValue(tags.brand) || getPrimaryPoiLabel(tags) || 'poi';
+  const label = getPrimaryPoiLabel(tags) || 'poi';
+  const name = trimTagValue(tags.name) || trimTagValue(tags.brand);
+  return name ? `${name} | ${label}` : label;
 }
 
 function getPrimaryPoiLabel(tags: Record<string, string>): string | null {
@@ -464,28 +421,36 @@ function getPrimaryPoiLabel(tags: Record<string, string>): string | null {
 }
 
 function getRoadDisplayLabel(tags: Record<string, string>): string {
-  return (
-    trimTagValue(tags.name) ||
-    trimTagValue(tags.highway) ||
-    trimTagValue(tags.railway) ||
-    trimTagValue(tags.waterway) ||
-    'road'
-  );
+  const label = trimTagValue(tags.highway) || trimTagValue(tags.railway) || trimTagValue(tags.waterway) || 'way';
+  const name = trimTagValue(tags.name);
+  return name ? `${name} | ${label}` : label;
 }
 
 function getAreaDisplayLabel(tags: Record<string, string>): string {
-  return (
-    trimTagValue(tags.name) ||
-    trimTagValue(tags.landuse) ||
-    trimTagValue(tags.natural) ||
-    trimTagValue(tags.leisure) ||
-    trimTagValue(tags.amenity) ||
-    'area'
-  );
+  const label = trimTagValue(tags.landuse) || trimTagValue(tags.natural) || trimTagValue(tags.leisure) || trimTagValue(tags.amenity) || 'area';
+  const name = trimTagValue(tags.name);
+  return name ? `${name} | ${label}` : label;
 }
 
 function getPreferredName(tags: Record<string, string>): string | null {
   return trimTagValue(tags.name) || trimTagValue(tags.brand);
+}
+
+function getFallbackBuildingLabel(buildingTagValue: string | undefined): string {
+  const buildingValue = trimTagValue(buildingTagValue);
+  return buildingValue && buildingValue !== 'yes' ? buildingValue : 'building';
+}
+
+function getDisplayableContainedPois(containedPois: ContainedPoi[] | undefined): ContainedPoi[] {
+  if (!containedPois || containedPois.length === 0 || containedPois.length > POI_LABEL_LIMIT) {
+    return [];
+  }
+
+  return [...containedPois].sort((left, right) => left.osmId - right.osmId);
+}
+
+function getContainedPoiDisplayLabel(poi: ContainedPoi): string {
+  return trimTagValue(poi.tags.name) || trimTagValue(poi.tags.brand) || getPrimaryPoiLabel(poi.tags) || 'poi';
 }
 
 // 这里顺手把空字符串也视为“没有值”，避免 label 里出现视觉上为空的噪音。

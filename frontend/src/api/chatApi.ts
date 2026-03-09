@@ -28,14 +28,17 @@ export interface ContainedPoi {
   sourceFeatureId: string;
 }
 
-export type MicroGridCellKind = 'building' | 'poi' | 'road' | 'area' | 'empty';
+export type MicroGridCellKind = 'building' | 'area' | 'empty';
 
 export interface NormalizedMicroGridCell {
   row: number;
   col: number;
   center: [number, number];
+  baseKind: MicroGridCellKind;
+  baseLabel: string;
+  poiLabels: string[];
+  roadLabels: string[];
   label: string;
-  kind: MicroGridCellKind;
   sourceFeatureIds: string[];
 }
 

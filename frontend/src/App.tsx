@@ -117,7 +117,7 @@ function App() {
                         {row.map((cell) => (
                           <td
                             key={`${cell.row}-${cell.col}`}
-                            title={`${cell.kind}: ${cell.sourceFeatureIds.join(', ') || 'none'}`}
+                            title={`${cell.baseKind}: ${cell.sourceFeatureIds.join(', ') || 'none'}`}
                             onClick={() => setSelectedGridCell(cell)}
                             style={{
                               border: '1px solid #999',
