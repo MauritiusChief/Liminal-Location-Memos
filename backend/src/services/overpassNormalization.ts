@@ -1,5 +1,5 @@
 import osmtogeojson from 'osmtogeojson';
-import type { Feature, FeatureCollection, Geometry } from 'geojson';
+import type { Feature, FeatureCollection, Geometry, MultiPolygon, Point, Polygon, Position } from 'geojson';
 
 export interface NormalizedOverpassRequest {
   lat: number;
@@ -14,6 +14,17 @@ export interface RelationReference {
   reltags: Record<string, string>;
 }
 
+export interface ContainedPoi {
+  osmType: string;
+  osmId: number;
+  tags: Record<string, string>;
+  relations: RelationReference[];
+  meta: Record<string, string | number>;
+  tainted: boolean;
+  coordinate: [number, number];
+  sourceFeatureId: string;
+}
+
 export interface NormalizedFeatureProperties {
   osmType: string;
   osmId: number;
@@ -21,6 +32,7 @@ export interface NormalizedFeatureProperties {
   relations: RelationReference[];
   meta: Record<string, string | number>;
   tainted: boolean;
+  containedPois?: ContainedPoi[];
 }
 
 export type NormalizedFeature = Feature<Geometry, NormalizedFeatureProperties>;
@@ -159,6 +171,362 @@ function normalizeFeature(feature: Feature): NormalizedFeature | null {
   };
 }
 
+const GEOMETRY_EPSILON = 1e-10;
+
+type BoundingBox = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+};
+
+type BuildingAreaCandidate = {
+  feature: Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>;
+  featureIndex: number;
+  area: number;
+  boundingBox: BoundingBox;
+};
+
+// contained POI 目前只处理真正的 Point 几何；
+// 后面如果要扩展到 entrance way / indoor area，再单独加新的分支。
+function isPointFeature(feature: NormalizedFeature): feature is Feature<Point, NormalizedFeatureProperties> {
+  return feature.geometry.type === 'Point';
+}
+
+// 首版只把带 building=* 的 Polygon / MultiPolygon 视为“可挂载内部功能点”的容器。
+// 这样可以避免把普通 landuse / natural 大面错误地当成商户承载面。
+function isBuildingAreaFeature(
+  feature: NormalizedFeature,
+): feature is Feature<Polygon | MultiPolygon, NormalizedFeatureProperties> {
+  const geometryType = feature.geometry.type;
+  if (geometryType !== 'Polygon' && geometryType !== 'MultiPolygon') {
+    return false;
+  }
+
+  return typeof feature.properties.tags.building === 'string' && feature.properties.tags.building.length > 0;
+}
+
+// 这里显式把 Point 坐标规整成 [lon, lat]，
+// 便于后续统一做 bbox 预筛、点落面判断和前端展示。
+function extractPointCoordinate(feature: NormalizedFeature): [number, number] | null {
+  if (!isPointFeature(feature)) {
+    return null;
+  }
+
+  const coordinates = feature.geometry.coordinates;
+  if (!Array.isArray(coordinates) || coordinates.length < 2) {
+    return null;
+  }
+
+  const [lon, lat] = coordinates;
+  if (typeof lon !== 'number' || typeof lat !== 'number') {
+    return null;
+  }
+
+  return [lon, lat];
+}
+
+// “候选内部 POI” 的判断故意收得比较窄：
+// 只有 node，并且带明确功能分类键，才进入后续归并流程。
+// name / brand / cuisine 这类补充信息会保留在 tags 里，但不会单独触发归并。
+function isContainedPoiCandidate(feature: NormalizedFeature): boolean {
+  if (feature.properties.osmType !== 'node') {
+    return false;
+  }
+
+  if (!extractPointCoordinate(feature)) {
+    return false;
+  }
+
+  const CONTAINED_POI_TAG_KEYS = new Set(['shop', 'amenity', 'office', 'tourism', 'leisure', 'craft', 'healthcare']);
+
+  return Object.keys(feature.properties.tags).some((key) => CONTAINED_POI_TAG_KEYS.has(key));
+}
+
+// GeoJSON 的 Position 理论上可以带第三维；
+// 这里归一化逻辑只关心经纬度，因此只验证前两位是有限数字。
+function isFinitePosition(position: Position): position is [number, number] {
+  return (
+    Array.isArray(position) &&
+    position.length >= 2 &&
+    typeof position[0] === 'number' &&
+    Number.isFinite(position[0]) &&
+    typeof position[1] === 'number' &&
+    Number.isFinite(position[1])
+  );
+}
+
+// bbox 只作为“快速排除不可能命中”的预筛条件；
+// 真正的是否在面内，仍然要走后面的逐环判断。
+function expandBoundingBoxWithRing(ring: Position[], boundingBox: BoundingBox): BoundingBox {
+  for (const position of ring) {
+    if (!isFinitePosition(position)) {
+      continue;
+    }
+
+    const [x, y] = position;
+    boundingBox.minX = Math.min(boundingBox.minX, x);
+    boundingBox.minY = Math.min(boundingBox.minY, y);
+    boundingBox.maxX = Math.max(boundingBox.maxX, x);
+    boundingBox.maxY = Math.max(boundingBox.maxY, y);
+  }
+
+  return boundingBox;
+}
+
+// 给每个建筑面预先算一个 bbox，避免每个点都直接做完整点落面计算。
+function computeBoundingBox(geometry: Polygon | MultiPolygon): BoundingBox {
+  const boundingBox: BoundingBox = {
+    minX: Number.POSITIVE_INFINITY,
+    minY: Number.POSITIVE_INFINITY,
+    maxX: Number.NEGATIVE_INFINITY,
+    maxY: Number.NEGATIVE_INFINITY,
+  };
+
+  if (geometry.type === 'Polygon') {
+    for (const ring of geometry.coordinates) {
+      expandBoundingBoxWithRing(ring, boundingBox);
+    }
+  } else {
+    for (const polygon of geometry.coordinates) {
+      for (const ring of polygon) {
+        expandBoundingBoxWithRing(ring, boundingBox);
+      }
+    }
+  }
+
+  return boundingBox;
+}
+
+// bbox 判断允许一个极小误差，避免浮点比较把边界点误判到面外。
+function isPointInBoundingBox(point: [number, number], boundingBox: BoundingBox): boolean {
+  const [x, y] = point;
+  return (
+    x >= boundingBox.minX - GEOMETRY_EPSILON &&
+    x <= boundingBox.maxX + GEOMETRY_EPSILON &&
+    y >= boundingBox.minY - GEOMETRY_EPSILON &&
+    y <= boundingBox.maxY + GEOMETRY_EPSILON
+  );
+}
+
+// 先单独判断“点是否落在线段上”，这样边界点可以直接视为命中。
+// 后面的射线法只负责处理严格位于内部的情况。
+function isPointOnSegment(point: [number, number], start: [number, number], end: [number, number]): boolean {
+  const [px, py] = point;
+  const [x1, y1] = start;
+  const [x2, y2] = end;
+
+  const cross = (px - x1) * (y2 - y1) - (py - y1) * (x2 - x1);
+  if (Math.abs(cross) > GEOMETRY_EPSILON) {
+    return false;
+  }
+
+  const dot = (px - x1) * (px - x2) + (py - y1) * (py - y2);
+  return dot <= GEOMETRY_EPSILON;
+}
+
+// 单环的点落面判断使用常见的射线法；
+// 如果点恰好落在边界线上，上面的 isPointOnSegment 会提前返回 true。
+function ringContainsPoint(ring: Position[], point: [number, number]): boolean {
+  let inside = false;
+
+  for (let index = 0; index < ring.length; index += 1) {
+    const current = ring[index];
+    const previous = ring[(index + ring.length - 1) % ring.length];
+
+    if (!isFinitePosition(current) || !isFinitePosition(previous)) {
+      continue;
+    }
+
+    if (isPointOnSegment(point, previous, current)) {
+      return true;
+    }
+
+    const [x, y] = point;
+    const [xi, yi] = current;
+    const [xj, yj] = previous;
+    const intersects = yi > y !== yj > y && x <= ((xj - xi) * (y - yi)) / (yj - yi) + xi + GEOMETRY_EPSILON;
+
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+// Polygon 先要求命中 outer ring，再要求不落在任何 inner ring（洞）里。
+function polygonContainsPoint(coordinates: Polygon['coordinates'], point: [number, number]): boolean {
+  const [outerRing, ...innerRings] = coordinates;
+  if (!outerRing || !ringContainsPoint(outerRing, point)) {
+    return false;
+  }
+
+  return !innerRings.some((ring) => ringContainsPoint(ring, point));
+}
+
+// MultiPolygon 只要命中任意一个子 polygon，就认为点在该要素内部。
+function multiPolygonContainsPoint(coordinates: MultiPolygon['coordinates'], point: [number, number]): boolean {
+  return coordinates.some((polygon) => polygonContainsPoint(polygon, point));
+}
+
+// 这里用平面 shoelace 公式算一个“相对面积”。
+// 它不追求测地精度，只要能稳定比较两个建筑面的大小即可。
+function signedRingArea(ring: Position[]): number {
+  let area = 0;
+
+  for (let index = 0; index < ring.length; index += 1) {
+    const current = ring[index];
+    const next = ring[(index + 1) % ring.length];
+
+    if (!isFinitePosition(current) || !isFinitePosition(next)) {
+      continue;
+    }
+
+    area += current[0] * next[1] - next[0] * current[1];
+  }
+
+  return area / 2;
+}
+
+// Polygon 面积 = outer ring 面积减去所有 inner ring 面积。
+function polygonArea(coordinates: Polygon['coordinates']): number {
+  const [outerRing, ...innerRings] = coordinates;
+  if (!outerRing) {
+    return 0;
+  }
+
+  const outerArea = Math.abs(signedRingArea(outerRing));
+  const innerArea = innerRings.reduce((sum, ring) => sum + Math.abs(signedRingArea(ring)), 0);
+  return Math.max(0, outerArea - innerArea);
+}
+
+// MultiPolygon 的总面积就是各子 polygon 面积之和。
+function multiPolygonArea(coordinates: MultiPolygon['coordinates']): number {
+  return coordinates.reduce((sum, polygon) => sum + polygonArea(polygon), 0);
+}
+
+// 选“最小命中建筑面”时，统一从这里取面积，避免调用方关心具体几何类型。
+function getFeatureArea(feature: Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>): number {
+  return feature.geometry.type === 'Polygon'
+    ? polygonArea(feature.geometry.coordinates)
+    : multiPolygonArea(feature.geometry.coordinates);
+}
+
+// 统一包装 Polygon / MultiPolygon 的点落面判断，减少 attach 阶段的分支噪音。
+function containsPoint(
+  feature: Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>,
+  point: [number, number],
+): boolean {
+  return feature.geometry.type === 'Polygon'
+    ? polygonContainsPoint(feature.geometry.coordinates, point)
+    : multiPolygonContainsPoint(feature.geometry.coordinates, point);
+}
+
+// 这里刻意复用规范化后的 properties 字段，而不是回头再读原始 osmtogeojson 输出。
+// 这样 containedPois 和普通 feature 的字段语义完全一致，前端消费也更简单。
+function toContainedPoi(feature: NormalizedFeature): ContainedPoi | null {
+  const coordinate = extractPointCoordinate(feature);
+  if (!coordinate) {
+    return null;
+  }
+
+  return {
+    osmType: feature.properties.osmType,
+    osmId: feature.properties.osmId,
+    tags: feature.properties.tags,
+    relations: feature.properties.relations,
+    meta: feature.properties.meta,
+    tainted: feature.properties.tainted,
+    coordinate,
+    sourceFeatureId: feature.id ? String(feature.id) : `${feature.properties.osmType}/${feature.properties.osmId}`,
+  };
+}
+
+// 这一阶段只做“给建筑面附加 containedPois”，不删除任何原始 Point feature。
+// 也就是说，Point 仍然保留独立表达，Polygon 只是额外携带一个聚合视图。
+function attachContainedPois(features: NormalizedFeature[]): NormalizedFeature[] {
+  const buildingAreas: BuildingAreaCandidate[] = features.flatMap((feature, featureIndex) => {
+    if (!isBuildingAreaFeature(feature)) {
+      return [];
+    }
+
+    return [
+      {
+        feature,
+        featureIndex,
+        area: getFeatureArea(feature),
+        boundingBox: computeBoundingBox(feature.geometry),
+      },
+    ];
+  });
+
+  if (buildingAreas.length === 0) {
+    return features;
+  }
+
+  const containedPoisByFeatureIndex = new Map<number, ContainedPoi[]>();
+
+  for (const feature of features) {
+    if (!isContainedPoiCandidate(feature)) {
+      continue;
+    }
+
+    const coordinate = extractPointCoordinate(feature);
+    const containedPoi = toContainedPoi(feature);
+    if (!coordinate || !containedPoi) {
+      continue;
+    }
+
+    let selectedBuilding: BuildingAreaCandidate | null = null;
+
+    for (const building of buildingAreas) {
+      // 先做 bbox 预筛，尽量把昂贵的点落面计算留给少数候选建筑。
+      if (!isPointInBoundingBox(coordinate, building.boundingBox)) {
+        continue;
+      }
+
+      if (!containsPoint(building.feature, coordinate)) {
+        continue;
+      }
+
+      // 如果一个 POI 同时落进多个建筑面，优先挂到面积更小的那个；
+      // 这样大型外层建筑或复杂叠加面，不会吞掉更具体的店铺建筑。
+      if (!selectedBuilding || building.area < selectedBuilding.area) {
+        selectedBuilding = building;
+      }
+    }
+
+    if (!selectedBuilding) {
+      continue;
+    }
+
+    const existingPois = containedPoisByFeatureIndex.get(selectedBuilding.featureIndex) || [];
+    existingPois.push(containedPoi);
+    containedPoisByFeatureIndex.set(selectedBuilding.featureIndex, existingPois);
+  }
+
+  if (containedPoisByFeatureIndex.size === 0) {
+    return features;
+  }
+
+  return features.map((feature, featureIndex) => {
+    const containedPois = containedPoisByFeatureIndex.get(featureIndex);
+    if (!containedPois) {
+      return feature;
+    }
+
+    return {
+      ...feature,
+      properties: {
+        ...feature.properties,
+        // 这里按 osmId 升序稳定输出，方便前端展示和人工比对结果。
+        containedPois: [...containedPois].sort((left, right) => left.osmId - right.osmId),
+      },
+    };
+  });
+}
+
 function isLinearGeometry(feature: NormalizedFeature): boolean {
   return feature.geometry.type === 'LineString' || feature.geometry.type === 'MultiLineString';
 }
@@ -276,7 +644,10 @@ export function normalizeOverpassData(
   const filteredRelationMemberLineFeatures = withoutPolygonOutlines.filter((feature) =>
     isMemberLineCoveredByRelationLine(feature, relationLineIds),
   ).length;
-  const features = withoutPolygonOutlines.filter((feature) => !isMemberLineCoveredByRelationLine(feature, relationLineIds));
+  const withoutRelationMemberLines = withoutPolygonOutlines.filter(
+    (feature) => !isMemberLineCoveredByRelationLine(feature, relationLineIds),
+  );
+  const features = attachContainedPois(withoutRelationMemberLines);
 
   const taintedFeatures = features.filter((feature) => feature.properties.tainted).length;
 

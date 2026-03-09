@@ -11,17 +11,31 @@ export interface OverpassResponse {
   data: unknown;
 }
 
+export interface RelationReference {
+  role: string;
+  rel: number;
+  reltags: Record<string, string>;
+}
+
+export interface ContainedPoi {
+  osmType: string;
+  osmId: number;
+  tags: Record<string, string>;
+  relations: RelationReference[];
+  meta: Record<string, string | number>;
+  tainted: boolean;
+  coordinate: [number, number];
+  sourceFeatureId: string;
+}
+
 export interface NormalizedFeatureProperties {
   osmType: string;
   osmId: number;
   tags: Record<string, string>;
-  relations: Array<{
-    role: string;
-    rel: number;
-    reltags: Record<string, string>;
-  }>;
+  relations: RelationReference[];
   meta: Record<string, string | number>;
   tainted: boolean;
+  containedPois?: ContainedPoi[];
 }
 
 export interface NormalizedFeature {

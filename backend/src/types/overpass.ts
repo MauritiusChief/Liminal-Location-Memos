@@ -1,4 +1,10 @@
-import type { NormalizationDiagnostics, NormalizedFeatureCollection } from '../services/overpassNormalization.js';
+import type {
+  ContainedPoi,
+  NormalizationDiagnostics,
+  NormalizedFeatureCollection,
+  NormalizedFeatureProperties,
+  RelationReference,
+} from '../services/overpassNormalization.js';
 
 export interface OverpassResponse {
   data: unknown;
@@ -17,3 +23,5 @@ export interface NormalizedOverpassResponseBody {
   diagnostics: NormalizationDiagnostics;
   raw?: unknown;
 }
+
+export type { ContainedPoi, NormalizedFeatureProperties, RelationReference };
