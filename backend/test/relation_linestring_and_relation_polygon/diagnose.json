@@ -1,0 +1,19 @@
+{
+  "rawElementCounts": {
+    "node": 807,
+    "way": 115,
+    "relation": 4
+  },
+  "totalRawElements": 926,
+  "totalConvertedFeatures": 111,
+  "totalNormalizedFeatures": 33,
+  "featureCountsByGeometryType": {
+    "LineString": 27,
+    "Polygon": 3,
+    "Point": 3
+  },
+  "taintedFeatures": 0,
+  "skippedFeaturesWithoutGeometry": 0,
+  "filteredRelationOutlineFeatures": 3,
+  "filteredRelationMemberLineFeatures": 75
+}

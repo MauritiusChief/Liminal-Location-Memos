@@ -35,6 +35,7 @@ export interface NormalizationDiagnostics {
   taintedFeatures: number;
   skippedFeaturesWithoutGeometry: number;
   filteredRelationOutlineFeatures: number;
+  filteredRelationMemberLineFeatures: number;
 }
 
 export interface OverpassJsonResponse {
@@ -95,7 +96,7 @@ function toMetaRecord(value: unknown): Record<string, string | number> {
 }
 
 // osmtogeojson 会把当前要素所属的 relation 信息挂到 properties.relations 上。
-// 后面判断某条线是不是 multipolygon/boundary 的 outer/inner 轮廓线，依赖的就是这里整理出的结构。
+// 后面判断一条线是不是 multipolygon/boundary 的轮廓线，或者是不是 route 汇总线的成员片段，依赖的都是这里的结果。
 function toRelationReferences(value: unknown): RelationReference[] {
   if (!Array.isArray(value)) {
     return [];
@@ -158,8 +159,12 @@ function normalizeFeature(feature: Feature): NormalizedFeature | null {
   };
 }
 
+function isLinearGeometry(feature: NormalizedFeature): boolean {
+  return feature.geometry.type === 'LineString' || feature.geometry.type === 'MultiLineString';
+}
+
 function isRelationOutlineCoveredByPolygon(feature: NormalizedFeature): boolean {
-  if (feature.geometry.type !== 'LineString' && feature.geometry.type !== 'MultiLineString') {
+  if (!isLinearGeometry(feature)) {
     return false;
   }
 
@@ -171,11 +176,98 @@ function isRelationOutlineCoveredByPolygon(feature: NormalizedFeature): boolean 
   });
 }
 
-// 这里不再用 building、landuse 等 tag 过滤查询范围。
-// 选择直接抓取 around 范围内的全部 node / way / relation，是为了把筛选责任后移到 normalization 或调用方。
-//
-// `out body geom` 会尽量返回完整几何；
-// `>; out skel geom` 则继续补齐被 relation / way 引用到的成员要素，避免只拿到壳数据。
+// “无标签片段”不能简单粗暴地理解成 tags 完全为空。
+// 有些线段虽然标签不多，但仍然有独立语义，例如 highway / name / surface / bicycle / foot。
+// 这里先用一组较保守的“有意义线标签”做第一版判定，后续可以按实际样例继续扩展。
+function hasMeaningfulLinearTags(tags: Record<string, string>): boolean {
+  if (Object.keys(tags).length === 0) {
+    return false;
+  }
+
+  const meaningfulKeys = new Set([
+    'highway',
+    'railway',
+    'waterway',
+    'aerialway',
+    'barrier',
+    'power',
+    'name',
+    'ref',
+    'surface',
+    'smoothness',
+    'tracktype',
+    'width',
+    'lanes',
+    'bicycle',
+    'foot',
+    'horse',
+    'motor_vehicle',
+    'access',
+    'oneway',
+    'lit',
+    'segregated',
+    'crossing',
+    'crossing:markings',
+    'cycleway',
+    'footway',
+    'sidewalk',
+    'service',
+    'bridge',
+    'tunnel',
+    'maxspeed',
+  ]);
+
+  return Object.keys(tags).some((key) => meaningfulKeys.has(key));
+}
+
+function buildRelationLineIndex(features: NormalizedFeature[]): Set<number> {
+  const relationIds = new Set<number>();
+
+  for (const feature of features) {
+    if (!isLinearGeometry(feature)) {
+      continue;
+    }
+
+    if (feature.properties.osmType !== 'relation') {
+      continue;
+    }
+
+    const relationType = feature.properties.tags.type;
+    if (relationType === 'route' || relationType === 'waterway') {
+      relationIds.add(feature.properties.osmId);
+    }
+  }
+
+  return relationIds;
+}
+
+function isMemberLineCoveredByRelationLine(feature: NormalizedFeature, relationLineIds: Set<number>): boolean {
+  if (!isLinearGeometry(feature)) {
+    return false;
+  }
+
+  if (feature.properties.osmType !== 'way') {
+    return false;
+  }
+
+  if (hasMeaningfulLinearTags(feature.properties.tags)) {
+    return false;
+  }
+
+  return feature.properties.relations.some((relation) => {
+    if (!relationLineIds.has(relation.rel)) {
+      return false;
+    }
+
+    const relationType = relation.reltags.type;
+    return relationType === 'route' || relationType === 'waterway';
+  });
+}
+
+// 这里不再用 `(if:count_tags()>0)` 过滤查询范围。
+// 原因是 relation 的几何常常依赖大量“自身没有标签、但作为成员骨架存在”的 way。
+// 如果在 Overpass 阶段先把这些成员丢掉，osmtogeojson 很可能无法正确拼出 route 的长线，或者 multipolygon 的面。
+// 因此正式 normalize 查询继续采用“先全量取回，再后处理过滤重复表达”的策略。
 export function buildNormalizedOverpassQuery(request: NormalizedOverpassRequest): string {
   return [
     '[out:json][timeout:25];',
@@ -189,10 +281,11 @@ export function buildNormalizedOverpassQuery(request: NormalizedOverpassRequest)
 // normalization 的完整流程：
 // 1. 先把 Overpass JSON 交给 osmtogeojson 转成标准 GeoJSON。
 // 2. 再把每个 Feature 的 properties 规整成统一结构。
-// 3. 最后过滤掉“已经被 multipolygon/boundary 面语义覆盖”的 outer/inner 轮廓线。
+// 3. 先过滤“已被面语义覆盖”的 outer/inner 轮廓线。
+// 4. 再过滤“已被 relation 汇总线覆盖”的无标签成员线段。
 //
 // 这里使用 flatProperties: false，是为了保留 tags / meta / relations 的分层信息。
-// 如果改成拍平结构，后面判断一条线是不是某个 relation 的 outer/inner 成员会更难理解。
+// 如果改成拍平结构，后面判断一条线是不是某个 relation 的成员会更难理解。
 export function normalizeOverpassData(
   raw: OverpassJsonResponse,
 ): { geojson: NormalizedFeatureCollection; diagnostics: NormalizationDiagnostics } {
@@ -201,11 +294,20 @@ export function normalizeOverpassData(
   const normalizedFeatures = normalizedCandidates.filter((feature): feature is NormalizedFeature => feature !== null);
   const skippedFeaturesWithoutGeometry = normalizedCandidates.length - normalizedFeatures.length;
 
-  // 这里过滤的不是“所有 relation 成员线”，而只是那些已经被 Polygon / MultiPolygon 逻辑表达过的轮廓线。
+  // 第一步过滤：删掉已经被 Polygon / MultiPolygon 逻辑表达过的外环或内环线。
   const filteredRelationOutlineFeatures = normalizedFeatures.filter((feature) =>
     isRelationOutlineCoveredByPolygon(feature),
   ).length;
-  const features = normalizedFeatures.filter((feature) => !isRelationOutlineCoveredByPolygon(feature));
+  const withoutPolygonOutlines = normalizedFeatures.filter((feature) => !isRelationOutlineCoveredByPolygon(feature));
+
+  // 第二步过滤：如果某个 route / waterway relation 自己已经生成了汇总线，
+  // 那么只作为其组成片段、且自身没有有意义标签的 member way 就可以删掉，避免重复表达。
+  const relationLineIds = buildRelationLineIndex(withoutPolygonOutlines);
+  const filteredRelationMemberLineFeatures = withoutPolygonOutlines.filter((feature) =>
+    isMemberLineCoveredByRelationLine(feature, relationLineIds),
+  ).length;
+  const features = withoutPolygonOutlines.filter((feature) => !isMemberLineCoveredByRelationLine(feature, relationLineIds));
+
   const taintedFeatures = features.filter((feature) => feature.properties.tainted).length;
 
   return {
@@ -222,6 +324,7 @@ export function normalizeOverpassData(
       taintedFeatures,
       skippedFeaturesWithoutGeometry,
       filteredRelationOutlineFeatures,
+      filteredRelationMemberLineFeatures,
     },
   };
 }

@@ -49,6 +49,7 @@ export interface NormalizationDiagnostics {
   taintedFeatures: number;
   skippedFeaturesWithoutGeometry: number;
   filteredRelationOutlineFeatures: number;
+  filteredRelationMemberLineFeatures: number;
 }
 
 export interface NormalizedOverpassRequest {
