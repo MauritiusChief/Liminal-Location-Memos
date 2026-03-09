@@ -1,51 +1,94 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { postChatMessage, postOverpassQuery } from '../../api/chatApi';
-
+import {
+  postNormalizedOverpassQuery,
+  postOverpassQuery,
+  type FeatureCategory,
+  type NormalizedOverpassResponse,
+  type OverpassResponse,
+} from '../../api/chatApi';
 // ChatState 描述了 chat 这块状态分片的结构。
 // 因为 store.ts 里把它注册为 chat，所以它最终会出现在 state.chat 中。
+interface NormalizeFormState {
+  lat: string;
+  lon: string;
+  radius: string;
+  includeRaw: boolean;
+}
+
 interface ChatState {
-  // input: 当前文本框里正在输入的内容。
-  input: string;
-  // loading: 是否正在等待异步请求返回。
-  loading: boolean;
-  // response: 后端成功返回的消息内容。
-  response: string;
-  // error: 请求失败时保存错误信息，没有错误时为 null。
+  normalizeForm: NormalizeFormState;
+  rawQuery: string;
+  categories: FeatureCategory[];
+  normalizeLoading: boolean;
+  rawLoading: boolean;
+  normalizedResult: NormalizedOverpassResponse | null;
+  rawResult: OverpassResponse | null;
   error: string | null;
 }
 
-// initialState 是 chat 这块状态的初始值。
-// 当应用第一次加载时，Redux 会先使用这里的默认数据。
 const initialState: ChatState = {
-  // input: '',
-  input: '[out:json];\nnwr(around:30, 34.02466920711174, -84.09143822250903)(if:count_tags()>0);\nout center geom;',
-  loading: false,
-  response: '',
+  normalizeForm: {
+    lat: '34.03051902687699',
+    lon: '-84.06309056978101',
+    radius: '30',
+    includeRaw: true,
+  },
+  rawQuery: '[out:json];\nnwr(around:30, 34.02466920711174, -84.09143822250903)(if:count_tags()>0);\nout center geom;',
+  categories: ['building', 'landuse', 'natural', 'leisure', 'amenity'],
+  normalizeLoading: false,
+  rawLoading: false,
+  normalizedResult: null,
+  rawResult: null,
   error: null,
 };
 
 // submitMessage 是一个异步 thunk action。
 // 它负责处理“提交消息给后端”这件异步工作，并自动生成 pending / fulfilled / rejected 三种状态。
-export const submitMessage = createAsyncThunk<string, string, { rejectValue: string }>(
+export const submitNormalizedQuery = createAsyncThunk<
+  NormalizedOverpassResponse,
+  NormalizeFormState,
+  { rejectValue: string; state: { chat: ChatState } }
+>(
   // 这是 action type 的前缀，最终会扩展成 chat/submitMessage/pending 等形式。
-  'chat/submitMessage',
-  async (message, { rejectWithValue }) => {
-    // 先去掉首尾空格，避免只输入空白字符也发请求。
-    const trimmedMessage = message.trim();
+  'chat/submitNormalizedQuery',
+  async (form, { getState, rejectWithValue }) => {
+    const lat = Number(form.lat);
+    const lon = Number(form.lon);
+    const radius = Number(form.radius);
 
-    if (!trimmedMessage) {
-      // rejectWithValue 可以返回一个自定义错误信息，
-      // 这样在 rejected 阶段就能通过 action.payload 取到它。
-      return rejectWithValue('Message is required.');
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radius)) {
+      return rejectWithValue('Latitude, longitude, and radius must be valid numbers.');
+    }
+
+    if (radius <= 0) {
+      return rejectWithValue('Radius must be greater than 0.');
     }
 
     try {
-      const result = await postOverpassQuery(trimmedMessage);
-      return JSON.stringify(result.data, null, 2);
-      // 调用 API，把用户输入发送到后端。
-      // const result = await postChatMessage(trimmedMessage);
-      // fulfilled 时，这个返回值会成为 action.payload。
-      // return result.reply;
+      return await postNormalizedOverpassQuery({
+        lat,
+        lon,
+        radius,
+        includeRaw: form.includeRaw,
+        featureCategories: getState().chat.categories,
+      });
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
+    }
+  }
+);
+
+export const submitRawQuery = createAsyncThunk<OverpassResponse, string, { rejectValue: string }>(
+  'chat/submitRawQuery',
+  async (query, { rejectWithValue }) => {
+    const trimmedQuery = query.trim();
+
+    if (!trimmedQuery) {
+      return rejectWithValue('Query is required.');
+    }
+
+    try {
+      return await postOverpassQuery(trimmedQuery);
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
     }
@@ -59,33 +102,62 @@ const chatSlice = createSlice({
   initialState,
   reducers: {
     // reducers 里放同步状态更新逻辑。
-    // 这里定义 updateInput ，其表示：用户输入变化时，更新 state.input。
-    updateInput(state, action: PayloadAction<string>) {
-      state.input = action.payload;
+    updateNormalizeField(
+      state,
+      action: PayloadAction<{ field: keyof Omit<NormalizeFormState, 'includeRaw'>; value: string }>,
+    ) {
+      state.normalizeForm[action.payload.field] = action.payload.value;
+    },
+    updateIncludeRaw(state, action: PayloadAction<boolean>) {
+      state.normalizeForm.includeRaw = action.payload;
+    },
+    updateRawQuery(state, action: PayloadAction<string>) {
+      state.rawQuery = action.payload;
+    },
+    toggleCategory(state, action: PayloadAction<FeatureCategory>) {
+      if (state.categories.includes(action.payload)) {
+        if (state.categories.length > 1) {
+          state.categories = state.categories.filter((category) => category !== action.payload);
+        }
+        return;
+      }
+
+      state.categories.push(action.payload);
     },
   },
   extraReducers: (builder) => {
     // extraReducers 用来处理当前 slice 自己定义之外的 actions，
     // 这里主要处理 submitMessage 这个异步 thunk 的三种阶段。
     builder
-      .addCase(submitMessage.pending, (state) => {
-        state.loading = true;
+      .addCase(submitNormalizedQuery.pending, (state) => {
+        state.normalizeLoading = true;
         state.error = null;
-        state.response = '';
       })
-      .addCase(submitMessage.fulfilled, (state, action) => {
-        state.loading = false;
-        state.response = action.payload;
+      .addCase(submitNormalizedQuery.fulfilled, (state, action) => {
+        state.normalizeLoading = false;
+        state.normalizedResult = action.payload;
       })
-      .addCase(submitMessage.rejected, (state, action) => {
-        state.loading = false;
+      .addCase(submitNormalizedQuery.rejected, (state, action) => {
+        state.normalizeLoading = false;
+        state.error = action.payload || 'Unknown error.';
+      })
+      .addCase(submitRawQuery.pending, (state) => {
+        state.rawLoading = true;
+        state.error = null;
+      })
+      .addCase(submitRawQuery.fulfilled, (state, action) => {
+        state.rawLoading = false;
+        state.rawResult = action.payload;
+      })
+      .addCase(submitRawQuery.rejected, (state, action) => {
+        state.rawLoading = false;
         state.error = action.payload || 'Unknown error.';
       });
   },
 });
 
 // chatSlice.actions 里会自动生成与 reducers 同名的 action creator。
-export const { updateInput } = chatSlice.actions;
+export const { updateNormalizeField, updateIncludeRaw, updateRawQuery, toggleCategory } = chatSlice.actions;
 
 // 默认导出 reducer，供 store.ts 注册到 Redux store 中。
 // store.ts 里把它命名为 chatReducer 导入，再挂到 reducer.chat 上。
