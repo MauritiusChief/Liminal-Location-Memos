@@ -1,21 +1,20 @@
 import { configureStore } from '@reduxjs/toolkit';
 import chatReducer from '../features/chat/chatSlice';
 
-// 这个文件负责创建整个应用的 Redux store。
-// 你可以把 store 理解成“全局状态仓库”，应用里共享的数据会放在这里管理。
+// store 可以理解为整个前端应用的“全局状态仓库”。
+// 当前项目只注册了一个 slice：chat。
 export const store = configureStore({
-  // reducer 用来告诉 Redux：全局状态由哪些“状态分片”组成。
   reducer: {
-    // chat 这块状态交给 chatReducer 管理。
-    // 所以之后可以通过 state.chat 读取这部分数据。
+    // 这里的 key 会决定状态树里的访问路径。
+    // 也就是说，组件里读取这块状态时要用 state.chat。
     chat: chatReducer,
   },
 });
 
-// RootState 是整个 Redux 状态树的类型。
-// 当你在 useSelector 里写 state 时，state 的类型就是 RootState。
+// RootState 表示整个 Redux 状态树的类型。
+// 在 useSelector 里，state 的类型就是它。
 export type RootState = ReturnType<typeof store.getState>;
 
-// AppDispatch 是当前 store 的 dispatch 函数类型。
-// 这样 dispatch 普通 action 或异步 thunk 时，TypeScript 都能给出正确提示。
+// AppDispatch 表示当前 store 的 dispatch 类型。
+// 有了它，dispatch thunk 时 TypeScript 才能正确推断返回值和参数。
 export type AppDispatch = typeof store.dispatch;

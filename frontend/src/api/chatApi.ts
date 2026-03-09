@@ -11,8 +11,6 @@ export interface OverpassResponse {
   data: unknown;
 }
 
-export type FeatureCategory = 'building' | 'landuse' | 'natural' | 'leisure' | 'amenity';
-
 export interface NormalizedFeatureProperties {
   osmType: string;
   osmId: number;
@@ -43,7 +41,6 @@ export interface NormalizedFeatureCollection {
 }
 
 export interface NormalizationDiagnostics {
-  requestedCategories: FeatureCategory[];
   rawElementCounts: Record<string, number>;
   totalRawElements: number;
   totalConvertedFeatures: number;
@@ -51,6 +48,7 @@ export interface NormalizationDiagnostics {
   featureCountsByGeometryType: Record<string, number>;
   taintedFeatures: number;
   skippedFeaturesWithoutGeometry: number;
+  filteredRelationOutlineFeatures: number;
 }
 
 export interface NormalizedOverpassRequest {
@@ -58,7 +56,6 @@ export interface NormalizedOverpassRequest {
   lon: number;
   radius: number;
   includeRaw?: boolean;
-  featureCategories?: FeatureCategory[];
 }
 
 export interface NormalizedOverpassResponse {
@@ -72,10 +69,6 @@ interface ErrorResponse {
   error: string;
 }
 
-/**
- * fetch 后端的状态
- * @returns
- */
 export async function fetchHealth(): Promise<HealthResponse> {
   const response = await fetch('/api/health');
 
@@ -86,11 +79,6 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return response.json() as Promise<HealthResponse>;
 }
 
-/**
- * post 一个消息
- * @param message
- * @returns
- */
 export async function postChatMessage(message: string): Promise<ChatResponse> {
   const response = await fetch('/api/chat', {
     method: 'POST',

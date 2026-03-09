@@ -1,21 +1,18 @@
 import { SubmitEvent, useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from './app/hooks';
-import { fetchHealth, type FeatureCategory } from './api/chatApi';
-import {
-  submitNormalizedQuery,
-  submitRawQuery,
-  toggleCategory,
-  updateIncludeRaw,
-  updateNormalizeField,
-  updateRawQuery,
-} from './features/chat/chatSlice';
-
-const categoryOptions: FeatureCategory[] = ['building', 'landuse', 'natural', 'leisure', 'amenity'];
+import { fetchHealth } from './api/chatApi';
+import { submitNormalizedQuery, submitRawQuery, updateIncludeRaw, updateNormalizeField, updateRawQuery } from './features/chat/chatSlice';
 
 function App() {
   const dispatch = useAppDispatch();
-  const { normalizeForm, rawQuery, categories, normalizeLoading, rawLoading, normalizedResult, rawResult, error } =
-    useAppSelector((state) => state.chat);
+
+  // useAppSelector 从 Redux 里读取 chat slice 的当前状态。
+  // 这里解构出来的每个字段，都会随着 Redux 状态变化自动触发重新渲染。
+  const { normalizeForm, rawQuery, normalizeLoading, rawLoading, normalizedResult, rawResult, error } = useAppSelector(
+    (state) => state.chat,
+  );
+
+  // 这个 health 只在当前组件内部使用，所以继续放在本地 useState，而不是 Redux。
   const [health, setHealth] = useState<string>('Checking backend...');
 
   useEffect(() => {
@@ -26,6 +23,9 @@ function App() {
 
   const handleNormalizeSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    // dispatch 一个 thunk 时，本质上是在触发一整套异步状态流转：
+    // pending -> fulfilled / rejected。
     await dispatch(submitNormalizedQuery(normalizeForm));
   };
 
@@ -74,17 +74,6 @@ function App() {
             />
             Include raw Overpass JSON
           </label>
-          <p>Feature categories</p>
-          {categoryOptions.map((category) => (
-            <label key={category} style={{ marginRight: '1rem' }}>
-              <input
-                type="checkbox"
-                checked={categories.includes(category)}
-                onChange={() => dispatch(toggleCategory(category))}
-              />
-              {category}
-            </label>
-          ))}
           <br />
           <br />
           <button type="submit" disabled={normalizeLoading}>

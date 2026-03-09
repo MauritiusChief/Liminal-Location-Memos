@@ -2,12 +2,13 @@ import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import {
   postNormalizedOverpassQuery,
   postOverpassQuery,
-  type FeatureCategory,
   type NormalizedOverpassResponse,
   type OverpassResponse,
 } from '../../api/chatApi';
-// ChatState 描述了 chat 这块状态分片的结构。
-// 因为 store.ts 里把它注册为 chat，所以它最终会出现在 state.chat 中。
+
+// 这个接口描述“规范化查询表单”在 Redux 里的形状。
+// 这里把输入值保留为 string，是为了让表单输入过程更自然；
+// 真正发请求前再统一转换成 number 并校验。
 interface NormalizeFormState {
   lat: string;
   lon: string;
@@ -15,10 +16,11 @@ interface NormalizeFormState {
   includeRaw: boolean;
 }
 
+// ChatState 是 chat slice 管理的整块状态。
+// 最终它会挂在全局 store 的 state.chat 下。
 interface ChatState {
   normalizeForm: NormalizeFormState;
   rawQuery: string;
-  categories: FeatureCategory[];
   normalizeLoading: boolean;
   rawLoading: boolean;
   normalizedResult: NormalizedOverpassResponse | null;
@@ -26,6 +28,8 @@ interface ChatState {
   error: string | null;
 }
 
+// initialState 是 chat slice 的默认值。
+// 应用首次启动时，界面上看到的初始输入框内容就来自这里。
 const initialState: ChatState = {
   normalizeForm: {
     lat: '34.03051902687699',
@@ -34,7 +38,6 @@ const initialState: ChatState = {
     includeRaw: true,
   },
   rawQuery: '[out:json];\nnwr(around:30, 34.02466920711174, -84.09143822250903)(if:count_tags()>0);\nout center geom;',
-  categories: ['building', 'landuse', 'natural', 'leisure', 'amenity'],
   normalizeLoading: false,
   rawLoading: false,
   normalizedResult: null,
@@ -42,42 +45,39 @@ const initialState: ChatState = {
   error: null,
 };
 
-// submitMessage 是一个异步 thunk action。
-// 它负责处理“提交消息给后端”这件异步工作，并自动生成 pending / fulfilled / rejected 三种状态。
+// createAsyncThunk 会自动帮我们生成 pending / fulfilled / rejected 三种 action。
+// 这个 thunk 用来处理“结构化参数 -> 调标准化接口”的完整异步流程。
 export const submitNormalizedQuery = createAsyncThunk<
   NormalizedOverpassResponse,
   NormalizeFormState,
-  { rejectValue: string; state: { chat: ChatState } }
->(
-  // 这是 action type 的前缀，最终会扩展成 chat/submitMessage/pending 等形式。
-  'chat/submitNormalizedQuery',
-  async (form, { getState, rejectWithValue }) => {
-    const lat = Number(form.lat);
-    const lon = Number(form.lon);
-    const radius = Number(form.radius);
+  { rejectValue: string }
+>('chat/submitNormalizedQuery', async (form, { rejectWithValue }) => {
+  const lat = Number(form.lat);
+  const lon = Number(form.lon);
+  const radius = Number(form.radius);
 
-    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radius)) {
-      return rejectWithValue('Latitude, longitude, and radius must be valid numbers.');
-    }
-
-    if (radius <= 0) {
-      return rejectWithValue('Radius must be greater than 0.');
-    }
-
-    try {
-      return await postNormalizedOverpassQuery({
-        lat,
-        lon,
-        radius,
-        includeRaw: form.includeRaw,
-        featureCategories: getState().chat.categories,
-      });
-    } catch (error) {
-      return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
-    }
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radius)) {
+    return rejectWithValue('Latitude, longitude, and radius must be valid numbers.');
   }
-);
 
+  if (radius <= 0) {
+    return rejectWithValue('Radius must be greater than 0.');
+  }
+
+  try {
+    return await postNormalizedOverpassQuery({
+      lat,
+      lon,
+      radius,
+      includeRaw: form.includeRaw,
+    });
+  } catch (error) {
+    return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
+  }
+});
+
+// 这个 thunk 保留“原始 Overpass QL playground”的能力。
+// 它和上面的区别在于：这里直接发送用户输入的 query 字符串。
 export const submitRawQuery = createAsyncThunk<OverpassResponse, string, { rejectValue: string }>(
   'chat/submitRawQuery',
   async (query, { rejectWithValue }) => {
@@ -95,13 +95,13 @@ export const submitRawQuery = createAsyncThunk<OverpassResponse, string, { rejec
   },
 );
 
-// createSlice 用来把“状态 + 修改状态的规则 + 自动生成的 actions”放在一起定义。
+// createSlice 把“状态、同步 reducer、异步 action 响应”放在一起定义。
 const chatSlice = createSlice({
-  // name 会作为 action type 的前缀，例如 chat/updateInput。
   name: 'chat',
   initialState,
   reducers: {
-    // reducers 里放同步状态更新逻辑。
+    // 这类 reducer 处理同步状态更新。
+    // 典型场景就是输入框 onChange 时，把最新输入写回 Redux。
     updateNormalizeField(
       state,
       action: PayloadAction<{ field: keyof Omit<NormalizeFormState, 'includeRaw'>; value: string }>,
@@ -114,20 +114,10 @@ const chatSlice = createSlice({
     updateRawQuery(state, action: PayloadAction<string>) {
       state.rawQuery = action.payload;
     },
-    toggleCategory(state, action: PayloadAction<FeatureCategory>) {
-      if (state.categories.includes(action.payload)) {
-        if (state.categories.length > 1) {
-          state.categories = state.categories.filter((category) => category !== action.payload);
-        }
-        return;
-      }
-
-      state.categories.push(action.payload);
-    },
   },
   extraReducers: (builder) => {
-    // extraReducers 用来处理当前 slice 自己定义之外的 actions，
-    // 这里主要处理 submitMessage 这个异步 thunk 的三种阶段。
+    // extraReducers 专门处理 thunk 这类“本 slice 外部生成的 action”。
+    // 这里根据异步请求的不同阶段来更新 loading / result / error。
     builder
       .addCase(submitNormalizedQuery.pending, (state) => {
         state.normalizeLoading = true;
@@ -156,9 +146,8 @@ const chatSlice = createSlice({
   },
 });
 
-// chatSlice.actions 里会自动生成与 reducers 同名的 action creator。
-export const { updateNormalizeField, updateIncludeRaw, updateRawQuery, toggleCategory } = chatSlice.actions;
+// actions 会被组件通过 dispatch 调用。
+export const { updateNormalizeField, updateIncludeRaw, updateRawQuery } = chatSlice.actions;
 
-// 默认导出 reducer，供 store.ts 注册到 Redux store 中。
-// store.ts 里把它命名为 chatReducer 导入，再挂到 reducer.chat 上。
+// reducer 会在 store.ts 里注册到全局 store。
 export default chatSlice.reducer;

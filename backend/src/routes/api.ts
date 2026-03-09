@@ -1,12 +1,7 @@
 import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
 import { generateReply } from '../services/llm.js';
-import {
-  buildNormalizedOverpassQuery,
-  normalizeOverpassData,
-  supportedFeatureCategories,
-  type FeatureCategory,
-} from '../services/overpassNormalization.js';
+import { buildNormalizedOverpassQuery, normalizeOverpassData } from '../services/overpassNormalization.js';
 import type { NormalizedOverpassRequestBody } from '../types/overpass.js';
 
 interface ChatRequestBody {
@@ -20,7 +15,7 @@ interface OverpassRequestBody {
 export const apiRouter = Router();
 
 function parseNormalizedRequest(body: NormalizedOverpassRequestBody) {
-  const { lat, lon, radius, includeRaw, featureCategories } = body;
+  const { lat, lon, radius, includeRaw } = body;
 
   if (
     typeof lat !== 'number' ||
@@ -33,35 +28,16 @@ function parseNormalizedRequest(body: NormalizedOverpassRequestBody) {
     return { error: 'lat, lon, and radius must be finite numbers.' } as const;
   }
 
-  const safeLat = lat;
-  const safeLon = lon;
-  const safeRadius = radius;
-
-  if (safeRadius <= 0) {
+  if (radius <= 0) {
     return { error: 'radius must be greater than 0.' } as const;
-  }
-
-  if (featureCategories && (!Array.isArray(featureCategories) || featureCategories.length === 0)) {
-    return { error: 'featureCategories must be a non-empty array when provided.' } as const;
-  }
-
-  const sanitizedCategories = (featureCategories || supportedFeatureCategories).filter(
-    (category): category is FeatureCategory => supportedFeatureCategories.includes(category as FeatureCategory),
-  );
-
-  if (sanitizedCategories.length === 0) {
-    return {
-      error: `featureCategories must contain at least one of: ${supportedFeatureCategories.join(', ')}.`,
-    } as const;
   }
 
   return {
     value: {
-      lat: safeLat,
-      lon: safeLon,
-      radius: safeRadius,
+      lat,
+      lon,
+      radius,
       includeRaw: Boolean(includeRaw),
-      featureCategories: sanitizedCategories,
     },
   } as const;
 }
@@ -125,9 +101,7 @@ apiRouter.post('/overpass/normalize', async (request, response) => {
       endpoint: 'https://overpass-api.de/api/interpreter',
     })) as Parameters<typeof normalizeOverpassData>[0];
 
-    const { geojson, diagnostics } = normalizeOverpassData(raw, {
-      requestedCategories: normalizedRequest.featureCategories,
-    });
+    const { geojson, diagnostics } = normalizeOverpassData(raw);
 
     response.json({
       query,

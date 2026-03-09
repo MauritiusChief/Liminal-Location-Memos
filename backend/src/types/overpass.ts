@@ -1,6 +1,4 @@
-import type { FeatureCategory, NormalizationDiagnostics, NormalizedFeatureCollection } from '../services/overpassNormalization.js';
-
-export type { FeatureCategory };
+import type { NormalizationDiagnostics, NormalizedFeatureCollection } from '../services/overpassNormalization.js';
 
 export interface OverpassResponse {
   data: unknown;
@@ -11,7 +9,6 @@ export interface NormalizedOverpassRequestBody {
   lon?: number;
   radius?: number;
   includeRaw?: boolean;
-  featureCategories?: FeatureCategory[];
 }
 
 export interface NormalizedOverpassResponseBody {
