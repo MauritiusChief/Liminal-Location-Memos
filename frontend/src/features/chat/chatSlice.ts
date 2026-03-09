@@ -18,7 +18,7 @@ interface ChatState {
 // 当应用第一次加载时，Redux 会先使用这里的默认数据。
 const initialState: ChatState = {
   // input: '',
-  input: '[out:json];\nnwr["amenity"="restaurant"](34.0, -84.1, 34.1, -84.0);\nout center;',
+  input: '[out:json];\nnwr(around:30, 34.02466920711174, -84.09143822250903)(if:count_tags()>0);\nout center geom;',
   loading: false,
   response: '',
   error: null,
