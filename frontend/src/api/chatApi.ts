@@ -28,6 +28,31 @@ export interface ContainedPoi {
   sourceFeatureId: string;
 }
 
+export type MicroGridCellKind = 'building' | 'poi' | 'road' | 'area' | 'empty';
+
+export interface NormalizedMicroGridCell {
+  row: number;
+  col: number;
+  center: [number, number];
+  label: string;
+  kind: MicroGridCellKind;
+  sourceFeatureIds: string[];
+}
+
+export interface NormalizedMicroGrid {
+  enabled: boolean;
+  reason?: 'radius_too_small';
+  center: {
+    lat: number;
+    lon: number;
+  };
+  extentMeters: 60;
+  cellSizeMeters: 5;
+  rows: 12;
+  cols: 12;
+  cells: NormalizedMicroGridCell[][];
+}
+
 export interface NormalizedFeatureProperties {
   osmType: string;
   osmId: number;
@@ -77,6 +102,7 @@ export interface NormalizedOverpassResponse {
   query: string;
   geojson: NormalizedFeatureCollection;
   diagnostics: NormalizationDiagnostics;
+  microGrid?: NormalizedMicroGrid;
   raw?: unknown;
 }
 

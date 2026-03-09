@@ -1,3 +1,4 @@
+import type { NormalizedMicroGrid, NormalizedMicroGridCell } from '../services/overpassGrid.js';
 import type {
   ContainedPoi,
   NormalizationDiagnostics,
@@ -21,7 +22,14 @@ export interface NormalizedOverpassResponseBody {
   query: string;
   geojson: NormalizedFeatureCollection;
   diagnostics: NormalizationDiagnostics;
+  microGrid?: NormalizedMicroGrid;
   raw?: unknown;
 }
 
-export type { ContainedPoi, NormalizedFeatureProperties, RelationReference };
+export type {
+  ContainedPoi,
+  NormalizedFeatureProperties,
+  NormalizedMicroGrid,
+  NormalizedMicroGridCell,
+  RelationReference,
+};

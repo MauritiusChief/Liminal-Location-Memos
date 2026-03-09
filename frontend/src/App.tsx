@@ -1,6 +1,6 @@
 import { SubmitEvent, useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from './app/hooks';
-import { fetchHealth } from './api/chatApi';
+import { fetchHealth, type NormalizedMicroGridCell } from './api/chatApi';
 import { submitNormalizedQuery, submitRawQuery, updateIncludeRaw, updateNormalizeField, updateRawQuery } from './features/chat/chatSlice';
 
 function App() {
@@ -11,9 +11,10 @@ function App() {
   const { normalizeForm, rawQuery, normalizeLoading, rawLoading, normalizedResult, rawResult, error } = useAppSelector(
     (state) => state.chat,
   );
-  const featuresSummary = normalizedResult?.geojson.features.map( f => {
-    return {id: f.id, type: f.geometry.type, properties: f.properties}
-  })
+  const featuresSummary = normalizedResult?.geojson.features.map((feature) => {
+    return { id: feature.id, type: feature.geometry.type, properties: feature.properties };
+  });
+  const [selectedGridCell, setSelectedGridCell] = useState<NormalizedMicroGridCell | null>(null);
 
   // 这个 health 只在当前组件内部使用，所以继续放在本地 useState，而不是 Redux。
   const [health, setHealth] = useState<string>('Checking backend...');
@@ -23,6 +24,10 @@ function App() {
       .then((result) => setHealth(result.ok ? `${result.service} online` : 'Backend unavailable'))
       .catch(() => setHealth('Backend unavailable'));
   }, []);
+
+  useEffect(() => {
+    setSelectedGridCell(normalizedResult?.microGrid?.enabled ? normalizedResult.microGrid.cells[0]?.[0] || null : null);
+  }, [normalizedResult]);
 
   const handleNormalizeSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -95,6 +100,55 @@ function App() {
 
         <h3>Normalized GeoJSON</h3>
         <pre style={{border: "1px solid", maxHeight: "600px", overflowY: "auto"}}>{normalizedResult ? JSON.stringify(normalizedResult.geojson, null, 2) : 'No normalized GeoJSON yet.'}</pre>
+
+        <h3>Micro Grid Debug</h3>
+        {normalizedResult?.microGrid?.enabled ? (
+          <>
+            <p>
+              {normalizedResult.microGrid.rows}x{normalizedResult.microGrid.cols} cells, {normalizedResult.microGrid.cellSizeMeters}m each,
+              centered at ({normalizedResult.microGrid.center.lat}, {normalizedResult.microGrid.center.lon})
+            </p>
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                  <tbody>
+                    {normalizedResult.microGrid.cells.map((row, rowIndex) => (
+                      <tr key={rowIndex}>
+                        {row.map((cell) => (
+                          <td
+                            key={`${cell.row}-${cell.col}`}
+                            title={`${cell.kind}: ${cell.sourceFeatureIds.join(', ') || 'none'}`}
+                            onClick={() => setSelectedGridCell(cell)}
+                            style={{
+                              border: '1px solid #999',
+                              width: '72px',
+                              minWidth: '72px',
+                              height: '48px',
+                              padding: '4px',
+                              verticalAlign: 'top',
+                              cursor: 'pointer',
+                              backgroundColor:
+                                selectedGridCell?.row === cell.row && selectedGridCell?.col === cell.col ? '#eef6ff' : '#fff',
+                            }}
+                          >
+                            <div style={{ fontSize: '12px', lineHeight: 1.2, wordBreak: 'break-word' }}>{cell.label}</div>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <pre style={{ border: '1px solid', padding: '8px', minWidth: '280px', maxWidth: '420px', whiteSpace: 'pre-wrap' }}>
+                {selectedGridCell ? JSON.stringify(selectedGridCell, null, 2) : 'Click a cell to inspect it.'}
+              </pre>
+            </div>
+          </>
+        ) : normalizedResult?.microGrid?.reason === 'radius_too_small' ? (
+          <p>Micro grid is skipped because radius must be greater than 50 meters.</p>
+        ) : (
+          <p>No micro grid yet.</p>
+        )}
 
         <h3>Raw Response Snapshot</h3>
         <pre style={{border: "1px solid", maxHeight: "600px", overflowY: "auto"}}>{normalizedResult?.raw ? JSON.stringify(normalizedResult.raw, null, 2) : 'Raw payload not included.'}</pre>

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
 import { generateReply } from '../services/llm.js';
+import { buildNormalizedMicroGrid } from '../services/overpassGrid.js';
 import { buildNormalizedOverpassQuery, normalizeOverpassData } from '../services/overpassNormalization.js';
 import type { NormalizedOverpassRequestBody } from '../types/overpass.js';
 
@@ -102,11 +103,13 @@ apiRouter.post('/overpass/normalize', async (request, response) => {
     })) as Parameters<typeof normalizeOverpassData>[0];
 
     const { geojson, diagnostics } = normalizeOverpassData(raw);
+    const microGrid = buildNormalizedMicroGrid(geojson.features, normalizedRequest);
 
     response.json({
       query,
       geojson,
       diagnostics,
+      microGrid,
       raw: normalizedRequest.includeRaw ? raw : undefined,
     });
   } catch (error) {
