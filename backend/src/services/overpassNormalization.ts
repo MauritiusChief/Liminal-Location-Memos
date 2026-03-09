@@ -176,48 +176,18 @@ function isRelationOutlineCoveredByPolygon(feature: NormalizedFeature): boolean 
   });
 }
 
-// “无标签片段”不能简单粗暴地理解成 tags 完全为空。
-// 有些线段虽然标签不多，但仍然有独立语义，例如 highway / name / surface / bicycle / foot。
-// 这里先用一组较保守的“有意义线标签”做第一版判定，后续可以按实际样例继续扩展。
+// “无标签片段”暂时简单粗暴地理解成 tags 完全为空。
 function hasMeaningfulLinearTags(tags: Record<string, string>): boolean {
   if (Object.keys(tags).length === 0) {
     return false;
   }
+  return true
 
-  const meaningfulKeys = new Set([
-    'highway',
-    'railway',
-    'waterway',
-    'aerialway',
-    'barrier',
-    'power',
-    'name',
-    'ref',
-    'surface',
-    'smoothness',
-    'tracktype',
-    'width',
-    'lanes',
-    'bicycle',
-    'foot',
-    'horse',
-    'motor_vehicle',
-    'access',
-    'oneway',
-    'lit',
-    'segregated',
-    'crossing',
-    'crossing:markings',
-    'cycleway',
-    'footway',
-    'sidewalk',
-    'service',
-    'bridge',
-    'tunnel',
-    'maxspeed',
-  ]);
+  // const meaningfulKeys = new Set([
+  //   'highway', 'railway', 'waterway', 'aerialway', 'barrier', 'power', 'name', 'ref', 'surface', 'smoothness', 'tracktype', 'width', 'lanes', 'bicycle', 'foot', 'horse', 'motor_vehicle', 'access', 'oneway', 'lit', 'segregated', 'crossing', 'crossing:markings', 'cycleway', 'footway', 'sidewalk', 'service', 'bridge', 'tunnel', 'maxspeed',
+  // ]);
 
-  return Object.keys(tags).some((key) => meaningfulKeys.has(key));
+  // return Object.keys(tags).some((key) => meaningfulKeys.has(key));
 }
 
 function buildRelationLineIndex(features: NormalizedFeature[]): Set<number> {
