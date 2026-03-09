@@ -11,6 +11,9 @@ function App() {
   const { normalizeForm, rawQuery, normalizeLoading, rawLoading, normalizedResult, rawResult, error } = useAppSelector(
     (state) => state.chat,
   );
+  const featuresSummary = normalizedResult?.geojson.features.map( f => {
+    return {id: f.id, type: f.geometry.type, properties: f.properties}
+  })
 
   // 这个 health 只在当前组件内部使用，所以继续放在本地 useState，而不是 Redux。
   const [health, setHealth] = useState<string>('Checking backend...');
@@ -87,8 +90,11 @@ function App() {
         <h3>Generated Overpass QL</h3>
         <pre>{normalizedResult?.query || 'No query generated yet.'}</pre>
 
+        <h3>Feature Summary</h3>
+        <pre style={{border: "1px solid", height: "600px", overflowY: "scroll"}}>{normalizedResult ? JSON.stringify(featuresSummary, null, 2) : 'No feature summary yet.'}</pre>
+
         <h3>Normalized GeoJSON</h3>
-        <pre>{normalizedResult ? JSON.stringify(normalizedResult.geojson, null, 2) : 'No normalized GeoJSON yet.'}</pre>
+        <pre style={{border: "1px solid", height: "600px", overflowY: "scroll"}}>{normalizedResult ? JSON.stringify(normalizedResult.geojson, null, 2) : 'No normalized GeoJSON yet.'}</pre>
 
         <h3>Raw Response Snapshot</h3>
         <pre>{normalizedResult?.raw ? JSON.stringify(normalizedResult.raw, null, 2) : 'Raw payload not included.'}</pre>
