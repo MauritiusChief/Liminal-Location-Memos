@@ -30,8 +30,9 @@ export interface NormalizedFeature {
   type: 'Feature';
   id?: string;
   geometry: {
-    type: 'Polygon' | 'MultiPolygon';
-    coordinates: unknown;
+    type: string;
+    coordinates?: unknown;
+    geometries?: unknown;
   };
   properties: NormalizedFeatureProperties;
 }
@@ -47,10 +48,9 @@ export interface NormalizationDiagnostics {
   totalRawElements: number;
   totalConvertedFeatures: number;
   totalNormalizedFeatures: number;
-  filteredNonPolygonFeatures: number;
-  polygonFeatures: number;
-  multiPolygonFeatures: number;
+  featureCountsByGeometryType: Record<string, number>;
   taintedFeatures: number;
+  skippedFeaturesWithoutGeometry: number;
 }
 
 export interface NormalizedOverpassRequest {

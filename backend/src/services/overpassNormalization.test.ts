@@ -5,6 +5,10 @@ import { fileURLToPath } from 'node:url';
 
 import { buildNormalizedOverpassQuery, normalizeOverpassData, type OverpassJsonResponse } from './overpassNormalization.js';
 
+// ##############
+// # deprecated #
+// ##############
+
 function loadSample(name: string): OverpassJsonResponse {
   const filePath = fileURLToPath(new URL(`../../../_designer_note/${name}`, import.meta.url));
   return JSON.parse(fs.readFileSync(filePath, 'utf8')) as OverpassJsonResponse;
@@ -30,7 +34,6 @@ test('normalizeOverpassData keeps polygon building features from sample 2', () =
 
   assert.equal(result.geojson.type, 'FeatureCollection');
   assert.ok(result.geojson.features.length > 0);
-  assert.ok(result.geojson.features.every((feature) => feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon'));
   assert.ok(result.geojson.features.some((feature) => feature.properties.tags.building === 'yes'));
 });
 
@@ -40,5 +43,4 @@ test('normalizeOverpassData tolerates incomplete relation inputs from sample 1',
 
   assert.equal(result.diagnostics.rawElementCounts.relation, 1);
   assert.ok(result.diagnostics.totalNormalizedFeatures > 0);
-  assert.ok(result.diagnostics.taintedFeatures > 0 || result.diagnostics.filteredNonPolygonFeatures > 0);
 });
