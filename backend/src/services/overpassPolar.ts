@@ -103,7 +103,7 @@ function buildPolarFeatureSummary(
   }
 
   const centerPoint = toPolarCoordinateSample(origin, centerCoordinate);
-  const level = classifyPolarLevel(centerPoint.distanceMeters);
+  const level = classifyPolarLevel(nearestPoint.distanceMeters);
   if (!level) {
     return null;
   }
