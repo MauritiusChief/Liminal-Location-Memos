@@ -10,8 +10,7 @@ import {
 // 这里把输入值保留为 string，是为了让表单输入过程更自然；
 // 真正发请求前再统一转换成 number 并校验。
 interface NormalizeFormState {
-  lat: string;
-  lon: string;
+  coordinates: string;
   radius: string;
   includeRaw: boolean;
 }
@@ -32,8 +31,7 @@ interface ChatState {
 // 应用首次启动时，界面上看到的初始输入框内容就来自这里。
 const initialState: ChatState = {
   normalizeForm: {
-    lat: '34.03051902687699',
-    lon: '-84.06309056978101',
+    coordinates: '34.03051902687699, -84.06309056978101',
     radius: '30',
     includeRaw: true,
   },
@@ -52,12 +50,21 @@ export const submitNormalizedQuery = createAsyncThunk<
   NormalizeFormState,
   { rejectValue: string }
 >('chat/submitNormalizedQuery', async (form, { rejectWithValue }) => {
-  const lat = Number(form.lat);
-  const lon = Number(form.lon);
+  const coordinateParts = form.coordinates
+    .trim()
+    .split(/[\s,，;；]+/)
+    .filter((part) => part.length > 0);
+
+  if (coordinateParts.length !== 2) {
+    return rejectWithValue('Coordinates must contain latitude and longitude, separated by a comma, space, or similar delimiter.');
+  }
+
+  const lat = Number(coordinateParts[0]);
+  const lon = Number(coordinateParts[1]);
   const radius = Number(form.radius);
 
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radius)) {
-    return rejectWithValue('Latitude, longitude, and radius must be valid numbers.');
+    return rejectWithValue('Coordinates and radius must be valid numbers.');
   }
 
   if (radius <= 0) {

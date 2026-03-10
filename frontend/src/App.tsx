@@ -1,7 +1,12 @@
 import { SubmitEvent, useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from './app/hooks';
-import { fetchHealth, type NormalizedMicroGridCell } from './api/chatApi';
+import {
+  fetchHealth,
+  type NormalizedMicroGridCell,
+  type NormalizedPolarFeatureSummary,
+} from './api/chatApi';
 import { submitNormalizedQuery, submitRawQuery, updateIncludeRaw, updateNormalizeField, updateRawQuery } from './features/chat/chatSlice';
+import { PolarFanChart } from './components/PolarFanChart';
 
 function App() {
   const dispatch = useAppDispatch();
@@ -15,6 +20,9 @@ function App() {
     return { id: feature.id, type: feature.geometry.type, properties: feature.properties };
   });
   const [selectedGridCell, setSelectedGridCell] = useState<NormalizedMicroGridCell | null>(null);
+  const [selectedPolarFeature, setSelectedPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
+  const [hoveredPolarFeature, setHoveredPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
+  const [selectedPolarLevel, setSelectedPolarLevel] = useState<'all' | 1 | 2 | 3>('all');
 
   // 这个 health 只在当前组件内部使用，所以继续放在本地 useState，而不是 Redux。
   const [health, setHealth] = useState<string>('Checking backend...');
@@ -27,6 +35,12 @@ function App() {
 
   useEffect(() => {
     setSelectedGridCell(normalizedResult?.microGrid?.enabled ? normalizedResult.microGrid.cells[0]?.[0] || null : null);
+  }, [normalizedResult]);
+
+  useEffect(() => {
+    setSelectedPolarFeature(null);
+    setHoveredPolarFeature(null);
+    setSelectedPolarLevel('all');
   }, [normalizedResult]);
 
   const handleNormalizeSubmit = async (event: SubmitEvent<HTMLFormElement>) => {
@@ -50,20 +64,13 @@ function App() {
       <section>
         <h2>Normalized GeoJSON</h2>
         <form onSubmit={handleNormalizeSubmit}>
-          <label htmlFor="lat">Latitude</label>
+          <label htmlFor="coordinates">Coordinates</label>
           <br />
           <input
-            id="lat"
-            value={normalizeForm.lat}
-            onChange={(event) => dispatch(updateNormalizeField({ field: 'lat', value: event.target.value }))}
-          />
-          <br />
-          <label htmlFor="lon">Longitude</label>
-          <br />
-          <input
-            id="lon"
-            value={normalizeForm.lon}
-            onChange={(event) => dispatch(updateNormalizeField({ field: 'lon', value: event.target.value }))}
+            id="coordinates"
+            value={normalizeForm.coordinates}
+            onChange={(event) => dispatch(updateNormalizeField({ field: 'coordinates', value: event.target.value }))}
+            placeholder="34.030519, -84.063091"
           />
           <br />
           <label htmlFor="radius">Radius (meters)</label>
@@ -157,6 +164,37 @@ function App() {
               Max radius {normalizedResult.polarView.maxRadiusMeters}m, centered at ({normalizedResult.polarView.center.lat},{' '}
               {normalizedResult.polarView.center.lon})
             </p>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+              {(['all', 1, 2, 3] as const).map((level) => (
+                <button
+                  key={String(level)}
+                  type="button"
+                  onClick={() => setSelectedPolarLevel(level)}
+                  style={{
+                    padding: '6px 10px',
+                    border: '1px solid #999',
+                    background: selectedPolarLevel === level ? '#eef6ff' : '#fff',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {level === 'all' ? 'All' : `L${level}`}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap' }}>
+              <PolarFanChart
+                polarView={normalizedResult.polarView}
+                selectedLevel={selectedPolarLevel}
+                selectedFeatureId={selectedPolarFeature?.featureId || null}
+                onFeatureHover={setHoveredPolarFeature}
+                onFeatureSelect={setSelectedPolarFeature}
+              />
+              <pre style={{ border: '1px solid', padding: '8px', minWidth: '300px', maxWidth: '420px', whiteSpace: 'pre-wrap' }}>
+                {selectedPolarFeature || hoveredPolarFeature
+                  ? JSON.stringify(selectedPolarFeature || hoveredPolarFeature, null, 2)
+                  : 'Hover or click a sector to inspect it.'}
+              </pre>
+            </div>
             {normalizedResult.polarView.levels.map((level) => (
               <section key={level.level}>
                 <h4>

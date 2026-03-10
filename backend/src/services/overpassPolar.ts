@@ -161,6 +161,8 @@ function selectFarthestSample(samples: PolarCoordinateSample[]): PolarCoordinate
 
 // widest span 体现“这个要素从查询点看占据了多宽的视野角”。
 // 实现上通过寻找 bearing 序列里的最大 gap，反推出最小包络角宽。
+// 这里的 leftPoint / rightPoint 表示“可见扇区两侧的边界点”，
+// 它们本身不是前端 SVG 路径的天然 start/end sweep 参数，真正可信的角宽以 angleWidthDegrees 为准。
 function computeWidestSpan(geometry: Geometry, samples: PolarCoordinateSample[]): PolarAngularSpan {
   if (geometry.type === 'Point' || samples.length === 1) {
     const point = samples[0]!;

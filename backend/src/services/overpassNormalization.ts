@@ -421,7 +421,7 @@ function isMemberLineCoveredByRelationLine(feature: NormalizedFeature, relationL
 export function buildNormalizedOverpassQuery(request: NormalizedOverpassRequest): string {
   return [
     '[out:json][timeout:25];',
-    `nwr(around:${request.radius},${request.lat},${request.lon});`,
+    `nwr["name"="Jim Lake"](around:${request.radius},${request.lat},${request.lon});`,
     'out body geom;',
     '>;',
     'out skel geom;',
