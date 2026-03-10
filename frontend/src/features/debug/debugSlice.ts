@@ -34,7 +34,7 @@ const initialState: DebugState = {
   normalizeForm: {
     coordinates: '34.03051902687699, -84.06309056978101',
     radius: '30',
-    includeRaw: true,
+    includeRaw: false,
   },
   rawQuery: '[out:json];\nnwr(around:30, 34.02466920711174, -84.09143822250903)(if:count_tags()>0);\nout center geom;',
   normalizeLoading: false,
@@ -54,7 +54,7 @@ export const submitNormalizedQuery = createAsyncThunk<
 >('debug/submitNormalizedQuery', async (form, { rejectWithValue }) => {
   const coordinateParts = form.coordinates
     .trim()
-    .split(/[\s,ï¼Œ;ï¼›]+/)
+    .split(/[\s,，;；]+/)
     .filter((part) => part.length > 0);
 
   if (coordinateParts.length !== 2) {
