@@ -150,6 +150,28 @@ function App() {
           <p>No micro grid yet.</p>
         )}
 
+        <h3>Polar View Debug</h3>
+        {normalizedResult?.polarView ? (
+          <>
+            <p>
+              Max radius {normalizedResult.polarView.maxRadiusMeters}m, centered at ({normalizedResult.polarView.center.lat},{' '}
+              {normalizedResult.polarView.center.lon})
+            </p>
+            {normalizedResult.polarView.levels.map((level) => (
+              <section key={level.level}>
+                <h4>
+                  Level {level.level} ({level.distanceRangeMeters[0]}m, {level.distanceRangeMeters[1]}m]
+                </h4>
+                <pre style={{ border: '1px solid', maxHeight: '320px', overflowY: 'auto' }}>
+                  {JSON.stringify(level.features, null, 2)}
+                </pre>
+              </section>
+            ))}
+          </>
+        ) : (
+          <p>No polar view yet.</p>
+        )}
+
         <h3>Raw Response Snapshot</h3>
         <pre style={{border: "1px solid", maxHeight: "600px", overflowY: "auto"}}>{normalizedResult?.raw ? JSON.stringify(normalizedResult.raw, null, 2) : 'Raw payload not included.'}</pre>
       </section>

@@ -1,5 +1,12 @@
 import type { NormalizedMicroGrid, NormalizedMicroGridCell } from '../services/overpassGrid.js';
 import type {
+  NormalizedPolarFeatureSummary,
+  NormalizedPolarLevel,
+  NormalizedPolarView,
+  PolarAngularSpan,
+  PolarCoordinateSample,
+} from '../services/overpassPolar.js';
+import type {
   ContainedPoi,
   NormalizationDiagnostics,
   NormalizedFeatureCollection,
@@ -23,6 +30,7 @@ export interface NormalizedOverpassResponseBody {
   geojson: NormalizedFeatureCollection;
   diagnostics: NormalizationDiagnostics;
   microGrid?: NormalizedMicroGrid;
+  polarView?: NormalizedPolarView;
   raw?: unknown;
 }
 
@@ -31,5 +39,10 @@ export type {
   NormalizedFeatureProperties,
   NormalizedMicroGrid,
   NormalizedMicroGridCell,
+  NormalizedPolarFeatureSummary,
+  NormalizedPolarLevel,
+  NormalizedPolarView,
+  PolarAngularSpan,
+  PolarCoordinateSample,
   RelationReference,
 };

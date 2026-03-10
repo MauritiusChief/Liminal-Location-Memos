@@ -1,8 +1,10 @@
 import type {
   Feature,
   Geometry,
+  GeometryCollection,
   LineString,
   MultiLineString,
+  MultiPoint,
   MultiPolygon,
   Point,
   Polygon,
@@ -16,6 +18,11 @@ export type BoundingBox = {
   minY: number;
   maxX: number;
   maxY: number;
+};
+
+export type CoordinateWithDistance = {
+  coordinate: [number, number];
+  distanceMeters: number;
 };
 
 // 这一层只放“与具体业务无关”的纯几何工具。
@@ -353,4 +360,120 @@ export function metersToLongitudeDegrees(meters: number, latitude: number): numb
   const cosLatitude = Math.cos((latitude * Math.PI) / 180);
   const safeCosLatitude = Math.max(Math.abs(cosLatitude), GEOMETRY_EPSILON);
   return meters / (111_320 * safeCosLatitude);
+}
+
+// polar 视图和后续叙述都需要“查询点到任一点有多远”这个基础量；
+// 这里用 haversine 近似求球面距离，精度对 1km 量级的本地环境已足够。
+export function distanceBetweenCoordinates(
+  left: [number, number],
+  right: [number, number],
+): number {
+  const earthRadiusMeters = 6_371_000;
+  const [leftLon, leftLat] = left;
+  const [rightLon, rightLat] = right;
+
+  const deltaLat = degreesToRadians(rightLat - leftLat);
+  const deltaLon = degreesToRadians(rightLon - leftLon);
+  const leftLatRadians = degreesToRadians(leftLat);
+  const rightLatRadians = degreesToRadians(rightLat);
+
+  const haversine =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(leftLatRadians) *
+      Math.cos(rightLatRadians) *
+      Math.sin(deltaLon / 2) *
+      Math.sin(deltaLon / 2);
+
+  const angularDistance = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  return earthRadiusMeters * angularDistance;
+}
+
+// bearing 用于模拟“以查询点为视点时，要素位于哪个方向”。
+// 这里采用正北为 0 度，顺时针增加到 360 度。
+export function bearingBetweenCoordinates(
+  origin: [number, number],
+  target: [number, number],
+): number {
+  const [originLon, originLat] = origin;
+  const [targetLon, targetLat] = target;
+  const originLatRadians = degreesToRadians(originLat);
+  const targetLatRadians = degreesToRadians(targetLat);
+  const deltaLonRadians = degreesToRadians(targetLon - originLon);
+
+  const y = Math.sin(deltaLonRadians) * Math.cos(targetLatRadians);
+  const x =
+    Math.cos(originLatRadians) * Math.sin(targetLatRadians) -
+    Math.sin(originLatRadians) * Math.cos(targetLatRadians) * Math.cos(deltaLonRadians);
+
+  return normalizeBearingDegrees(radiansToDegrees(Math.atan2(y, x)));
+}
+
+// polar 摘要并不需要保留完整 GeoJSON 拓扑，只需要“这个要素有哪些候选坐标点”。
+// 因此这里统一把各种 geometry 展平成坐标数组，供后续过滤与统计使用。
+export function extractAllCoordinates(geometry: Geometry): [number, number][] {
+  if (geometry.type === 'Point') {
+    return toCoordinateList([geometry.coordinates]);
+  }
+
+  if (geometry.type === 'MultiPoint' || geometry.type === 'LineString') {
+    return toCoordinateList(geometry.coordinates);
+  }
+
+  if (geometry.type === 'MultiLineString' || geometry.type === 'Polygon') {
+    return geometry.coordinates.flatMap((positions) => toCoordinateList(positions));
+  }
+
+  if (geometry.type === 'MultiPolygon') {
+    return geometry.coordinates.flatMap((polygon) => polygon.flatMap((ring) => toCoordinateList(ring)));
+  }
+
+  if (geometry.type === 'GeometryCollection') {
+    return geometry.geometries.flatMap((childGeometry) => extractAllCoordinates(childGeometry));
+  }
+
+  return [];
+}
+
+// bbox 中心在这里被当作“线/面的大致中心点”，
+// 它不追求严格几何质心，只追求简单稳定且足够直观。
+export function getBoundingBoxCenter(coordinates: [number, number][]): [number, number] | null {
+  if (coordinates.length === 0) {
+    return null;
+  }
+
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
+  for (const [x, y] of coordinates) {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+
+  return [(minX + maxX) / 2, (minY + maxY) / 2];
+}
+
+// 角度差需要考虑 0/360 环绕；
+// 这里返回圆周上的最短角距离，方便后续做 widest span 与 gap 计算。
+export function circularAngleDeltaDegrees(fromDegrees: number, toDegrees: number): number {
+  return normalizeBearingDegrees(toDegrees - fromDegrees);
+}
+
+export function normalizeBearingDegrees(degrees: number): number {
+  return ((degrees % 360) + 360) % 360;
+}
+
+function degreesToRadians(degrees: number): number {
+  return (degrees * Math.PI) / 180;
+}
+
+function radiansToDegrees(radians: number): number {
+  return (radians * 180) / Math.PI;
+}
+
+function toCoordinateList(positions: Position[]): [number, number][] {
+  return positions.flatMap((position) => (isFinitePosition(position) ? [[position[0], position[1]]] : []));
 }

@@ -56,6 +56,46 @@ export interface NormalizedMicroGrid {
   cells: NormalizedMicroGridCell[][];
 }
 
+export interface PolarCoordinateSample {
+  coordinate: [number, number];
+  distanceMeters: number;
+  bearingDegrees: number;
+}
+
+export interface PolarAngularSpan {
+  leftPoint: PolarCoordinateSample;
+  rightPoint: PolarCoordinateSample;
+  angleWidthDegrees: number;
+}
+
+export interface NormalizedPolarFeatureSummary {
+  featureId: string;
+  osmType: string;
+  osmId: number;
+  geometryType: string;
+  displayLabel: string;
+  level: 1 | 2 | 3;
+  nearestPoint: PolarCoordinateSample;
+  farthestPoint: PolarCoordinateSample;
+  centerPoint: PolarCoordinateSample;
+  widestSpan: PolarAngularSpan;
+}
+
+export interface NormalizedPolarLevel {
+  level: 1 | 2 | 3;
+  distanceRangeMeters: [number, number];
+  features: NormalizedPolarFeatureSummary[];
+}
+
+export interface NormalizedPolarView {
+  center: {
+    lat: number;
+    lon: number;
+  };
+  maxRadiusMeters: 1000;
+  levels: NormalizedPolarLevel[];
+}
+
 export interface NormalizedFeatureProperties {
   osmType: string;
   osmId: number;
@@ -106,6 +146,7 @@ export interface NormalizedOverpassResponse {
   geojson: NormalizedFeatureCollection;
   diagnostics: NormalizationDiagnostics;
   microGrid?: NormalizedMicroGrid;
+  polarView?: NormalizedPolarView;
   raw?: unknown;
 }
 
