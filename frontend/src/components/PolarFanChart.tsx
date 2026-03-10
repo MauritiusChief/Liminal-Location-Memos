@@ -95,7 +95,7 @@ export function PolarFanChart({
         const path = describeAnnularSectorPath(
           feature.nearestPoint.distanceMeters,
           feature.farthestPoint.distanceMeters,
-          feature.widestSpan.rightPoint.bearingDegrees,
+          feature.widestSpan.leftPoint.bearingDegrees,
           feature.widestSpan.angleWidthDegrees,
         );
         const [centerX, centerY] = polarToCartesian(
@@ -162,6 +162,8 @@ function polarToCartesian(distanceMeters: number, bearingDegrees: number): [numb
 // 这里显式使用“起点 bearing + 已知角宽”来画扇形，而不是再从两个边界点反推角宽。
 // 原因是后端已经明确给出了 angleWidthDegrees，它表示最小包络视野角；
 // 如果前端再用 end-start 去猜，很容易画成互补的大弧，出现“整圈只缺一口”的反相效果。
+// 注意：当前后端 widestSpan 的语义里，更适合作为顺时针起点的是 leftPoint，
+// 然后沿顺时针方向走 angleWidthDegrees 才会落到另一侧边界。
 function describeAnnularSectorPath(
   innerDistanceMeters: number,
   outerDistanceMeters: number,
