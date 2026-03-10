@@ -297,8 +297,7 @@ function selectPoisForCell(features: NormalizedFeature[], cellBoundingBox: Bound
     const coordinate = extractPointCoordinate(feature.geometry);
     return coordinate ? isPointInBoundingBox(coordinate, cellBoundingBox) : false;
   });
-
-  return [...matches].sort(comparePoiFeatures);
+  return matches
 }
 
 // 道路不要求穿过格子中心；
@@ -316,8 +315,7 @@ function selectRoadsForCell(candidates: LineCandidate[], cellBoundingBox: Boundi
 
     return lineIntersectsBoundingBox(candidate.feature.geometry, cellBoundingBox);
   });
-
-  return [...matches].sort((left, right) => compareNamedFeatures(left.feature, right.feature));
+  return matches
 }
 
 // 建筑格的 baseLabel 只负责反映“这个建筑本身是谁”；
@@ -362,45 +360,9 @@ function buildCellLabel(
     segments.push(`${roadLabels.join('&')}`);
   }
 
-  return segments.filter(Boolean).join(' - ');
+  return segments.filter(Boolean).join(': ');
 }
 
-// 这个排序器专门服务“一个格子里有多个 POI 点”的情况。
-function comparePoiFeatures(left: NormalizedFeature, right: NormalizedFeature): number {
-  const leftPriority = getPoiSortPriority(left.properties.tags);
-  const rightPriority = getPoiSortPriority(right.properties.tags);
-  if (leftPriority !== rightPriority) {
-    return leftPriority - rightPriority;
-  }
-
-  return left.properties.osmId - right.properties.osmId;
-}
-
-// 道路等线要素冲突时，优先保留可读名字更多的那个。
-function compareNamedFeatures(left: NormalizedFeature, right: NormalizedFeature): number {
-  const leftName = getPreferredName(left.properties.tags);
-  const rightName = getPreferredName(right.properties.tags);
-
-  if (leftName && !rightName) {
-    return -1;
-  }
-  if (!leftName && rightName) {
-    return 1;
-  }
-  if (leftName && rightName && leftName !== rightName) {
-    return leftName.localeCompare(rightName);
-  }
-
-  return left.properties.osmId - right.properties.osmId;
-}
-
-// POI 是否有 name/brand 决定它在格子里的展示优先级。
-function getPoiSortPriority(tags: Record<string, string>): number {
-  if (trimTagValue(tags.name) || trimTagValue(tags.brand)) {
-    return 0;
-  }
-  return 1;
-}
 
 // 这几个 display helper 都是在把“原始 tags”压成适合单元格展示的短文本。
 function getPoiDisplayLabel(tags: Record<string, string>): string {
@@ -430,10 +392,6 @@ function getAreaDisplayLabel(tags: Record<string, string>): string {
   const label = trimTagValue(tags.landuse) || trimTagValue(tags.natural) || trimTagValue(tags.leisure) || trimTagValue(tags.amenity) || 'area';
   const name = trimTagValue(tags.name);
   return name ? `${name} | ${label}` : label;
-}
-
-function getPreferredName(tags: Record<string, string>): string | null {
-  return trimTagValue(tags.name) || trimTagValue(tags.brand);
 }
 
 function getFallbackBuildingLabel(buildingTagValue: string | undefined): string {
