@@ -7,6 +7,10 @@ export interface ChatResponse {
   reply: string;
 }
 
+export interface PromptPreview {
+  userPrompt: string;
+}
+
 export interface OverpassResponse {
   data: unknown;
 }
@@ -147,6 +151,7 @@ export interface NormalizedOverpassResponse {
   diagnostics: NormalizationDiagnostics;
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
+  promptPreview?: PromptPreview;
   raw?: unknown;
 }
 
@@ -171,6 +176,23 @@ export async function postChatMessage(message: string): Promise<ChatResponse> {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ message }),
+  });
+
+  if (!response.ok) {
+    const errorPayload = (await response.json().catch(() => ({ error: 'Request failed.' }))) as ErrorResponse;
+    throw new Error(errorPayload.error || 'Request failed.');
+  }
+
+  return response.json() as Promise<ChatResponse>;
+}
+
+export async function postDebugLlmMessage(input: { systemPrompt: string; message: string }): Promise<ChatResponse> {
+  const response = await fetch('/api/debug/llm', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
   });
 
   if (!response.ok) {

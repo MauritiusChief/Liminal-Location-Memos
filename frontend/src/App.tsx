@@ -22,6 +22,7 @@ function App() {
           </NavLink>
           <NavLink to="/debug/normalization">Debug / Normalization</NavLink>
           <NavLink to="/debug/overpass">Debug / Overpass</NavLink>
+          <NavLink to="/debug/llm-environment">Debug / LLM Environment</NavLink>
         </nav>
       </header>
       <Outlet />

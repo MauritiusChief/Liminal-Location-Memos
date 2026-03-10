@@ -1,4 +1,5 @@
 import type { NormalizedMicroGrid, NormalizedMicroGridCell } from '../services/overpassGrid.js';
+import type { PromptPreview } from '../services/overpassPrompt.js';
 import type {
   NormalizedPolarFeatureSummary,
   NormalizedPolarLevel,
@@ -31,6 +32,7 @@ export interface NormalizedOverpassResponseBody {
   diagnostics: NormalizationDiagnostics;
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
+  promptPreview?: PromptPreview;
   raw?: unknown;
 }
 
@@ -42,6 +44,7 @@ export type {
   NormalizedPolarFeatureSummary,
   NormalizedPolarLevel,
   NormalizedPolarView,
+  PromptPreview,
   PolarAngularSpan,
   PolarCoordinateSample,
   RelationReference,

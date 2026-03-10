@@ -10,16 +10,40 @@
 
 等级0内细网格描绘建筑相对关系（5m的格子宽度）
 
+格子内填写 label，网格下面以 `<label>(id=...): \n<tag1>\n<tag2>...` 的形式跟上格子里填不下的细节
+具体形式例子：
+```md
+McGinnis Ferry Road - highway:secondary (id=way/252545208):
+* maxspeed: 45 mph
+* oneway: yes
+* tiger:county: Gwinnett, GA
+...
+```
+以id为unique entry来展示细节。
+
 等级1~3仅包含极坐标体系下：
 * 最近点、最远点、中心点的极坐标
 * 最宽的两点的极坐标与所占视野角度
 
 无论是建筑体还是区域，均按照这个方式呈现
 
+每个等级也类似 `<label>: (id=...)\n<坐标信息>\n<tag1>\n<tag2>...` 这样。
+具体形式例子：
+```md
+McGinnis Ferry Road Trail - highway:cycleway:
+* (id=way/1480967447)
+  * 最近点距离39m / 方位31°，最远点距离967m / 方位307°，中心点距离17m / 方位340°
+  * 边界点1距离323m / 方位295°，边界点2距离938m / 方位126°，视野角宽191°
+  * maxspeed: 45 mph
+  * oneway: yes
+  * tiger:county: Gwinnett, GA
+* (id=way/463137310)
+  * 最近点距离...
+...
 ```
-[out:json];
-nwr(around:30, 34.01521568905169, -84.0797239505424)(if:count_tags()>0);
-out tags center geom;
-```
+以id为unique entry来展示细节，但 label 相同的会被聚类到一起展示。（这里假设连 label 都能够重合，说明性质都差不多）
+
+在排序上，先分两大块，第一块只显示建筑与POI信息，内部等级1~3依次排列；第二块显示线类元素与区域（比如工业区/居住区/林地等），内部等级1~3依次排列。
+POI有可能在高等级时所有细节全部遗失，如果这样那么这个POI就不显示了。
 
 ###

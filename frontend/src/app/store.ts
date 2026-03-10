@@ -1,6 +1,7 @@
 import { configureStore } from '@reduxjs/toolkit';
 import chatReducer from '../features/chat/chatSlice';
 import debugReducer from '../features/debug/debugSlice';
+import llmDebugReducer from '../features/llmDebug/llmDebugSlice';
 
 // store 是整个前端应用的全局状态仓库。
 // 现在它分成两块：
@@ -10,6 +11,7 @@ export const store = configureStore({
   reducer: {
     chat: chatReducer,
     debug: debugReducer,
+    llmDebug: llmDebugReducer,
   },
 });
 

@@ -14,6 +14,24 @@ interface ChatCompletionResponse {
 }
 
 export async function generateReply(message: string): Promise<string> {
+  return generateReplyWithSystemPrompt('', message);
+}
+
+export async function generateReplyWithSystemPrompt(systemPrompt: string, message: string): Promise<string> {
+  const messages: Array<{ role: 'system' | 'user'; content: string }> = [];
+
+  if (systemPrompt.trim()) {
+    messages.push({
+      role: 'system',
+      content: systemPrompt.trim(),
+    });
+  }
+
+  messages.push({
+    role: 'user',
+    content: message,
+  });
+
   const response = await fetch(`${config.llmBaseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
     method: 'POST',
     headers: {
@@ -22,12 +40,7 @@ export async function generateReply(message: string): Promise<string> {
     },
     body: JSON.stringify({
       model: config.llmModel,
-      messages: [
-        {
-          role: 'user',
-          content: message,
-        },
-      ],
+      messages,
     }),
   });
 
@@ -56,4 +69,3 @@ export async function generateReply(message: string): Promise<string> {
 
   throw new Error('LLM response did not include a reply.');
 }
-

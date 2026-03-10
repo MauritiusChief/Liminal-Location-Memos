@@ -1,12 +1,18 @@
 import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
-import { generateReply } from '../services/llm.js';
+import { generateReply, generateReplyWithSystemPrompt } from '../services/llm.js';
 import { buildNormalizedMicroGrid } from '../services/overpassGrid.js';
 import { buildNormalizedPolarView } from '../services/overpassPolar.js';
+import { buildDefaultDebugSystemPrompt, buildNormalizationPrompt } from '../services/overpassPrompt.js';
 import { buildNormalizedOverpassQuery, normalizeOverpassData } from '../services/overpassNormalization.js';
 import type { NormalizedOverpassRequestBody } from '../types/overpass.js';
 
 interface ChatRequestBody {
+  message?: string;
+}
+
+interface DebugLlmRequestBody {
+  systemPrompt?: string;
   message?: string;
 }
 
@@ -66,6 +72,27 @@ apiRouter.post('/chat', async (request, response) => {
   }
 });
 
+apiRouter.post('/debug/llm', async (request, response) => {
+  const { systemPrompt, message } = request.body as DebugLlmRequestBody;
+
+  if (!message || !message.trim()) {
+    response.status(400).json({ error: 'Message is required.' });
+    return;
+  }
+
+  try {
+    const reply = await generateReplyWithSystemPrompt(
+      typeof systemPrompt === 'string' ? systemPrompt : buildDefaultDebugSystemPrompt(),
+      message.trim(),
+    );
+    response.json({ reply });
+  } catch (error) {
+    response.status(502).json({
+      error: error instanceof Error ? error.message : 'Unexpected upstream error.',
+    });
+  }
+});
+
 apiRouter.post('/overpass', async (request, response) => {
   const { query } = request.body as OverpassRequestBody;
 
@@ -106,6 +133,14 @@ apiRouter.post('/overpass/normalize', async (request, response) => {
     const { geojson, diagnostics } = normalizeOverpassData(raw);
     const microGrid = buildNormalizedMicroGrid(geojson.features, normalizedRequest);
     const polarView = buildNormalizedPolarView(geojson.features, normalizedRequest);
+    const promptPreview = {
+      userPrompt: buildNormalizationPrompt({
+        request: normalizedRequest,
+        geojson,
+        microGrid,
+        polarView,
+      }),
+    };
 
     response.json({
       query,
@@ -113,6 +148,7 @@ apiRouter.post('/overpass/normalize', async (request, response) => {
       diagnostics,
       microGrid,
       polarView,
+      promptPreview,
       raw: normalizedRequest.includeRaw ? raw : undefined,
     });
   } catch (error) {
