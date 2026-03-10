@@ -116,10 +116,10 @@ export function NormalizationDebugPage() {
         {normalizedResult ? JSON.stringify(featuresSummary, null, 2) : 'No feature summary yet.'}
       </pre>
 
-      <h3>Normalized GeoJSON</h3>
+      {/* <h3>Normalized GeoJSON</h3>
       <pre style={{ border: '1px solid', maxHeight: '600px', overflowY: 'auto' }}>
         {normalizedResult ? JSON.stringify(normalizedResult.geojson, null, 2) : 'No normalized GeoJSON yet.'}
-      </pre>
+      </pre> */}
 
       <h3>Micro Grid Debug</h3>
       {normalizedResult?.microGrid?.enabled ? (
@@ -250,10 +250,10 @@ export function NormalizationDebugPage() {
         <p>No polar view yet.</p>
       )}
 
-      <h3>Raw Response Snapshot</h3>
+      {/* <h3>Raw Response Snapshot</h3>
       <pre style={{ border: '1px solid', maxHeight: '600px', overflowY: 'auto' }}>
         {normalizedResult?.raw ? JSON.stringify(normalizedResult.raw, null, 2) : 'Raw payload not included.'}
-      </pre>
+      </pre> */}
 
       {normalizeError ? (
         <section>

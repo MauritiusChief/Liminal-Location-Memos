@@ -323,9 +323,8 @@ function selectRoadsForCell(candidates: LineCandidate[], cellBoundingBox: Boundi
 function buildBuildingCellLabel(feature: Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>): string {
   const buildingName = trimTagValue(feature.properties.tags.name);
   const fallbackBuildingLabel = getFallbackBuildingLabel(feature.properties.tags.building);
-  const containedPois = getDisplayableContainedPois(feature.properties.containedPois);
-  const containedPoiLabels = containedPois.map((poi) => getContainedPoiDisplayLabel(poi));
-  const containedPoiLabel = containedPoiLabels.length > 0 ? containedPoiLabels.join('&') : null;
+  const containedPoi = getDisplayableContainedPois(feature.properties.containedPois);
+  const containedPoiLabel = containedPoi ? getPoiDisplayLabel(containedPoi.tags) : null
 
   if (buildingName) {
     return `${buildingName} | ${containedPoiLabel || fallbackBuildingLabel}`;
@@ -360,55 +359,51 @@ function buildCellLabel(
     segments.push(`${roadLabels.join('&')}`);
   }
 
-  return segments.filter(Boolean).join(': ');
+  return segments.filter(Boolean).join(' | ');
 }
 
 
 // 这几个 display helper 都是在把“原始 tags”压成适合单元格展示的短文本。
 function getPoiDisplayLabel(tags: Record<string, string>): string {
-  const label = getPrimaryPoiLabel(tags) || 'poi';
+  const label = getPrimaryLabel(POI_TAG_KEYS, tags) || 'poi';
   const name = trimTagValue(tags.name) || trimTagValue(tags.brand);
-  return name ? `${name} | ${label}` : label;
-}
-
-function getPrimaryPoiLabel(tags: Record<string, string>): string | null {
-  for (const key of POI_TAG_KEYS) {
-    const value = trimTagValue(tags[key]);
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
+  return name ? `${name} - ${label}` : label;
 }
 
 function getRoadDisplayLabel(tags: Record<string, string>): string {
-  const label = trimTagValue(tags.highway) || trimTagValue(tags.railway) || trimTagValue(tags.waterway) || 'way';
+  const label = getPrimaryLabel(ROAD_TAG_KEYS, tags) || 'way';
   const name = trimTagValue(tags.name);
-  return name ? `${name} | ${label}` : label;
+  return name ? `${name} - ${label}` : label;
 }
 
 function getAreaDisplayLabel(tags: Record<string, string>): string {
-  const label = trimTagValue(tags.landuse) || trimTagValue(tags.natural) || trimTagValue(tags.leisure) || trimTagValue(tags.amenity) || 'area';
+  const label = getPrimaryLabel(AREA_TAG_KEYS, tags) || 'area';
   const name = trimTagValue(tags.name);
-  return name ? `${name} | ${label}` : label;
+  return name ? `${name} - ${label}` : label;
+}
+
+// 共用的依照XX_TAG_KEYS产出label的函数
+function getPrimaryLabel(keys: readonly string[], tags: Record<string, string>): string | null {
+  for (const key of keys) {
+    const value = trimTagValue(tags[key]);
+    if (value) {
+      return `${key}:${value}`;
+    }
+  }
+  return null;
 }
 
 function getFallbackBuildingLabel(buildingTagValue: string | undefined): string {
   const buildingValue = trimTagValue(buildingTagValue);
-  return buildingValue && buildingValue !== 'yes' ? buildingValue : 'building';
+  return buildingValue && buildingValue !== 'yes' ? `building:${buildingValue}` : 'building';
 }
 
-function getDisplayableContainedPois(containedPois: ContainedPoi[] | undefined): ContainedPoi[] {
-  if (!containedPois || containedPois.length === 0 || containedPois.length > POI_LABEL_LIMIT) {
-    return [];
+function getDisplayableContainedPois(containedPois: ContainedPoi[] | undefined): ContainedPoi | null {
+  if (!containedPois || containedPois.length === 0 || containedPois.length > 1) {
+    return null;
   }
 
-  return [...containedPois].sort((left, right) => left.osmId - right.osmId);
-}
-
-function getContainedPoiDisplayLabel(poi: ContainedPoi): string {
-  return trimTagValue(poi.tags.name) || trimTagValue(poi.tags.brand) || getPrimaryPoiLabel(poi.tags) || 'poi';
+  return containedPois[0];
 }
 
 // 这里顺手把空字符串也视为“没有值”，避免 label 里出现视觉上为空的噪音。
