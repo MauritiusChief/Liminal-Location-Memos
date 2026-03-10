@@ -63,8 +63,8 @@ export interface PolarCoordinateSample {
 }
 
 export interface PolarAngularSpan {
-  leftPoint: PolarCoordinateSample;
-  rightPoint: PolarCoordinateSample;
+  clockwiseEarlyPoint: PolarCoordinateSample;
+  clockwiseLatePoint: PolarCoordinateSample;
   angleWidthDegrees: number;
 }
 

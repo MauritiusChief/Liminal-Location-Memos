@@ -1,0 +1,117 @@
+import type { Feature, LineString, MultiLineString, MultiPolygon, Polygon } from 'geojson';
+import { isLinearGeometryType, isPolygonalGeometry } from './overpassGeometry.js';
+import type { ContainedPoi, NormalizedFeature, NormalizedFeatureProperties } from './overpassNormalization.js';
+
+export const POI_TAG_KEYS = ['shop', 'amenity', 'office', 'tourism', 'leisure', 'craft', 'healthcare'] as const;
+export const AREA_TAG_KEYS = ['landuse', 'natural', 'leisure', 'amenity'] as const;
+export const ROAD_TAG_KEYS = ['highway', 'railway', 'waterway'] as const;
+const BUILDING_POI_LABEL_LIMIT = 1;
+
+// 这个文件专门承接“如何把 normalized feature 压成短标签”这类规则。
+// 这样 grid 和 polar 可以共享同一套文本风格，而不用各自维护一份相似但逐渐分叉的逻辑。
+
+// 这里顺手把空字符串也视为“没有值”，避免 label 里出现视觉上为空的噪音。
+export function trimTagValue(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+// 共用的依照 XX_TAG_KEYS 产出主分类标签的函数。
+// 返回值保留 key:value 形式，避免调用方只看到裸值却不知道语义来源。
+export function getPrimaryLabel(keys: readonly string[], tags: Record<string, string>): string | null {
+  for (const key of keys) {
+    const value = trimTagValue(tags[key]);
+    if (value) {
+      return `${key}:${value}`;
+    }
+  }
+
+  return null;
+}
+
+export function getFallbackBuildingLabel(buildingTagValue: string | undefined): string {
+  const buildingValue = trimTagValue(buildingTagValue);
+  return buildingValue && buildingValue !== 'yes' ? `building:${buildingValue}` : 'building';
+}
+
+// 当前建筑标签规则只在“内部正好有 1 个可展示 contained POI”时借用它。
+// 这是复用现有 overpassGrid 行为，而不是恢复到更早的“前两个 POI 拼接”版本。
+export function getDisplayableContainedPois(containedPois: ContainedPoi[] | undefined): ContainedPoi | null {
+  if (!containedPois || containedPois.length === 0 || containedPois.length > BUILDING_POI_LABEL_LIMIT) {
+    return null;
+  }
+
+  return containedPois[0];
+}
+
+export function getPoiDisplayLabel(tags: Record<string, string>): string {
+  const label = getPrimaryLabel(POI_TAG_KEYS, tags) || 'poi';
+  const name = trimTagValue(tags.name) || trimTagValue(tags.brand);
+  return name ? `${name} - ${label}` : label;
+}
+
+export function getRoadDisplayLabel(tags: Record<string, string>): string {
+  const label = getPrimaryLabel(ROAD_TAG_KEYS, tags) || 'way';
+  const name = trimTagValue(tags.name);
+  return name ? `${name} - ${label}` : label;
+}
+
+export function getAreaDisplayLabel(tags: Record<string, string>): string {
+  const label = getPrimaryLabel(AREA_TAG_KEYS, tags) || 'area';
+  const name = trimTagValue(tags.name);
+  return name ? `${name} - ${label}` : label;
+}
+
+// 建筑标签只负责回答“这个建筑本身该怎么称呼”，
+// POI / ROAD 的重叠显示由 grid 之类的上层结构再做额外拼接。
+export function buildBuildingBaseLabel(
+  feature: Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>,
+): string {
+  const buildingName = trimTagValue(feature.properties.tags.name);
+  const fallbackBuildingLabel = getFallbackBuildingLabel(feature.properties.tags.building);
+  const containedPoi = getDisplayableContainedPois(feature.properties.containedPois);
+  const containedPoiLabel = containedPoi ? getPoiDisplayLabel(containedPoi.tags) : null;
+
+  if (buildingName) {
+    return `${buildingName} | ${containedPoiLabel || fallbackBuildingLabel}`;
+  }
+
+  if (containedPoiLabel) {
+    return `${containedPoiLabel} | ${fallbackBuildingLabel}`;
+  }
+
+  return fallbackBuildingLabel;
+}
+
+// 这是给 polar 这类“单 feature 标签”场景准备的统一入口。
+// 它复用 grid 的文本规则，但不参与 cell 级别的 POI / ROAD 叠加拼接。
+export function buildFeatureDisplayLabel(feature: NormalizedFeature): string {
+  if (isPolygonalGeometry(feature.geometry) && typeof feature.properties.tags.building === 'string') {
+    return buildBuildingBaseLabel(feature as Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>);
+  }
+
+  if (isLinearGeometryType(feature.geometry)) {
+    const roadLabel = getRoadDisplayLabel(feature.properties.tags);
+    if (roadLabel !== 'way') {
+      return roadLabel;
+    }
+  }
+
+  const poiLabel = getPoiDisplayLabel(feature.properties.tags);
+  if (poiLabel !== 'poi') {
+    return poiLabel;
+  }
+
+  if (isPolygonalGeometry(feature.geometry)) {
+    const areaLabel = getAreaDisplayLabel(feature.properties.tags);
+    if (areaLabel !== 'area') {
+      return areaLabel;
+    }
+  }
+
+  return `${feature.properties.osmType}/${feature.properties.osmId}`;
+}

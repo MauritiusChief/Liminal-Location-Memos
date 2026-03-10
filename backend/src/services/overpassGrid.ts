@@ -12,7 +12,16 @@ import {
   polygonalGeometryContainsPoint,
   type BoundingBox,
 } from './overpassGeometry.js';
-import type { ContainedPoi, NormalizedFeature, NormalizedFeatureProperties } from './overpassNormalization.js';
+import type { NormalizedFeature, NormalizedFeatureProperties } from './overpassNormalization.js';
+import {
+  AREA_TAG_KEYS as SHARED_AREA_TAG_KEYS,
+  buildBuildingBaseLabel,
+  getAreaDisplayLabel,
+  getPoiDisplayLabel,
+  getRoadDisplayLabel,
+  POI_TAG_KEYS as SHARED_POI_TAG_KEYS,
+  ROAD_TAG_KEYS as SHARED_ROAD_TAG_KEYS,
+} from './overpassLabels.js';
 
 export type MicroGridCellKind = 'building' | 'area' | 'empty';
 
@@ -49,10 +58,9 @@ const GRID_CELL_SIZE_METERS = 5 as const;
 const GRID_ROWS = 12 as const;
 const GRID_COLS = 12 as const;
 const GRID_HALF_EXTENT_METERS = GRID_EXTENT_METERS / 2;
-const POI_TAG_KEYS = ['shop', 'amenity', 'office', 'tourism', 'leisure', 'craft', 'healthcare'] as const;
-const AREA_TAG_KEYS = ['landuse', 'natural', 'leisure', 'amenity'] as const;
-const ROAD_TAG_KEYS = ['highway', 'railway', 'waterway'] as const;
-const POI_LABEL_LIMIT = 1;
+const POI_TAG_KEYS = SHARED_POI_TAG_KEYS;
+const AREA_TAG_KEYS = SHARED_AREA_TAG_KEYS;
+const ROAD_TAG_KEYS = SHARED_ROAD_TAG_KEYS;
 
 type PolygonCandidate = {
   feature: Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>;
@@ -202,7 +210,7 @@ function buildMicroGridCell(input: {
 
   if (buildingMatch) {
     baseKind = 'building';
-    baseLabel = buildBuildingCellLabel(buildingMatch.feature);
+    baseLabel = buildBuildingBaseLabel(buildingMatch.feature);
     sourceFeatureIds.push(toFeatureId(buildingMatch.feature));
   } else if (areaMatch) {
     baseKind = 'area';
@@ -318,25 +326,6 @@ function selectRoadsForCell(candidates: LineCandidate[], cellBoundingBox: Boundi
   return matches
 }
 
-// 建筑格的 baseLabel 只负责反映“这个建筑本身是谁”；
-// POI / ROAD 的叠加信息会在后面统一拼到整格 label 里。
-function buildBuildingCellLabel(feature: Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>): string {
-  const buildingName = trimTagValue(feature.properties.tags.name);
-  const fallbackBuildingLabel = getFallbackBuildingLabel(feature.properties.tags.building);
-  const containedPoi = getDisplayableContainedPois(feature.properties.containedPois);
-  const containedPoiLabel = containedPoi ? getPoiDisplayLabel(containedPoi.tags) : null
-
-  if (buildingName) {
-    return `${buildingName} | ${containedPoiLabel || fallbackBuildingLabel}`;
-  }
-
-  if (containedPoiLabel) {
-    return `${containedPoiLabel} | ${fallbackBuildingLabel}`;
-  }
-
-  return fallbackBuildingLabel;
-}
-
 // 最终整格 label 仍保留为单字符串，方便前端直接渲染；
 // 但内部先分出 base / poi / road，再用稳定格式拼接起来。
 function buildCellLabel(
@@ -360,60 +349,6 @@ function buildCellLabel(
   }
 
   return segments.filter(Boolean).join(' | ');
-}
-
-
-// 这几个 display helper 都是在把“原始 tags”压成适合单元格展示的短文本。
-function getPoiDisplayLabel(tags: Record<string, string>): string {
-  const label = getPrimaryLabel(POI_TAG_KEYS, tags) || 'poi';
-  const name = trimTagValue(tags.name) || trimTagValue(tags.brand);
-  return name ? `${name} - ${label}` : label;
-}
-
-function getRoadDisplayLabel(tags: Record<string, string>): string {
-  const label = getPrimaryLabel(ROAD_TAG_KEYS, tags) || 'way';
-  const name = trimTagValue(tags.name);
-  return name ? `${name} - ${label}` : label;
-}
-
-function getAreaDisplayLabel(tags: Record<string, string>): string {
-  const label = getPrimaryLabel(AREA_TAG_KEYS, tags) || 'area';
-  const name = trimTagValue(tags.name);
-  return name ? `${name} - ${label}` : label;
-}
-
-// 共用的依照XX_TAG_KEYS产出label的函数
-function getPrimaryLabel(keys: readonly string[], tags: Record<string, string>): string | null {
-  for (const key of keys) {
-    const value = trimTagValue(tags[key]);
-    if (value) {
-      return `${key}:${value}`;
-    }
-  }
-  return null;
-}
-
-function getFallbackBuildingLabel(buildingTagValue: string | undefined): string {
-  const buildingValue = trimTagValue(buildingTagValue);
-  return buildingValue && buildingValue !== 'yes' ? `building:${buildingValue}` : 'building';
-}
-
-function getDisplayableContainedPois(containedPois: ContainedPoi[] | undefined): ContainedPoi | null {
-  if (!containedPois || containedPois.length === 0 || containedPois.length > 1) {
-    return null;
-  }
-
-  return containedPois[0];
-}
-
-// 这里顺手把空字符串也视为“没有值”，避免 label 里出现视觉上为空的噪音。
-function trimTagValue(value: string | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 }
 
 // 调试和前端联动都统一用 feature id 字符串，而不是散落地拼 osmType/osmId。

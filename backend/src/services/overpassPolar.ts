@@ -6,7 +6,8 @@ import {
   extractAllCoordinates,
   getBoundingBoxCenter,
 } from './overpassGeometry.js';
-import type { ContainedPoi, NormalizedFeature } from './overpassNormalization.js';
+import { buildFeatureDisplayLabel } from './overpassLabels.js';
+import type { NormalizedFeature } from './overpassNormalization.js';
 
 export interface PolarCoordinateSample {
   coordinate: [number, number];
@@ -15,8 +16,8 @@ export interface PolarCoordinateSample {
 }
 
 export interface PolarAngularSpan {
-  leftPoint: PolarCoordinateSample;
-  rightPoint: PolarCoordinateSample;
+  clockwiseEarlyPoint: PolarCoordinateSample;
+  clockwiseLatePoint: PolarCoordinateSample;
   angleWidthDegrees: number;
 }
 
@@ -54,10 +55,6 @@ const POLAR_LEVELS: Array<{ level: 1 | 2 | 3; minExclusive: number; maxInclusive
   { level: 2, minExclusive: 100, maxInclusive: 300 },
   { level: 3, minExclusive: 300, maxInclusive: 1000 },
 ];
-const POI_TAG_KEYS = ['shop', 'amenity', 'office', 'tourism', 'leisure', 'craft', 'healthcare'] as const;
-const LINE_TAG_KEYS = ['highway', 'railway', 'waterway'] as const;
-const AREA_TAG_KEYS = ['landuse', 'natural', 'leisure', 'amenity'] as const;
-
 // polar 视图只消费 normalized features；
 // 它的任务不是重建几何，而是压缩出“对叙述最有用的视角信息”。
 export function buildNormalizedPolarView(
@@ -116,7 +113,7 @@ function buildPolarFeatureSummary(
     osmType: feature.properties.osmType,
     osmId: feature.properties.osmId,
     geometryType: feature.geometry.type,
-    displayLabel: getPolarDisplayLabel(feature),
+    displayLabel: buildFeatureDisplayLabel(feature),
     level,
     nearestPoint,
     farthestPoint,
@@ -161,14 +158,14 @@ function selectFarthestSample(samples: PolarCoordinateSample[]): PolarCoordinate
 
 // widest span 体现“这个要素从查询点看占据了多宽的视野角”。
 // 实现上通过寻找 bearing 序列里的最大 gap，反推出最小包络角宽。
-// 这里的 leftPoint / rightPoint 表示“可见扇区两侧的边界点”，
+// 这里的 clockwiseEarlyPoint / clockwiseLatePoint 表示“可见扇区两侧的边界点”，
 // 它们本身不是前端 SVG 路径的天然 start/end sweep 参数，真正可信的角宽以 angleWidthDegrees 为准。
 function computeWidestSpan(geometry: Geometry, samples: PolarCoordinateSample[]): PolarAngularSpan {
   if (geometry.type === 'Point' || samples.length === 1) {
     const point = samples[0]!;
     return {
-      leftPoint: point,
-      rightPoint: point,
+      clockwiseEarlyPoint: point,
+      clockwiseLatePoint: point,
       angleWidthDegrees: 0,
     };
   }
@@ -188,12 +185,12 @@ function computeWidestSpan(geometry: Geometry, samples: PolarCoordinateSample[])
     }
   }
 
-  const rightPoint = sortedSamples[gapStartIndex]!;
-  const leftPoint = sortedSamples[(gapStartIndex + 1) % sortedSamples.length]!;
+  const clockwiseLatePoint = sortedSamples[gapStartIndex]!;
+  const clockwiseEarlyPoint = sortedSamples[(gapStartIndex + 1) % sortedSamples.length]!;
 
   return {
-    leftPoint,
-    rightPoint,
+    clockwiseEarlyPoint,
+    clockwiseLatePoint,
     angleWidthDegrees: 360 - largestGap,
   };
 }
@@ -203,78 +200,6 @@ function classifyPolarLevel(distanceMeters: number): 1 | 2 | 3 | null {
     (definition) => distanceMeters > definition.minExclusive && distanceMeters <= definition.maxInclusive,
   );
   return match ? match.level : null;
-}
-
-function getPolarDisplayLabel(feature: NormalizedFeature): string {
-  const name = trimTagValue(feature.properties.tags.name);
-  if (name) {
-    return name;
-  }
-
-  const containedPois = getDisplayableContainedPois(feature.properties.containedPois);
-  if (containedPois.length > 0) {
-    return containedPois.map((poi) => getContainedPoiDisplayLabel(poi)).join('&');
-  }
-
-  const tags = feature.properties.tags;
-  if (typeof tags.building === 'string') {
-    return trimTagValue(tags.building) || 'building';
-  }
-
-  for (const key of POI_TAG_KEYS) {
-    const value = trimTagValue(tags[key]);
-    if (value) {
-      return value;
-    }
-  }
-
-  for (const key of LINE_TAG_KEYS) {
-    const value = trimTagValue(tags[key]);
-    if (value) {
-      return value;
-    }
-  }
-
-  for (const key of AREA_TAG_KEYS) {
-    const value = trimTagValue(tags[key]);
-    if (value) {
-      return value;
-    }
-  }
-
-  return `${feature.properties.osmType}/${feature.properties.osmId}`;
-}
-
-function getDisplayableContainedPois(containedPois: ContainedPoi[] | undefined): ContainedPoi[] {
-  if (!containedPois || containedPois.length === 0) {
-    return [];
-  }
-
-  return [...containedPois].sort((left, right) => left.osmId - right.osmId).slice(0, 2);
-}
-
-function getContainedPoiDisplayLabel(poi: ContainedPoi): string {
-  return trimTagValue(poi.tags.name) || trimTagValue(poi.tags.brand) || getPrimaryPoiLabel(poi.tags) || 'poi';
-}
-
-function getPrimaryPoiLabel(tags: Record<string, string>): string | null {
-  for (const key of POI_TAG_KEYS) {
-    const value = trimTagValue(tags[key]);
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-function trimTagValue(value: string | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
 }
 
 function toFeatureId(feature: NormalizedFeature): string {
