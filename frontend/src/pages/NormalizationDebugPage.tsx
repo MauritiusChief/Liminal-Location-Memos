@@ -21,6 +21,7 @@ export function NormalizationDebugPage() {
   const [selectedPolarFeature, setSelectedPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
   const [hoveredPolarFeature, setHoveredPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
   const [selectedPolarLevel, setSelectedPolarLevel] = useState<'all' | 1 | 2 | 3>('all');
+  const [showOnlyBuildingAndPoiInChart, setShowOnlyBuildingAndPoiInChart] = useState(false);
   const [renderPolarSvgRequested, setRenderPolarSvgRequested] = useState(false);
   const [polarSvgRenderLimit, setPolarSvgRenderLimit] = useState(DEFAULT_POLAR_RENDER_LIMIT);
 
@@ -45,24 +46,33 @@ export function NormalizationDebugPage() {
       return null;
     }
 
-    return limitPolarView(normalizedResult.polarView, selectedPolarLevel, polarRenderLimit);
-  }, [normalizedResult, polarRenderLimit, selectedPolarLevel]);
+    return filterPolarViewForChart(
+      normalizedResult.polarView,
+      selectedPolarLevel,
+      polarRenderLimit,
+      showOnlyBuildingAndPoiInChart,
+    );
+  }, [normalizedResult, polarRenderLimit, selectedPolarLevel, showOnlyBuildingAndPoiInChart]);
 
   const totalVisiblePolarFeatures = useMemo(() => {
     if (!normalizedResult?.polarView) {
       return 0;
     }
 
-    return getVisiblePolarFeatureCount(normalizedResult.polarView.levels, selectedPolarLevel);
-  }, [normalizedResult, selectedPolarLevel]);
+    return getVisiblePolarFeatureCount(
+      normalizedResult.polarView.levels,
+      selectedPolarLevel,
+      showOnlyBuildingAndPoiInChart,
+    );
+  }, [normalizedResult, selectedPolarLevel, showOnlyBuildingAndPoiInChart]);
 
   const renderedPolarFeatures = useMemo(() => {
     if (!chartPolarView) {
       return 0;
     }
 
-    return getVisiblePolarFeatureCount(chartPolarView.levels, selectedPolarLevel);
-  }, [chartPolarView, selectedPolarLevel]);
+    return getVisiblePolarFeatureCount(chartPolarView.levels, 'all', false);
+  }, [chartPolarView]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -214,6 +224,15 @@ export function NormalizationDebugPage() {
               onChange={(event) => setPolarSvgRenderLimit(event.target.value)}
               style={{ width: '100px' }}
             />
+            <label htmlFor="polarBuildingPoiOnly" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <input
+                id="polarBuildingPoiOnly"
+                type="checkbox"
+                checked={showOnlyBuildingAndPoiInChart}
+                onChange={(event) => setShowOnlyBuildingAndPoiInChart(event.target.checked)}
+              />
+              Only buildings & POI
+            </label>
             <button
               type="button"
               onClick={() => setRenderPolarSvgRequested(true)}
@@ -287,10 +306,11 @@ export function NormalizationDebugPage() {
   );
 }
 
-function limitPolarView(
+function filterPolarViewForChart(
   polarView: NormalizedPolarView,
   selectedLevel: 'all' | 1 | 2 | 3,
   limit: number,
+  showOnlyBuildingAndPoi: boolean,
 ): NormalizedPolarView {
   let remaining = limit;
 
@@ -304,6 +324,10 @@ function limitPolarView(
         };
       }
 
+      const filteredFeatures = showOnlyBuildingAndPoi
+        ? level.features.filter((feature) => feature.category === 'building' || feature.category === 'poi')
+        : level.features;
+
       if (remaining <= 0) {
         return {
           ...level,
@@ -311,7 +335,7 @@ function limitPolarView(
         };
       }
 
-      const nextFeatures = level.features.slice(0, remaining);
+      const nextFeatures = filteredFeatures.slice(0, remaining);
       remaining -= nextFeatures.length;
 
       return {
@@ -322,12 +346,20 @@ function limitPolarView(
   };
 }
 
-function getVisiblePolarFeatureCount(levels: NormalizedPolarLevel[], selectedLevel: 'all' | 1 | 2 | 3): number {
+function getVisiblePolarFeatureCount(
+  levels: NormalizedPolarLevel[],
+  selectedLevel: 'all' | 1 | 2 | 3,
+  showOnlyBuildingAndPoi: boolean,
+): number {
   return levels.reduce((count, level) => {
     if (selectedLevel !== 'all' && level.level !== selectedLevel) {
       return count;
     }
 
-    return count + level.features.length;
+    const filteredFeatures = showOnlyBuildingAndPoi
+      ? level.features.filter((feature) => feature.category === 'building' || feature.category === 'poi')
+      : level.features;
+
+    return count + filteredFeatures.length;
   }, 0);
 }
