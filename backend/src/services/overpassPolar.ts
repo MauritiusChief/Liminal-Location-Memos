@@ -6,8 +6,26 @@ import {
   extractAllCoordinates,
   getBoundingBoxCenter,
 } from './overpassGeometry.js';
-import { buildFeatureDisplayLabel } from './overpassLabels.js';
+import {
+  AREA_TAG_KEYS,
+  buildBuildingBaseLabel,
+  getAreaDisplayLabel,
+  getFallbackBuildingLabel,
+  getPoiDisplayLabel,
+  getPrimaryLabel,
+  getRoadDisplayLabel,
+  POI_TAG_KEYS,
+  ROAD_TAG_KEYS,
+  trimTagValue,
+} from './overpassLabels.js';
 import type { NormalizedFeature } from './overpassNormalization.js';
+
+export type PolarFeatureCategory = 'building' | 'poi' | 'line' | 'area';
+
+export interface PolarVisibleTag {
+  key: string;
+  value: string;
+}
 
 export interface PolarCoordinateSample {
   coordinate: [number, number];
@@ -26,7 +44,9 @@ export interface NormalizedPolarFeatureSummary {
   osmType: string;
   osmId: number;
   geometryType: string;
+  category: PolarFeatureCategory;
   displayLabel: string;
+  visibleTags: PolarVisibleTag[];
   level: 1 | 2 | 3;
   nearestPoint: PolarCoordinateSample;
   farthestPoint: PolarCoordinateSample;
@@ -108,17 +128,27 @@ function buildPolarFeatureSummary(
     return null;
   }
 
+  const category = classifyPolarFeature(feature);
+  const filteredPresentation = applyPolarLevelFilter(feature, category, level, computeWidestSpan(feature.geometry, samples));
+  if (!filteredPresentation.shouldInclude) {
+    return null;
+  }
+
+  const widestSpan = computeWidestSpan(feature.geometry, samples);
+
   return {
     featureId: toFeatureId(feature),
     osmType: feature.properties.osmType,
     osmId: feature.properties.osmId,
     geometryType: feature.geometry.type,
-    displayLabel: buildFeatureDisplayLabel(feature),
+    category,
+    displayLabel: filteredPresentation.displayLabel,
+    visibleTags: filteredPresentation.visibleTags,
     level,
     nearestPoint,
     farthestPoint,
     centerPoint,
-    widestSpan: computeWidestSpan(feature.geometry, samples),
+    widestSpan,
   };
 }
 
@@ -200,6 +230,190 @@ function classifyPolarLevel(distanceMeters: number): 1 | 2 | 3 | null {
     (definition) => distanceMeters > definition.minExclusive && distanceMeters <= definition.maxInclusive,
   );
   return match ? match.level : null;
+}
+
+function classifyPolarFeature(feature: NormalizedFeature): PolarFeatureCategory {
+  if (typeof feature.properties.tags.building === 'string') {
+    return 'building';
+  }
+
+  if (POI_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string')) {
+    return 'poi';
+  }
+
+  if (feature.geometry.type === 'LineString' || feature.geometry.type === 'MultiLineString') {
+    return 'line';
+  }
+
+  return 'area';
+}
+
+function applyPolarLevelFilter(
+  feature: NormalizedFeature,
+  category: PolarFeatureCategory,
+  level: 1 | 2 | 3,
+  widestSpan: PolarAngularSpan,
+): {
+  shouldInclude: boolean;
+  displayLabel: string;
+  visibleTags: PolarVisibleTag[];
+} {
+  if (level === 1) {
+    return applyLevel1Filter(feature, category);
+  }
+
+  if (level === 2) {
+    return applyLevel2Filter(feature, category);
+  }
+
+  return applyLevel3Filter(feature, category, widestSpan);
+}
+
+function applyLevel1Filter(
+  feature: NormalizedFeature,
+  category: PolarFeatureCategory,
+): {
+  shouldInclude: boolean;
+  displayLabel: string;
+  visibleTags: PolarVisibleTag[];
+} {
+  switch (category) {
+    case 'building':
+      return {
+        shouldInclude: true,
+        displayLabel: buildBuildingBaseLabel(feature as never),
+        visibleTags: collectVisibleTags(feature, ['name', 'brand', ...POI_TAG_KEYS, 'building']),
+      };
+    case 'poi':
+      return {
+        shouldInclude: true,
+        displayLabel: getPoiDisplayLabel(feature.properties.tags),
+        visibleTags: collectVisibleTags(feature, ['name', 'brand', ...POI_TAG_KEYS]),
+      };
+    case 'line':
+      return {
+        shouldInclude: true,
+        displayLabel: getRoadDisplayLabel(feature.properties.tags),
+        visibleTags: collectVisibleTags(feature, ['name', ...ROAD_TAG_KEYS]),
+      };
+    case 'area':
+      return {
+        shouldInclude: true,
+        displayLabel: getAreaDisplayLabel(feature.properties.tags),
+        visibleTags: collectVisibleTags(feature, ['name', ...AREA_TAG_KEYS]),
+      };
+  }
+}
+
+function applyLevel2Filter(
+  feature: NormalizedFeature,
+  category: PolarFeatureCategory,
+): {
+  shouldInclude: boolean;
+  displayLabel: string;
+  visibleTags: PolarVisibleTag[];
+} {
+  switch (category) {
+    case 'building':
+      return {
+        shouldInclude: true,
+        displayLabel: buildBuildingBaseLabel(feature as never),
+        visibleTags: collectVisibleTags(feature, ['building', 'name', 'brand']),
+      };
+    case 'poi': {
+      const primaryTag = getPrimaryVisibleTag(feature, POI_TAG_KEYS);
+      return {
+        shouldInclude: primaryTag !== null,
+        displayLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'poi',
+        visibleTags: primaryTag ? [primaryTag] : [],
+      };
+    }
+    case 'line': {
+      const primaryTag = getPrimaryVisibleTag(feature, ROAD_TAG_KEYS);
+      return {
+        shouldInclude: primaryTag !== null,
+        displayLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'way',
+        visibleTags: primaryTag ? [primaryTag] : [],
+      };
+    }
+    case 'area': {
+      const primaryTag = getPrimaryVisibleTag(feature, AREA_TAG_KEYS);
+      return {
+        shouldInclude: primaryTag !== null,
+        displayLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'area',
+        visibleTags: primaryTag ? [primaryTag] : [],
+      };
+    }
+  }
+}
+
+function applyLevel3Filter(
+  feature: NormalizedFeature,
+  category: PolarFeatureCategory,
+  widestSpan: PolarAngularSpan,
+): {
+  shouldInclude: boolean;
+  displayLabel: string;
+  visibleTags: PolarVisibleTag[];
+} {
+  switch (category) {
+    case 'building': {
+      const buildingValue = trimTagValue(feature.properties.tags.building);
+      return {
+        shouldInclude: true,
+        displayLabel: getFallbackBuildingLabel(buildingValue || undefined),
+        visibleTags: buildingValue ? [{ key: 'building', value: buildingValue }] : [],
+      };
+    }
+    case 'poi':
+      return {
+        shouldInclude: false,
+        displayLabel: 'poi',
+        visibleTags: [],
+      };
+    case 'line': {
+      const primaryTag = getPrimaryVisibleTag(feature, ROAD_TAG_KEYS);
+      const shouldInclude = primaryTag !== null && widestSpan.angleWidthDegrees >= 5;
+      return {
+        shouldInclude,
+        displayLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'way',
+        visibleTags: shouldInclude && primaryTag ? [primaryTag] : [],
+      };
+    }
+    case 'area': {
+      const primaryTag = getPrimaryVisibleTag(feature, AREA_TAG_KEYS);
+      const shouldInclude = primaryTag !== null && widestSpan.angleWidthDegrees >= 5;
+      return {
+        shouldInclude,
+        displayLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'area',
+        visibleTags: shouldInclude && primaryTag ? [primaryTag] : [],
+      };
+    }
+  }
+}
+
+function collectVisibleTags(
+  feature: NormalizedFeature,
+  keys: readonly string[],
+): PolarVisibleTag[] {
+  return keys.flatMap((key) => {
+    const value = trimTagValue(feature.properties.tags[key]);
+    return value ? [{ key, value }] : [];
+  });
+}
+
+function getPrimaryVisibleTag(
+  feature: NormalizedFeature,
+  keys: readonly string[],
+): PolarVisibleTag | null {
+  const primaryLabel = getPrimaryLabel(keys, feature.properties.tags);
+  if (!primaryLabel) {
+    return null;
+  }
+
+  const [key, ...valueParts] = primaryLabel.split(':');
+  const value = valueParts.join(':');
+  return key && value ? { key, value } : null;
 }
 
 function toFeatureId(feature: NormalizedFeature): string {

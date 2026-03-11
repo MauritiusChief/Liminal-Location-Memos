@@ -24,7 +24,7 @@ export function buildNormalizationPrompt(input: {
   const sections = [
     buildPromptIntro(input.request),
     buildGridSection(input.microGrid, featureById),
-    buildPolarSection(input.polarView, featureById),
+    buildPolarSection(input.polarView),
   ];
 
   return sections.join('\n\n');
@@ -52,7 +52,7 @@ function buildGridSection(
   featureById: Map<string, NormalizedFeature>,
 ): string {
   if (!microGrid || !microGrid.enabled) {
-    return '等级0（30米内微网格）：半径不足，未生成微网格。';
+    return '## 等级0（30米内微网格）：半径不足，未生成微网格。';
   }
 
   const gridLines = microGrid.cells.map((row) => row.map((cell) => cell.label || '.').join('\t'));
@@ -80,36 +80,37 @@ function buildGridSection(
     .join('\n\n');
 
   return [
-    '等级0（30米内微网格）',
-    '网格正文：',
+    '## 等级0（30米内微网格）',
+    '',
+    '### 网格正文：',
     ...gridLines,
     '',
-    '网格补充细节：',
+    '### 网格补充细节：',
     featureEntries || '无',
   ].join('\n');
 }
 
 function buildPolarSection(
   polarView: NormalizedPolarView | undefined,
-  featureById: Map<string, NormalizedFeature>,
 ): string {
   if (!polarView) {
-    return '等级1到等级3（30米到1公里极坐标摘要）：无';
+    return '## 等级1到等级3（30米到1公里极坐标摘要）：无';
   }
 
   const buildingAndPoiBlocks = polarView.levels.map((level) =>
-    buildPolarLevelBlock(level.level, level.features, featureById, true),
+    buildPolarLevelBlock(level.level, level.features, true),
   );
   const lineAndAreaBlocks = polarView.levels.map((level) =>
-    buildPolarLevelBlock(level.level, level.features, featureById, false),
+    buildPolarLevelBlock(level.level, level.features, false),
   );
 
   return [
-    '等级1到等级3（30米到1公里极坐标摘要）',
-    '第一块：建筑与POI',
+    '## 等级1到等级3（30米到1公里极坐标摘要）',
+    '',
+    '### 显著部分：建筑与POI',
     ...buildingAndPoiBlocks,
     '',
-    '第二块：线类与区域',
+    '### 补充部分：线类与区域',
     ...lineAndAreaBlocks,
   ].join('\n');
 }
@@ -117,44 +118,35 @@ function buildPolarSection(
 function buildPolarLevelBlock(
   level: 1 | 2 | 3,
   summaries: NormalizedPolarFeatureSummary[],
-  featureById: Map<string, NormalizedFeature>,
   includeBuildingAndPoi: boolean,
 ): string {
-  const groupedEntries = new Map<string, Array<{ summary: NormalizedPolarFeatureSummary; feature: NormalizedFeature }>>();
+  const groupedEntries = new Map<string, NormalizedPolarFeatureSummary[]>();
+  const levelDesc = {1: "100m~30m", 2: "300m~100m", 3: "1km~300m"}
 
   for (const summary of summaries) {
-    const feature = featureById.get(summary.featureId);
-    if (!feature) {
-      continue;
-    }
-
-    if (includeBuildingAndPoi ? !isBuildingOrPoiFeature(feature) : isBuildingOrPoiFeature(feature)) {
-      continue;
-    }
-
-    if (includeBuildingAndPoi && isPoiWithoutReadableDetail(feature)) {
+    if (includeBuildingAndPoi ? !isBuildingOrPoiCategory(summary.category) : isBuildingOrPoiCategory(summary.category)) {
       continue;
     }
 
     const existingGroup = groupedEntries.get(summary.displayLabel) || [];
-    existingGroup.push({ summary, feature });
+    existingGroup.push(summary);
     groupedEntries.set(summary.displayLabel, existingGroup);
   }
 
   if (groupedEntries.size === 0) {
-    return `等级${level}：无`;
+    return `#### 等级${level}：无`;
   }
 
   const groupLines = Array.from(groupedEntries.entries()).map(([label, entries]) => {
-    const itemLines = entries.flatMap(({ summary, feature }) => buildPolarFeatureLines(summary, feature));
-    return [label + ':', ...itemLines].join('\n');
+    const itemLines = entries.flatMap((summary) => buildPolarFeatureLines(summary));
+    return [label + ':','', ...itemLines,''].join('\n');
   });
 
-  return [`等级${level}：`, ...groupLines].join('\n');
+  return [`#### 等级${level}(${levelDesc[level]})：`, ...groupLines].join('\n');
 }
 
-function buildPolarFeatureLines(summary: NormalizedPolarFeatureSummary, feature: NormalizedFeature): string[] {
-  const detailTags = collectImportantTags(feature);
+function buildPolarFeatureLines(summary: NormalizedPolarFeatureSummary): string[] {
+  const detailTags = summary.visibleTags.map((tag) => `${tag.key}: ${tag.value}`);
 
   return [
     `* (id=${summary.featureId})`,
@@ -220,13 +212,8 @@ function isBuildingOrPoiFeature(feature: NormalizedFeature): boolean {
   return POI_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
 }
 
-function isPoiWithoutReadableDetail(feature: NormalizedFeature): boolean {
-  const hasPoiTag = POI_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
-  if (!hasPoiTag) {
-    return false;
-  }
-
-  return !trimTagValue(feature.properties.tags.name) && !trimTagValue(feature.properties.tags.brand);
+function isBuildingOrPoiCategory(category: NormalizedPolarFeatureSummary['category']): boolean {
+  return category === 'building' || category === 'poi';
 }
 
 function isLineFeature(feature: NormalizedFeature): boolean {

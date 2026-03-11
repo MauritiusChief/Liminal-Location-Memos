@@ -4,6 +4,8 @@ import type {
   NormalizedPolarFeatureSummary,
   NormalizedPolarLevel,
   NormalizedPolarView,
+  PolarFeatureCategory,
+  PolarVisibleTag,
   PolarAngularSpan,
   PolarCoordinateSample,
 } from '../services/overpassPolar.js';
@@ -44,7 +46,9 @@ export type {
   NormalizedPolarFeatureSummary,
   NormalizedPolarLevel,
   NormalizedPolarView,
+  PolarFeatureCategory,
   PromptPreview,
+  PolarVisibleTag,
   PolarAngularSpan,
   PolarCoordinateSample,
   RelationReference,

@@ -72,12 +72,21 @@ export interface PolarAngularSpan {
   angleWidthDegrees: number;
 }
 
+export type PolarFeatureCategory = 'building' | 'poi' | 'line' | 'area';
+
+export interface PolarVisibleTag {
+  key: string;
+  value: string;
+}
+
 export interface NormalizedPolarFeatureSummary {
   featureId: string;
   osmType: string;
   osmId: number;
   geometryType: string;
+  category: PolarFeatureCategory;
   displayLabel: string;
+  visibleTags: PolarVisibleTag[];
   level: 1 | 2 | 3;
   nearestPoint: PolarCoordinateSample;
   farthestPoint: PolarCoordinateSample;
