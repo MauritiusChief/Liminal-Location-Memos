@@ -7,6 +7,11 @@ export interface ChatResponse {
   reply: string;
 }
 
+export interface DebugLlmResponse {
+  reply: string;
+  reasoning: string | null;
+}
+
 export interface PromptPreview {
   userPrompt: string;
 }
@@ -204,7 +209,7 @@ export async function postChatMessage(message: string): Promise<ChatResponse> {
   return response.json() as Promise<ChatResponse>;
 }
 
-export async function postDebugLlmMessage(input: { systemPrompt: string; message: string }): Promise<ChatResponse> {
+export async function postDebugLlmMessage(input: { systemPrompt: string; message: string }): Promise<DebugLlmResponse> {
   const response = await fetch('/api/debug/llm', {
     method: 'POST',
     headers: {
@@ -218,7 +223,7 @@ export async function postDebugLlmMessage(input: { systemPrompt: string; message
     throw new Error(errorPayload.error || 'Request failed.');
   }
 
-  return response.json() as Promise<ChatResponse>;
+  return response.json() as Promise<DebugLlmResponse>;
 }
 
 export async function postOverpassQuery(query: string): Promise<OverpassResponse> {

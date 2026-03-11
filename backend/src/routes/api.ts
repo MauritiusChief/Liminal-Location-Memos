@@ -63,8 +63,8 @@ apiRouter.post('/chat', async (request, response) => {
   }
 
   try {
-    const reply = await generateReply(message.trim());
-    response.json({ reply });
+    const result = await generateReply(message.trim());
+    response.json({ reply: result.reply });
   } catch (error) {
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected upstream error.',
@@ -81,11 +81,11 @@ apiRouter.post('/debug/llm', async (request, response) => {
   }
 
   try {
-    const reply = await generateReplyWithSystemPrompt(
+    const result = await generateReplyWithSystemPrompt(
       typeof systemPrompt === 'string' ? systemPrompt : buildDefaultDebugSystemPrompt(),
       message.trim(),
     );
-    response.json({ reply });
+    response.json(result);
   } catch (error) {
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected upstream error.',

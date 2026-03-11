@@ -85,8 +85,8 @@ const POLAR_LEVELS: Array<{ level: 1 | 2 | 3; minExclusive: number; maxInclusive
   { level: 3, minExclusive: 300, maxInclusive: 1000 },
 ];
 const DIRECTION_CLUSTER_THRESHOLD_DEGREES: Record<2 | 3, number> = {
-  2: 25,
-  3: 20,
+  2: 30,
+  3: 45,
 };
 // polar 视图只消费 normalized features；
 // 它的任务不是重建几何，而是压缩出“对叙述最有用的视角信息”。
@@ -131,6 +131,8 @@ function buildPolarFeatureSummary(
   const samples = clippedCoordinates.map((coordinate) => toPolarCoordinateSample(origin, coordinate));
   const nearestPoint = selectNearestSample(samples);
   const farthestPoint = selectFarthestSample(samples);
+  // centerPoint 负责表达“这个要素大致位于哪个方向”，
+  // nearest / farthest 则保留它离查询点最近和最远的边界，用于描述远近范围。
   const centerCoordinate = feature.geometry.type === 'Point' ? clippedCoordinates[0] || null : getBoundingBoxCenter(clippedCoordinates);
   if (!nearestPoint || !farthestPoint || !centerCoordinate) {
     return null;
@@ -148,6 +150,7 @@ function buildPolarFeatureSummary(
     return null;
   }
 
+  // widestSpan 不用于聚类，它回答的是“这个要素从当前位置看占了多宽的视野”。
   const widestSpan = computeWidestSpan(feature.geometry, samples);
 
   return {
@@ -412,6 +415,7 @@ function applyLevel3Filter(
 function applyDirectionClusters(summaries: NormalizedPolarFeatureSummary[]): NormalizedPolarFeatureSummary[] {
   const groupedByLevelAndLabel = new Map<string, NormalizedPolarFeatureSummary[]>();
 
+  // 先按 level + baseLabel 分桶，避免不同距离层或不同语义标签互相影响。
   for (const summary of summaries) {
     const key = `${summary.level}:${summary.baseLabel}`;
     const existingGroup = groupedByLevelAndLabel.get(key) || [];
@@ -438,6 +442,7 @@ function applyDirectionClusters(summaries: NormalizedPolarFeatureSummary[]): Nor
       continue;
     }
 
+    // L2 / L3 才做方向分群；L1 保持原始标签，避免近距离信息被切得过碎。
     const clusters = splitEntriesIntoDirectionClusters(entries, DIRECTION_CLUSTER_THRESHOLD_DEGREES[level]);
     clusters.forEach((clusterEntries, clusterIndex) => {
       const centerBearingDegrees = computeCircularMeanDegrees(
@@ -472,18 +477,19 @@ function splitEntriesIntoDirectionClusters(
     return [entries];
   }
 
+  // 这里不能用“相邻两个点角差不大就并入”的单链规则，
+  // 否则会被一串过渡点桥接，最后把整体跨度很大的元素串成同一群。
   const sortedEntries = [...entries].sort(
     (left, right) => left.centerPoint.bearingDegrees - right.centerPoint.bearingDegrees,
   );
   const clusters: NormalizedPolarFeatureSummary[][] = [[sortedEntries[0]!]];
 
   for (let index = 1; index < sortedEntries.length; index += 1) {
-    const previous = sortedEntries[index - 1]!;
     const current = sortedEntries[index]!;
     const currentCluster = clusters[clusters.length - 1]!;
-    const gap = circularAngleDeltaDegrees(previous.centerPoint.bearingDegrees, current.centerPoint.bearingDegrees);
 
-    if (gap <= thresholdDegrees) {
+    // 只有“加入这个点后，整群最小圆周包络角仍然不超过阈值”才允许并入。
+    if (canAppendToDirectionCluster(currentCluster, current, thresholdDegrees)) {
       currentCluster.push(current);
       continue;
     }
@@ -494,12 +500,13 @@ function splitEntriesIntoDirectionClusters(
   if (clusters.length > 1) {
     const firstCluster = clusters[0]!;
     const lastCluster = clusters[clusters.length - 1]!;
-    const wrapGap = circularAngleDeltaDegrees(
-      lastCluster[lastCluster.length - 1]!.centerPoint.bearingDegrees,
-      firstCluster[0]!.centerPoint.bearingDegrees,
-    );
 
-    if (wrapGap <= thresholdDegrees) {
+    // 收口时同样用“合并后的整体角宽是否仍紧凑”来判断，
+    // 这样 350° 和 8° 这类跨 0° 的群可以正确合并，但不会误并远端群。
+    if (computeMinimalCircularSpanDegrees([
+      ...lastCluster.map((entry) => entry.centerPoint.bearingDegrees),
+      ...firstCluster.map((entry) => entry.centerPoint.bearingDegrees),
+    ]) <= thresholdDegrees) {
       firstCluster.unshift(...lastCluster);
       clusters.pop();
     }
@@ -508,6 +515,41 @@ function splitEntriesIntoDirectionClusters(
   return clusters;
 }
 
+// 一组 bearing 的“最小圆周包络角”定义为 360° 减去最大空隙。
+// 这样可以天然处理跨 0° 的情况，例如 [350°, 8°] 的包络角会得到 18° 而不是 342°。
+function computeMinimalCircularSpanDegrees(values: number[]): number {
+  if (values.length <= 1) {
+    return 0;
+  }
+
+  const sortedValues = [...values].sort((left, right) => left - right);
+  let largestGap = 0;
+
+  for (let index = 0; index < sortedValues.length; index += 1) {
+    const current = sortedValues[index]!;
+    const next = sortedValues[(index + 1) % sortedValues.length]!;
+    const gap = circularAngleDeltaDegrees(current, next);
+    if (gap > largestGap) {
+      largestGap = gap;
+    }
+  }
+
+  return 360 - largestGap;
+}
+
+function canAppendToDirectionCluster(
+  clusterEntries: NormalizedPolarFeatureSummary[],
+  candidate: NormalizedPolarFeatureSummary,
+  thresholdDegrees: number,
+): boolean {
+  return computeMinimalCircularSpanDegrees([
+    ...clusterEntries.map((entry) => entry.centerPoint.bearingDegrees),
+    candidate.centerPoint.bearingDegrees,
+  ]) <= thresholdDegrees;
+}
+
+// clusterLabel 的中心角适合用圆周均值；
+// 如果直接做普通平均，359° 和 1° 会被错误地算成 180°。
 function computeCircularMeanDegrees(values: number[]): number {
   const { sinSum, cosSum } = values.reduce(
     (accumulator, value) => {

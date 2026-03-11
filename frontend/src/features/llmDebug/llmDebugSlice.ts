@@ -1,5 +1,5 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { postDebugLlmMessage, type ChatResponse } from '../../api/chatApi';
+import { postDebugLlmMessage, type DebugLlmResponse } from '../../api/chatApi';
 import { DEFAULT_LLM_DEBUG_SYSTEM_PROMPT } from './defaultSystemPrompt';
 
 interface LlmDebugState {
@@ -7,6 +7,7 @@ interface LlmDebugState {
   message: string;
   loading: boolean;
   reply: string | null;
+  reasoning: string | null;
   error: string | null;
 }
 
@@ -15,13 +16,14 @@ const initialState: LlmDebugState = {
   message: '',
   loading: false,
   reply: null,
+  reasoning: null,
   error: null,
 };
 
 // 这个 slice 专门服务 debug/llm-environment 页面。
 // 它和首页 chat 分开，避免调试时的系统提示词、消息内容污染首页的简单聊天体验。
 export const submitDebugLlmMessage = createAsyncThunk<
-  ChatResponse,
+  DebugLlmResponse,
   { systemPrompt: string; message: string },
   { rejectValue: string }
 >('llmDebug/submitDebugLlmMessage', async (input, { rejectWithValue }) => {
@@ -58,13 +60,16 @@ const llmDebugSlice = createSlice({
       .addCase(submitDebugLlmMessage.pending, (state) => {
         state.loading = true;
         state.error = null;
+        state.reasoning = null;
       })
       .addCase(submitDebugLlmMessage.fulfilled, (state, action) => {
         state.loading = false;
         state.reply = action.payload.reply;
+        state.reasoning = action.payload.reasoning;
       })
       .addCase(submitDebugLlmMessage.rejected, (state, action) => {
         state.loading = false;
+        state.reasoning = null;
         state.error = action.payload || 'Unknown error.';
       });
   },
