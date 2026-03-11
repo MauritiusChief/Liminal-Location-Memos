@@ -10,6 +10,8 @@ export interface PromptPreview {
 const BUILDING_AND_POI_TAG_KEYS = ['name', 'brand', ...POI_TAG_KEYS, 'building'] as const;
 const LINE_DETAIL_TAG_KEYS = ['name', ...ROAD_TAG_KEYS] as const;
 const AREA_DETAIL_TAG_KEYS = ['name', ...AREA_TAG_KEYS] as const;
+const LEVEL3_REPRESENTATIVE_MIN_ANGLE = 5;
+const LEVEL3_REPRESENTATIVE_LIMIT = 4;
 
 // 这个文件把 grid / polar 结果压成 LLM 更容易直接阅读的中文文本。
 // 它不重新做几何计算，只负责组织层级、排序和文本格式。
@@ -121,7 +123,7 @@ function buildPolarLevelBlock(
   includeBuildingAndPoi: boolean,
 ): string {
   const groupedEntries = new Map<string, NormalizedPolarFeatureSummary[]>();
-  const levelDesc = {1: "100m~30m", 2: "300m~100m", 3: "1km~300m"}
+  const levelDesc = { 1: '100m~30m', 2: '300m~100m', 3: '1km~300m' };
 
   for (const summary of summaries) {
     if (includeBuildingAndPoi ? !isBuildingOrPoiCategory(summary.category) : isBuildingOrPoiCategory(summary.category)) {
@@ -138,11 +140,35 @@ function buildPolarLevelBlock(
   }
 
   const groupLines = Array.from(groupedEntries.entries()).map(([label, entries]) => {
-    const itemLines = entries.flatMap((summary) => buildPolarFeatureLines(summary));
-    return [label + ':','', ...itemLines,''].join('\n');
+    const itemLines = level === 3 ? buildPolarClusterSummaryLines(entries) : entries.flatMap((summary) => buildPolarFeatureLines(summary));
+    return [`${label}:`, '', ...itemLines, ''].join('\n');
   });
 
   return [`#### 等级${level}(${levelDesc[level]})：`, ...groupLines].join('\n');
+}
+
+function buildPolarClusterSummaryLines(entries: NormalizedPolarFeatureSummary[]): string[] {
+  const sortedEntries = [...entries].sort((left, right) =>
+    right.widestSpan.angleWidthDegrees - left.widestSpan.angleWidthDegrees
+    || left.centerPoint.distanceMeters - right.centerPoint.distanceMeters
+    || left.osmId - right.osmId,
+  );
+  const representativeEntries = sortedEntries
+    .filter((entry) => entry.widestSpan.angleWidthDegrees >= LEVEL3_REPRESENTATIVE_MIN_ANGLE)
+    .slice(0, LEVEL3_REPRESENTATIVE_LIMIT);
+  const anchors = representativeEntries.length > 0 ? representativeEntries : sortedEntries.slice(0, 1);
+  const omittedCount = Math.max(0, entries.length - anchors.length);
+  const directionCluster = entries[0]!.directionCluster;
+  const hint = entries.length > anchors.length ? `，共${entries.length}个要素，展示${anchors.length}个代表要素，其余${omittedCount}个仅保留数量` : ""
+  const lines = [
+    `* 群中心方位${formatAngle(directionCluster.centerBearingDegrees)}`+hint,
+  ];
+
+  for (const anchor of anchors) {
+    lines.push(...buildPolarFeatureLines(anchor));
+  }
+
+  return lines;
 }
 
 function buildPolarFeatureLines(summary: NormalizedPolarFeatureSummary): string[] {

@@ -39,12 +39,21 @@ export interface PolarAngularSpan {
   angleWidthDegrees: number;
 }
 
+export interface PolarDirectionCluster {
+  clusterId: string;
+  centerBearingDegrees: number;
+  memberCount: number;
+}
+
 export interface NormalizedPolarFeatureSummary {
   featureId: string;
   osmType: string;
   osmId: number;
   geometryType: string;
   category: PolarFeatureCategory;
+  baseLabel: string;
+  clusterLabel: string;
+  directionCluster: PolarDirectionCluster;
   displayLabel: string;
   visibleTags: PolarVisibleTag[];
   level: 1 | 2 | 3;
@@ -75,6 +84,10 @@ const POLAR_LEVELS: Array<{ level: 1 | 2 | 3; minExclusive: number; maxInclusive
   { level: 2, minExclusive: 100, maxInclusive: 300 },
   { level: 3, minExclusive: 300, maxInclusive: 1000 },
 ];
+const DIRECTION_CLUSTER_THRESHOLD_DEGREES: Record<2 | 3, number> = {
+  2: 25,
+  3: 20,
+};
 // polar 视图只消费 normalized features；
 // 它的任务不是重建几何，而是压缩出“对叙述最有用的视角信息”。
 export function buildNormalizedPolarView(
@@ -86,11 +99,12 @@ export function buildNormalizedPolarView(
     const summary = buildPolarFeatureSummary(feature, origin);
     return summary ? [summary] : [];
   });
+  const clusteredSummaries = applyDirectionClusters(summaries);
 
   const levels = POLAR_LEVELS.map<NormalizedPolarLevel>((definition) => ({
     level: definition.level,
     distanceRangeMeters: [definition.minExclusive, definition.maxInclusive],
-    features: summaries
+    features: clusteredSummaries
       .filter((summary) => summary.level === definition.level)
       .sort((left, right) => left.centerPoint.distanceMeters - right.centerPoint.distanceMeters || left.osmId - right.osmId),
   }));
@@ -142,7 +156,10 @@ function buildPolarFeatureSummary(
     osmId: feature.properties.osmId,
     geometryType: feature.geometry.type,
     category,
-    displayLabel: filteredPresentation.displayLabel,
+    baseLabel: filteredPresentation.baseLabel,
+    clusterLabel: filteredPresentation.baseLabel,
+    directionCluster: buildSingletonDirectionCluster(toFeatureId(feature), centerPoint.bearingDegrees),
+    displayLabel: filteredPresentation.baseLabel,
     visibleTags: filteredPresentation.visibleTags,
     level,
     nearestPoint,
@@ -255,7 +272,7 @@ function applyPolarLevelFilter(
   widestSpan: PolarAngularSpan,
 ): {
   shouldInclude: boolean;
-  displayLabel: string;
+  baseLabel: string;
   visibleTags: PolarVisibleTag[];
 } {
   if (level === 1) {
@@ -274,32 +291,32 @@ function applyLevel1Filter(
   category: PolarFeatureCategory,
 ): {
   shouldInclude: boolean;
-  displayLabel: string;
+  baseLabel: string;
   visibleTags: PolarVisibleTag[];
 } {
   switch (category) {
     case 'building':
       return {
         shouldInclude: true,
-        displayLabel: buildBuildingBaseLabel(feature as never),
+        baseLabel: buildBuildingBaseLabel(feature as never),
         visibleTags: collectVisibleTags(feature, ['name', 'brand', ...POI_TAG_KEYS, 'building']),
       };
     case 'poi':
       return {
         shouldInclude: true,
-        displayLabel: getPoiDisplayLabel(feature.properties.tags),
+        baseLabel: getPoiDisplayLabel(feature.properties.tags),
         visibleTags: collectVisibleTags(feature, ['name', 'brand', ...POI_TAG_KEYS]),
       };
     case 'line':
       return {
         shouldInclude: true,
-        displayLabel: getRoadDisplayLabel(feature.properties.tags),
+        baseLabel: getRoadDisplayLabel(feature.properties.tags),
         visibleTags: collectVisibleTags(feature, ['name', ...ROAD_TAG_KEYS]),
       };
     case 'area':
       return {
         shouldInclude: true,
-        displayLabel: getAreaDisplayLabel(feature.properties.tags),
+        baseLabel: getAreaDisplayLabel(feature.properties.tags),
         visibleTags: collectVisibleTags(feature, ['name', ...AREA_TAG_KEYS]),
       };
   }
@@ -310,21 +327,21 @@ function applyLevel2Filter(
   category: PolarFeatureCategory,
 ): {
   shouldInclude: boolean;
-  displayLabel: string;
+  baseLabel: string;
   visibleTags: PolarVisibleTag[];
 } {
   switch (category) {
     case 'building':
       return {
         shouldInclude: true,
-        displayLabel: buildBuildingBaseLabel(feature as never),
+        baseLabel: buildBuildingBaseLabel(feature as never),
         visibleTags: collectVisibleTags(feature, ['building', 'name', 'brand']),
       };
     case 'poi': {
       const primaryTag = getPrimaryVisibleTag(feature, POI_TAG_KEYS);
       return {
         shouldInclude: primaryTag !== null,
-        displayLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'poi',
+        baseLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'poi',
         visibleTags: primaryTag ? [primaryTag] : [],
       };
     }
@@ -332,7 +349,7 @@ function applyLevel2Filter(
       const primaryTag = getPrimaryVisibleTag(feature, ROAD_TAG_KEYS);
       return {
         shouldInclude: primaryTag !== null,
-        displayLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'way',
+        baseLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'way',
         visibleTags: primaryTag ? [primaryTag] : [],
       };
     }
@@ -340,7 +357,7 @@ function applyLevel2Filter(
       const primaryTag = getPrimaryVisibleTag(feature, AREA_TAG_KEYS);
       return {
         shouldInclude: primaryTag !== null,
-        displayLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'area',
+        baseLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'area',
         visibleTags: primaryTag ? [primaryTag] : [],
       };
     }
@@ -353,7 +370,7 @@ function applyLevel3Filter(
   widestSpan: PolarAngularSpan,
 ): {
   shouldInclude: boolean;
-  displayLabel: string;
+  baseLabel: string;
   visibleTags: PolarVisibleTag[];
 } {
   switch (category) {
@@ -361,14 +378,14 @@ function applyLevel3Filter(
       const buildingValue = trimTagValue(feature.properties.tags.building);
       return {
         shouldInclude: true,
-        displayLabel: getFallbackBuildingLabel(buildingValue || undefined),
+        baseLabel: getFallbackBuildingLabel(buildingValue || undefined),
         visibleTags: buildingValue ? [{ key: 'building', value: buildingValue }] : [],
       };
     }
     case 'poi':
       return {
         shouldInclude: false,
-        displayLabel: 'poi',
+        baseLabel: 'poi',
         visibleTags: [],
       };
     case 'line': {
@@ -376,7 +393,7 @@ function applyLevel3Filter(
       const shouldInclude = primaryTag !== null && widestSpan.angleWidthDegrees >= 5;
       return {
         shouldInclude,
-        displayLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'way',
+        baseLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'way',
         visibleTags: shouldInclude && primaryTag ? [primaryTag] : [],
       };
     }
@@ -385,11 +402,137 @@ function applyLevel3Filter(
       const shouldInclude = primaryTag !== null && widestSpan.angleWidthDegrees >= 5;
       return {
         shouldInclude,
-        displayLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'area',
+        baseLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'area',
         visibleTags: shouldInclude && primaryTag ? [primaryTag] : [],
       };
     }
   }
+}
+
+function applyDirectionClusters(summaries: NormalizedPolarFeatureSummary[]): NormalizedPolarFeatureSummary[] {
+  const groupedByLevelAndLabel = new Map<string, NormalizedPolarFeatureSummary[]>();
+
+  for (const summary of summaries) {
+    const key = `${summary.level}:${summary.baseLabel}`;
+    const existingGroup = groupedByLevelAndLabel.get(key) || [];
+    existingGroup.push(summary);
+    groupedByLevelAndLabel.set(key, existingGroup);
+  }
+
+  const clustered = new Map<string, NormalizedPolarFeatureSummary>();
+
+  for (const summary of summaries) {
+    if (summary.level === 1) {
+      clustered.set(summary.featureId, {
+        ...summary,
+        clusterLabel: summary.baseLabel,
+        displayLabel: summary.baseLabel,
+        directionCluster: buildSingletonDirectionCluster(summary.featureId, summary.centerPoint.bearingDegrees),
+      });
+    }
+  }
+
+  for (const entries of groupedByLevelAndLabel.values()) {
+    const level = entries[0]?.level;
+    if (level !== 2 && level !== 3) {
+      continue;
+    }
+
+    const clusters = splitEntriesIntoDirectionClusters(entries, DIRECTION_CLUSTER_THRESHOLD_DEGREES[level]);
+    clusters.forEach((clusterEntries, clusterIndex) => {
+      const centerBearingDegrees = computeCircularMeanDegrees(
+        clusterEntries.map((entry) => entry.centerPoint.bearingDegrees),
+      );
+      const clusterId = `${entries[0]!.baseLabel}#L${level}C${clusterIndex + 1}`;
+      const clusterLabel = `${entries[0]!.baseLabel}[${Math.round(centerBearingDegrees)}°群]`;
+
+      clusterEntries.forEach((entry) => {
+        clustered.set(entry.featureId, {
+          ...entry,
+          clusterLabel,
+          displayLabel: clusterLabel,
+          directionCluster: {
+            clusterId,
+            centerBearingDegrees,
+            memberCount: clusterEntries.length,
+          },
+        });
+      });
+    });
+  }
+
+  return summaries.map((summary) => clustered.get(summary.featureId) || summary);
+}
+
+function splitEntriesIntoDirectionClusters(
+  entries: NormalizedPolarFeatureSummary[],
+  thresholdDegrees: number,
+): NormalizedPolarFeatureSummary[][] {
+  if (entries.length <= 1) {
+    return [entries];
+  }
+
+  const sortedEntries = [...entries].sort(
+    (left, right) => left.centerPoint.bearingDegrees - right.centerPoint.bearingDegrees,
+  );
+  const clusters: NormalizedPolarFeatureSummary[][] = [[sortedEntries[0]!]];
+
+  for (let index = 1; index < sortedEntries.length; index += 1) {
+    const previous = sortedEntries[index - 1]!;
+    const current = sortedEntries[index]!;
+    const currentCluster = clusters[clusters.length - 1]!;
+    const gap = circularAngleDeltaDegrees(previous.centerPoint.bearingDegrees, current.centerPoint.bearingDegrees);
+
+    if (gap <= thresholdDegrees) {
+      currentCluster.push(current);
+      continue;
+    }
+
+    clusters.push([current]);
+  }
+
+  if (clusters.length > 1) {
+    const firstCluster = clusters[0]!;
+    const lastCluster = clusters[clusters.length - 1]!;
+    const wrapGap = circularAngleDeltaDegrees(
+      lastCluster[lastCluster.length - 1]!.centerPoint.bearingDegrees,
+      firstCluster[0]!.centerPoint.bearingDegrees,
+    );
+
+    if (wrapGap <= thresholdDegrees) {
+      firstCluster.unshift(...lastCluster);
+      clusters.pop();
+    }
+  }
+
+  return clusters;
+}
+
+function computeCircularMeanDegrees(values: number[]): number {
+  const { sinSum, cosSum } = values.reduce(
+    (accumulator, value) => {
+      const radians = (value * Math.PI) / 180;
+      return {
+        sinSum: accumulator.sinSum + Math.sin(radians),
+        cosSum: accumulator.cosSum + Math.cos(radians),
+      };
+    },
+    { sinSum: 0, cosSum: 0 },
+  );
+  const radians = Math.atan2(sinSum, cosSum);
+  return normalizeDegrees((radians * 180) / Math.PI);
+}
+
+function buildSingletonDirectionCluster(featureId: string, centerBearingDegrees: number): PolarDirectionCluster {
+  return {
+    clusterId: `${featureId}#solo`,
+    centerBearingDegrees,
+    memberCount: 1,
+  };
+}
+
+function normalizeDegrees(value: number): number {
+  return ((value % 360) + 360) % 360;
 }
 
 function collectVisibleTags(

@@ -72,6 +72,12 @@ export interface PolarAngularSpan {
   angleWidthDegrees: number;
 }
 
+export interface PolarDirectionCluster {
+  clusterId: string;
+  centerBearingDegrees: number;
+  memberCount: number;
+}
+
 export type PolarFeatureCategory = 'building' | 'poi' | 'line' | 'area';
 
 export interface PolarVisibleTag {
@@ -85,6 +91,9 @@ export interface NormalizedPolarFeatureSummary {
   osmId: number;
   geometryType: string;
   category: PolarFeatureCategory;
+  baseLabel: string;
+  clusterLabel: string;
+  directionCluster: PolarDirectionCluster;
   displayLabel: string;
   visibleTags: PolarVisibleTag[];
   level: 1 | 2 | 3;

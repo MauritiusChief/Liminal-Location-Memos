@@ -8,6 +8,7 @@ import type {
   PolarVisibleTag,
   PolarAngularSpan,
   PolarCoordinateSample,
+  PolarDirectionCluster,
 } from '../services/overpassPolar.js';
 import type {
   ContainedPoi,
@@ -51,5 +52,6 @@ export type {
   PolarVisibleTag,
   PolarAngularSpan,
   PolarCoordinateSample,
+  PolarDirectionCluster,
   RelationReference,
 };
