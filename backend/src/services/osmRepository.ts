@@ -33,16 +33,18 @@ type FeatureRow = {
 
 const BUILDING_TAG_COLUMNS = ['name', 'building', 'height', 'level', 'building_levels'] as const;
 const POI_TAG_COLUMNS = ['name', 'brand', ...POI_TAG_KEYS] as const;
-const LINEAR_AREA_TAG_COLUMNS = ['name', ...ROAD_TAG_KEYS, ...AREA_TAG_KEYS] as const;
+const ROAD_TAG_COLUMNS = ['name', ...ROAD_TAG_KEYS] as const;
+const AREA_TAG_COLUMNS = ['name', ...AREA_TAG_KEYS] as const;
 
 export async function syncNormalizedFeaturesToDb(
   features: NormalizedFeature[],
   coverage: { lat: number; lon: number; radius: number },
-): Promise<{ buildings: number; pois: number; linearAreas: number }> {
+): Promise<{ buildings: number; pois: number; lines: number; areas: number }> {
   return withTransaction(async (client) => {
     let buildings = 0;
     let pois = 0;
-    let linearAreas = 0;
+    let lines = 0;
+    let areas = 0;
 
     for (const feature of features) {
       if (isDbBuildingFeature(feature)) {
@@ -57,9 +59,15 @@ export async function syncNormalizedFeaturesToDb(
         continue;
       }
 
-      if (isDbLinearOrAreaFeature(feature)) {
-        await upsertLinearAreaFeature(client, feature);
-        linearAreas += 1;
+      if (isDbLineFeature(feature)) {
+        await upsertLineFeature(client, feature);
+        lines += 1;
+        continue;
+      }
+
+      if (isDbAreaFeature(feature)) {
+        await upsertAreaFeature(client, feature);
+        areas += 1;
       }
     }
 
@@ -71,21 +79,23 @@ export async function syncNormalizedFeaturesToDb(
       [coverage.lon, coverage.lat, coverage.radius],
     );
 
-    return { buildings, pois, linearAreas };
+    return { buildings, pois, lines, areas };
   });
 }
 
 export async function fetchFeaturesFromDb(request: NormalizedOverpassRequest): Promise<NormalizedFeature[]> {
-  const [buildingRows, poiRows, linearAreaRows] = await Promise.all([
+  const [buildingRows, poiRows, lineRows, areaRows] = await Promise.all([
     fetchBuildingsWithContainedPois(request),
     fetchPois(request),
-    fetchLinearAreaFeatures(request),
+    fetchLineFeatures(request),
+    fetchAreaFeatures(request),
   ]);
 
   return [
     ...buildingRows.map((row) => toNormalizedBuildingFeature(row)),
     ...poiRows.map((row) => toNormalizedFeature(row)),
-    ...linearAreaRows.map((row) => toNormalizedFeature(row)),
+    ...lineRows.map((row) => toNormalizedFeature(row)),
+    ...areaRows.map((row) => toNormalizedFeature(row)),
   ];
 }
 
@@ -260,7 +270,7 @@ async function fetchPois(request: NormalizedOverpassRequest): Promise<FeatureRow
   return result.rows;
 }
 
-async function fetchLinearAreaFeatures(request: NormalizedOverpassRequest): Promise<FeatureRow[]> {
+async function fetchLineFeatures(request: NormalizedOverpassRequest): Promise<FeatureRow[]> {
   const result = await query<FeatureRow>(
     `
     WITH query_circle AS (
@@ -278,7 +288,39 @@ async function fetchLinearAreaFeatures(request: NormalizedOverpassRequest): Prom
           'name', f.name,
           'highway', f.highway,
           'railway', f.railway,
-          'waterway', f.waterway,
+          'waterway', f.waterway
+        ) || f.tags_extra
+      )::jsonb AS tags,
+      f.relations,
+      f.meta,
+      f.tainted
+    FROM osm_line_features f
+    CROSS JOIN query_circle qc
+    WHERE ST_Intersects(f.geom, qc.geom)
+    ORDER BY f.osm_id ASC
+    `,
+    [request.lon, request.lat, request.radius],
+  );
+
+  return result.rows;
+}
+
+async function fetchAreaFeatures(request: NormalizedOverpassRequest): Promise<FeatureRow[]> {
+  const result = await query<FeatureRow>(
+    `
+    WITH query_circle AS (
+      SELECT ST_Buffer(
+        ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+        $3
+      )::geometry AS geom
+    )
+    SELECT
+      f.osm_type,
+      f.osm_id,
+      ST_AsGeoJSON(f.geom) AS geometry_geojson,
+      jsonb_strip_nulls(
+        jsonb_build_object(
+          'name', f.name,
           'landuse', f.landuse,
           'natural', f.natural,
           'leisure', f.leisure,
@@ -288,7 +330,7 @@ async function fetchLinearAreaFeatures(request: NormalizedOverpassRequest): Prom
       f.relations,
       f.meta,
       f.tainted
-    FROM osm_linear_area_features f
+    FROM osm_area_features f
     CROSS JOIN query_circle qc
     WHERE ST_Intersects(f.geom, qc.geom)
     ORDER BY f.osm_id ASC
@@ -398,31 +440,67 @@ async function upsertPoiFeature(client: PoolClient, feature: NormalizedFeature):
   );
 }
 
-async function upsertLinearAreaFeature(client: PoolClient, feature: NormalizedFeature): Promise<void> {
+async function upsertLineFeature(client: PoolClient, feature: NormalizedFeature): Promise<void> {
   const tags = feature.properties.tags;
-  const tagsExtra = omitKeys(tags, LINEAR_AREA_TAG_COLUMNS);
+  const tagsExtra = omitKeys(tags, ROAD_TAG_COLUMNS);
 
   await client.query(
     `
-    INSERT INTO osm_linear_area_features (
-      osm_type, osm_id, feature_family, geom, name, highway, railway, waterway, landuse, natural, leisure, amenity,
-      tags_extra, relations, meta, tainted, last_synced_at
+    INSERT INTO osm_line_features (
+      osm_type, osm_id, geom, name, highway, railway, waterway, tags_extra, relations, meta, tainted, last_synced_at
     )
     VALUES (
-      $1, $2, $3, ST_SetSRID(ST_GeomFromGeoJSON($4), 4326),
-      $5, $6, $7, $8, $9, $10, $11, $12,
-      $13::jsonb, $14::jsonb, $15::jsonb, $16, now()
+      $1, $2, ST_SetSRID(ST_GeomFromGeoJSON($3), 4326),
+      $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11, now()
     )
     ON CONFLICT (osm_type, osm_id)
     DO UPDATE SET
-      feature_family = EXCLUDED.feature_family,
       geom = EXCLUDED.geom,
       name = EXCLUDED.name,
       highway = EXCLUDED.highway,
       railway = EXCLUDED.railway,
       waterway = EXCLUDED.waterway,
+      tags_extra = EXCLUDED.tags_extra,
+      relations = EXCLUDED.relations,
+      meta = EXCLUDED.meta,
+      tainted = EXCLUDED.tainted,
+      last_synced_at = now()
+    `,
+    [
+      feature.properties.osmType,
+      feature.properties.osmId,
+      JSON.stringify(feature.geometry),
+      tags.name || null,
+      tags.highway || null,
+      tags.railway || null,
+      tags.waterway || null,
+      JSON.stringify(tagsExtra),
+      JSON.stringify(feature.properties.relations),
+      JSON.stringify(feature.properties.meta),
+      feature.properties.tainted,
+    ],
+  );
+}
+
+async function upsertAreaFeature(client: PoolClient, feature: NormalizedFeature): Promise<void> {
+  const tags = feature.properties.tags;
+  const tagsExtra = omitKeys(tags, AREA_TAG_COLUMNS);
+
+  await client.query(
+    `
+    INSERT INTO osm_area_features (
+      osm_type, osm_id, geom, name, landuse, "natural", leisure, amenity, tags_extra, relations, meta, tainted, last_synced_at
+    )
+    VALUES (
+      $1, $2, ST_SetSRID(ST_GeomFromGeoJSON($3), 4326),
+      $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, now()
+    )
+    ON CONFLICT (osm_type, osm_id)
+    DO UPDATE SET
+      geom = EXCLUDED.geom,
+      name = EXCLUDED.name,
       landuse = EXCLUDED.landuse,
-      natural = EXCLUDED.natural,
+      "natural" = EXCLUDED.natural,
       leisure = EXCLUDED.leisure,
       amenity = EXCLUDED.amenity,
       tags_extra = EXCLUDED.tags_extra,
@@ -434,12 +512,8 @@ async function upsertLinearAreaFeature(client: PoolClient, feature: NormalizedFe
     [
       feature.properties.osmType,
       feature.properties.osmId,
-      isPolygonalGeometry(feature.geometry) ? 'area' : 'line',
       JSON.stringify(feature.geometry),
       tags.name || null,
-      tags.highway || null,
-      tags.railway || null,
-      tags.waterway || null,
       tags.landuse || null,
       tags.natural || null,
       tags.leisure || null,
@@ -493,14 +567,14 @@ function isDbPoiFeature(feature: NormalizedFeature): boolean {
   return isPointGeometry(feature.geometry) && POI_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
 }
 
-function isDbLinearOrAreaFeature(feature: NormalizedFeature): boolean {
-  if (isPolygonalGeometry(feature.geometry)) {
-    return AREA_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
-  }
-
+function isDbLineFeature(feature: NormalizedFeature): boolean {
   const geometryType = feature.geometry.type;
   const isLineGeometry = geometryType === 'LineString' || geometryType === 'MultiLineString';
   return isLineGeometry && ROAD_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
+}
+
+function isDbAreaFeature(feature: NormalizedFeature): boolean {
+  return isPolygonalGeometry(feature.geometry) && AREA_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
 }
 
 function omitKeys<T extends string>(source: Record<string, string>, keys: readonly T[]): Record<string, string> {

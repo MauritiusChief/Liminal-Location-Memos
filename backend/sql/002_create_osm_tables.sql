@@ -41,15 +41,27 @@ CREATE TABLE IF NOT EXISTS osm_pois (
   CONSTRAINT osm_pois_pk PRIMARY KEY (osm_type, osm_id)
 );
 
-CREATE TABLE IF NOT EXISTS osm_linear_area_features (
+CREATE TABLE IF NOT EXISTS osm_line_features (
   osm_type text NOT NULL,
   osm_id bigint NOT NULL,
-  feature_family text NOT NULL CHECK (feature_family IN ('line', 'area')),
   geom geometry(Geometry, 4326) NOT NULL,
   name text NULL,
   highway text NULL,
   railway text NULL,
   waterway text NULL,
+  tags_extra jsonb NOT NULL DEFAULT '{}'::jsonb,
+  relations jsonb NOT NULL DEFAULT '[]'::jsonb,
+  meta jsonb NOT NULL DEFAULT '{}'::jsonb,
+  tainted boolean NOT NULL DEFAULT false,
+  last_synced_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT osm_line_features_pk PRIMARY KEY (osm_type, osm_id)
+);
+
+CREATE TABLE IF NOT EXISTS osm_area_features (
+  osm_type text NOT NULL,
+  osm_id bigint NOT NULL,
+  geom geometry(Geometry, 4326) NOT NULL,
+  name text NULL,
   landuse text NULL,
   "natural" text NULL,
   leisure text NULL,
@@ -59,7 +71,7 @@ CREATE TABLE IF NOT EXISTS osm_linear_area_features (
   meta jsonb NOT NULL DEFAULT '{}'::jsonb,
   tainted boolean NOT NULL DEFAULT false,
   last_synced_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT osm_linear_area_features_pk PRIMARY KEY (osm_type, osm_id)
+  CONSTRAINT osm_area_features_pk PRIMARY KEY (osm_type, osm_id)
 );
 
 CREATE TABLE IF NOT EXISTS osm_sync_coverage (
@@ -72,9 +84,11 @@ CREATE TABLE IF NOT EXISTS osm_sync_coverage (
 
 CREATE INDEX IF NOT EXISTS osm_buildings_geom_gix ON osm_buildings USING GIST (geom);
 CREATE INDEX IF NOT EXISTS osm_pois_geom_gix ON osm_pois USING GIST (geom);
-CREATE INDEX IF NOT EXISTS osm_linear_area_features_geom_gix ON osm_linear_area_features USING GIST (geom);
+CREATE INDEX IF NOT EXISTS osm_line_features_geom_gix ON osm_line_features USING GIST (geom);
+CREATE INDEX IF NOT EXISTS osm_area_features_geom_gix ON osm_area_features USING GIST (geom);
 CREATE INDEX IF NOT EXISTS osm_sync_coverage_center_gix ON osm_sync_coverage USING GIST (center);
 
 CREATE INDEX IF NOT EXISTS osm_buildings_tags_extra_gin ON osm_buildings USING GIN (tags_extra);
 CREATE INDEX IF NOT EXISTS osm_pois_tags_extra_gin ON osm_pois USING GIN (tags_extra);
-CREATE INDEX IF NOT EXISTS osm_linear_area_features_tags_extra_gin ON osm_linear_area_features USING GIN (tags_extra);
+CREATE INDEX IF NOT EXISTS osm_line_features_tags_extra_gin ON osm_line_features USING GIN (tags_extra);
+CREATE INDEX IF NOT EXISTS osm_area_features_tags_extra_gin ON osm_area_features USING GIN (tags_extra);

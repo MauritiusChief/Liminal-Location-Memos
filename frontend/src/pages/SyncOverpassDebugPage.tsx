@@ -78,13 +78,14 @@ export function SyncOverpassDebugPage() {
       <h3>Sync Result</h3>
       <p>
         Feature count: {syncResult?.featureCount ?? 'n/a'} | buildings: {syncResult?.counts.buildings ?? 'n/a'} | pois:{' '}
-        {syncResult?.counts.pois ?? 'n/a'} | linearAreas: {syncResult?.counts.linearAreas ?? 'n/a'} | coverage recorded:{' '}
+        {syncResult?.counts.pois ?? 'n/a'} | lines: {syncResult?.counts.lines ?? 'n/a'} | areas:{' '}
+        {syncResult?.counts.areas ?? 'n/a'} | coverage recorded:{' '}
         {syncResult ? String(syncResult.coverageRecorded) : 'n/a'}
       </p>
-      <button type="button" onClick={() => void handleCopyText(syncResult?.query || '')} disabled={!syncResult?.query}>
+      {/* <button type="button" onClick={() => void handleCopyText(syncResult?.query || '')} disabled={!syncResult?.query}>
         Copy Overpass QL
-      </button>
-      <pre style={{ border: '1px solid', maxHeight: '300px', overflowY: 'auto' }}>
+      </button> */}
+      <pre>
         {syncResult?.query || 'No sync result yet.'}
       </pre>
 
@@ -107,7 +108,7 @@ export function SyncOverpassDebugPage() {
         {normalizedGeoJsonText || 'No normalized GeoJSON yet.'}
       </pre>
 
-      <h3>Micro Grid</h3>
+      {/* <h3>Micro Grid</h3>
       <button type="button" onClick={() => void handleCopyText(microGridText)} disabled={!microGridText}>
         Copy Micro Grid
       </button>
@@ -125,7 +126,7 @@ export function SyncOverpassDebugPage() {
       </button>
       <pre style={{ border: '1px solid', maxHeight: '400px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
         {promptPreviewText || 'No prompt preview yet.'}
-      </pre>
+      </pre> */}
 
       {syncError ? (
         <section>

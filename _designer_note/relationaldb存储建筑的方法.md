@@ -1,8 +1,9 @@
 
-三张表：
+四张表：
 * 建筑表
 * POI表
-* 线元素与大面积元素表
+* 线元素表
+* 大面积元素表
 
 ``js
 export const POI_TAG_KEYS = ['shop', 'amenity', 'office', 'tourism', 'leisure', 'craft', 'healthcare'] as const;

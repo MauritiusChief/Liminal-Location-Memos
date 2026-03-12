@@ -54,7 +54,7 @@
    - 这里不会附加 `containedPois`
 4. `syncNormalizedFeaturesToDb()`
    - 在 `backend/src/services/osmRepository.ts`
-   - 把 feature 分类写入三张主表
+   - 把 feature 分类写入四张表里的三类业务表
    - 并写入 `osm_sync_coverage`
 
 这条链路的目的：
@@ -70,7 +70,7 @@
 
 1. `fetchFeaturesFromDb()`
    - 在 `backend/src/services/osmRepository.ts`
-   - 按查询圆从三张表取数
+   - 按查询圆从建筑、POI、线、面四路取数
    - 建筑的 `containedPois` 由 PostGIS SQL 计算
 2. 组装成 `NormalizedFeatureCollection`
 3. `buildNormalizedMicroGrid()`
@@ -93,6 +93,8 @@
 - `backend/src/services/osmRepository.ts`
   - 负责数据库写入和数据库读取
   - 也负责用 PostGIS 算建筑包含 POI
+  - 道路、铁路、水系等写入 `osm_line_features`
+  - landuse / natural / leisure / amenity 面写入 `osm_area_features`
 - `backend/src/services/overpassGrid.ts`
   - 负责近场网格表示
 - `backend/src/services/overpassPolar.ts`

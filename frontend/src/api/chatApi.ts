@@ -188,7 +188,8 @@ export interface SyncOverpassToDbResponse {
   counts: {
     buildings: number;
     pois: number;
-    linearAreas: number;
+    lines: number;
+    areas: number;
   };
   coverageRecorded: boolean;
 }
