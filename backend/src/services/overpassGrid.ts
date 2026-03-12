@@ -53,6 +53,8 @@ export interface NormalizedMicroGrid {
 
 // 这一层只做一件事：把已经 normalize 好的 features 压成一个固定尺寸的微网格。
 // 它不再关心 Overpass 原始 JSON，也不重复做 normalize 阶段的业务规整。
+// 如果某个要素虽然在 normalize 里保留下来了，但和这 60m × 60m 的小范围格子没有相交，
+// 它会在这里被自然忽略；也就是说，grid 不会主动“删数据”，只是只消费近场相关部分。
 const GRID_EXTENT_METERS = 60 as const;
 const GRID_CELL_SIZE_METERS = 5 as const;
 const GRID_ROWS = 12 as const;

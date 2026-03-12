@@ -434,6 +434,10 @@ export function buildNormalizedOverpassQuery(request: NormalizedOverpassRequest)
 // 3. 先过滤“已被面语义覆盖”的 outer/inner 轮廓线。
 // 4. 再过滤“已被 relation 汇总线覆盖”的无标签成员线段。
 //
+// 这里不会按“原始查询半径”再次裁掉要素。
+// 也就是说，`out skel geom;` 带回来的查询范围外成员，只要最后形成了 geometry，
+// normalize 阶段通常都会保留下来；真正按距离裁剪，是 grid / polar 这种下游表示层各自再做。
+//
 // 这里使用 flatProperties: false，是为了保留 tags / meta / relations 的分层信息。
 // 如果改成拍平结构，后面判断一条线是不是某个 relation 的成员会更难理解。
 export function normalizeOverpassData(

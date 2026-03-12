@@ -178,6 +178,9 @@ function clipFeatureCoordinatesToRadius(
   origin: [number, number],
   maxRadiusMeters: number,
 ): [number, number][] {
+  // polar 视图会在这里显式按最大半径裁剪坐标。
+  // 所以即便 Overpass 因为 `out skel geom;` 带回了查询范围外的成员几何，
+  // 只要这些坐标全部落在 1km 外，这个要素在 polar 阶段就会被整体忽略。
   return extractAllCoordinates(geometry).filter((coordinate) => distanceBetweenCoordinates(origin, coordinate) <= maxRadiusMeters);
 }
 
@@ -339,7 +342,7 @@ function applyLevel2Filter(
       return {
         shouldInclude: true,
         baseLabel: buildBuildingBaseLabel(feature as never),
-        visibleTags: collectVisibleTags(feature, ['building', 'name', 'brand']),
+        visibleTags: collectVisibleTags(feature, ['building', 'height', 'level', 'building:levels', 'name', 'brand']),
       };
     case 'poi': {
       const primaryTag = getPrimaryVisibleTag(feature, POI_TAG_KEYS);
@@ -383,7 +386,7 @@ function applyLevel3Filter(
       return {
         shouldInclude: true,
         baseLabel: getFallbackBuildingLabel(buildingValue || undefined),
-        visibleTags: buildingValue ? [{ key: 'building', value: buildingValue }] : [],
+        visibleTags: collectVisibleTags(feature, ['building', 'height', 'level', 'building:levels']),
       };
     }
     case 'poi':
