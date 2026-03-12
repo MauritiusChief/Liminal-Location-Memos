@@ -1,16 +1,21 @@
 import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
+import type { DbFeatureDetail } from '../services/dbSceneTypes.js';
 import { generateReply, generateReplyWithSystemPrompt } from '../services/llm.js';
 import { buildNormalizedMicroGrid } from '../services/overpassGrid.js';
-import { fetchFeaturesFromDb, syncNormalizedFeaturesToDb } from '../services/osmRepository.js';
+import {
+  fetchFeatureDetailsFromDb,
+  fetchMicroGridFromDb,
+  fetchPolarFeaturesFromDb,
+  syncNormalizedFeaturesToDb,
+} from '../services/osmRepository.js';
 import { buildNormalizedPolarView } from '../services/overpassPolar.js';
 import { buildDefaultDebugSystemPrompt, buildNormalizationPrompt } from '../services/overpassPrompt.js';
 import {
   buildNormalizedOverpassQuery,
   convertOverpassToNormalizedFeatures,
   type NormalizedOverpassRequest,
-  type NormalizedFeatureCollection,
 } from '../services/overpassNormalization.js';
 import type { NormalizedOverpassRequestBody } from '../types/overpass.js';
 
@@ -29,44 +34,71 @@ interface OverpassRequestBody {
 
 export const apiRouter = Router();
 
-function buildFeatureSummary(geojson: NormalizedFeatureCollection) {
-  return geojson.features.map((feature) => ({
-    id: feature.id,
-    type: feature.geometry.type,
-    properties: feature.properties,
-  }));
-}
-
-function buildDbDiagnostics(geojson: NormalizedFeatureCollection) {
-  return {
-    totalNormalizedFeatures: geojson.features.length,
-    featureCountsByGeometryType: geojson.features.reduce<Record<string, number>>((counts, feature) => {
-      counts[feature.geometry.type] = (counts[feature.geometry.type] || 0) + 1;
+function buildDbDiagnostics(input: {
+  featureDetails: DbFeatureDetail[];
+  microGrid: ReturnType<typeof buildNormalizedMicroGrid>;
+  polarView: ReturnType<typeof buildNormalizedPolarView>;
+}) {
+  // 新 diagnostics 改为围绕“DB-native 投影结果”统计，
+  // 这样前端看到的数字就直接对应 grid / polar / prompt 的真实输入。
+  const featureCountsByCategory = input.featureDetails.reduce<Record<'building' | 'poi' | 'line' | 'area', number>>(
+    (counts, feature) => {
+      counts[feature.category] += 1;
       return counts;
-    }, {}),
-    taintedFeatures: geojson.features.filter((feature) => feature.properties.tainted).length,
+    },
+    { building: 0, poi: 0, line: 0, area: 0 },
+  );
+
+  return {
+    featureCountsByCategory,
+    totalFeatures: input.featureDetails.length,
+    populatedMicroGridCellCount: input.microGrid.enabled
+      ? input.microGrid.cells.flat().filter((cell) => cell.sourceFeatureIds.length > 0).length
+      : 0,
+    polarFeatureCount: input.polarView.levels.reduce((count, level) => count + level.features.length, 0),
   };
 }
 
-function buildNormalizationDebugPayload(
-  geojson: NormalizedFeatureCollection,
-  normalizedRequest: NormalizedOverpassRequest,
-) {
-  const diagnostics = buildDbDiagnostics(geojson);
-  const microGrid = buildNormalizedMicroGrid(geojson.features, normalizedRequest);
-  const polarView = buildNormalizedPolarView(geojson.features, normalizedRequest);
+function buildDbFeatureDetailIndex(featureDetails: DbFeatureDetail[]): Map<string, DbFeatureDetail> {
+  // 统一做成 featureId -> detail 索引，避免 grid/polar/prompt 各自重复扫描数组。
+  return new Map(featureDetails.map((feature) => [feature.featureId, feature]));
+}
+
+function buildNormalizationDebugPayload(input: {
+  normalizedRequest: NormalizedOverpassRequest;
+  featureDetails: DbFeatureDetail[];
+  microGridRecords: Awaited<ReturnType<typeof fetchMicroGridFromDb>>;
+  polarRecords: Awaited<ReturnType<typeof fetchPolarFeaturesFromDb>>;
+}) {
+  const featureDetailIndex = buildDbFeatureDetailIndex(input.featureDetails);
+  // 这里是 DB-native 调试链路的汇合点：
+  // repository 提供三份投影原料，service 层再分别拼出 grid / polar / prompt。
+  const microGrid = buildNormalizedMicroGrid({
+    request: input.normalizedRequest,
+    cells: input.microGridRecords,
+    featureDetails: featureDetailIndex,
+  });
+  const polarView = buildNormalizedPolarView({
+    records: input.polarRecords,
+    featureDetails: featureDetailIndex,
+    request: input.normalizedRequest,
+  });
   const promptPreview = {
     userPrompt: buildNormalizationPrompt({
-      request: normalizedRequest,
-      geojson,
+      request: input.normalizedRequest,
       microGrid,
       polarView,
+      featureDetails: featureDetailIndex,
     }),
   };
+  const diagnostics = buildDbDiagnostics({
+    featureDetails: input.featureDetails,
+    microGrid,
+    polarView,
+  });
 
   return {
-    featureSummary: buildFeatureSummary(geojson),
-    geojson,
+    featureSummary: input.featureDetails,
     diagnostics,
     microGrid,
     polarView,
@@ -212,17 +244,21 @@ apiRouter.post('/db/normalized-load', async (request, response) => {
   const normalizedRequest = parsed.value;
 
   try {
-    const features = await fetchFeaturesFromDb(normalizedRequest);
-    const geojson: NormalizedFeatureCollection = {
-      type: 'FeatureCollection',
-      features,
-    };
-    const debugPayload = buildNormalizationDebugPayload(geojson, normalizedRequest);
+    const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
+      fetchFeatureDetailsFromDb(normalizedRequest),
+      fetchMicroGridFromDb(normalizedRequest),
+      fetchPolarFeaturesFromDb(normalizedRequest),
+    ]);
+    const debugPayload = buildNormalizationDebugPayload({
+      normalizedRequest,
+      featureDetails,
+      microGridRecords,
+      polarRecords,
+    });
 
     response.json({
       query: '[db source]',
       ...debugPayload,
-      raw: undefined,
     });
   } catch (error) {
     response.status(502).json({

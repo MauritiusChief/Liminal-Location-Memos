@@ -1,4 +1,4 @@
-import type { NormalizedFeature, NormalizedFeatureCollection } from './overpassNormalization.js';
+import type { DbFeatureDetail } from './dbSceneTypes.js';
 import type { NormalizedMicroGrid } from './overpassGrid.js';
 import type { NormalizedPolarFeatureSummary, NormalizedPolarView } from './overpassPolar.js';
 import { AREA_TAG_KEYS, POI_TAG_KEYS, ROAD_TAG_KEYS, trimTagValue } from './overpassLabels.js';
@@ -35,19 +35,18 @@ const POLAR_LEVEL_PROMPT_CONFIG: Record<
   },
 };
 
-// 这个文件把 grid / polar 结果压成 LLM 更容易直接阅读的中文文本。
-// 它不重新做几何计算，只负责组织层级、排序和文本格式。
+// prompt 层只消费“已经投影好的场景结构”：
+// request + microGrid + polarView + 少量 feature detail。
+// 它不再回看完整 GeoJSON，也不负责任何空间计算。
 export function buildNormalizationPrompt(input: {
   request: { lat: number; lon: number; radius: number };
-  geojson: NormalizedFeatureCollection;
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
+  featureDetails: Map<string, DbFeatureDetail>;
 }): string {
-  const featureById = new Map(input.geojson.features.map((feature) => [toFeatureId(feature), feature]));
-
   const sections = [
     buildPromptIntro(input.request),
-    buildGridSection(input.microGrid, featureById),
+    buildGridSection(input.microGrid, input.featureDetails),
     buildPolarSection(input.polarView),
   ];
 
@@ -73,7 +72,7 @@ function buildPromptIntro(request: { lat: number; lon: number; radius: number })
 
 function buildGridSection(
   microGrid: NormalizedMicroGrid | undefined,
-  featureById: Map<string, NormalizedFeature>,
+  featureDetails: Map<string, DbFeatureDetail>,
 ): string {
   if (!microGrid || !microGrid.enabled) {
     return '## 等级0（30米内微网格）：半径不足，未生成微网格。';
@@ -84,6 +83,7 @@ function buildGridSection(
     new Set(
       microGrid.cells.flatMap((row) =>
         row.flatMap((cell) => {
+          // 空格子不额外展开细节，避免 prompt 被大量无意义条目淹没。
           if (cell.baseKind === 'empty' && cell.poiLabels.length === 0 && cell.roadLabels.length === 0) {
             return [];
           }
@@ -94,7 +94,7 @@ function buildGridSection(
     ),
   )
     .flatMap((featureId) => {
-      const feature = featureById.get(featureId);
+      const feature = featureDetails.get(featureId);
       if (!feature) {
         return [];
       }
@@ -114,19 +114,13 @@ function buildGridSection(
   ].join('\n');
 }
 
-function buildPolarSection(
-  polarView: NormalizedPolarView | undefined,
-): string {
+function buildPolarSection(polarView: NormalizedPolarView | undefined): string {
   if (!polarView) {
     return '## 等级1到等级3（30米到1公里极坐标摘要）：无';
   }
 
-  const buildingAndPoiBlocks = polarView.levels.map((level) =>
-    buildPolarLevelBlock(level.level, level.features, true),
-  );
-  const lineAndAreaBlocks = polarView.levels.map((level) =>
-    buildPolarLevelBlock(level.level, level.features, false),
-  );
+  const buildingAndPoiBlocks = polarView.levels.map((level) => buildPolarLevelBlock(level.level, level.features, true));
+  const lineAndAreaBlocks = polarView.levels.map((level) => buildPolarLevelBlock(level.level, level.features, false));
 
   return [
     '## 等级1到等级3（30米到1公里极坐标摘要）',
@@ -148,6 +142,7 @@ function buildPolarLevelBlock(
   const levelDesc = { 1: '100m~30m', 2: '300m~100m', 3: '1km~300m' };
 
   for (const summary of summaries) {
+    // building/poi 与 line/area 分开展示，是为了让 prompt 先读到更显著的环境对象。
     if (includeBuildingAndPoi ? !isBuildingOrPoiCategory(summary.category) : isBuildingOrPoiCategory(summary.category)) {
       continue;
     }
@@ -191,24 +186,24 @@ function buildPolarGroupBlock(
 
 function buildPolarClusterSummaryLines(level: 1 | 2 | 3, entries: NormalizedPolarFeatureSummary[]): string[] {
   const config = POLAR_LEVEL_PROMPT_CONFIG[level];
-  const sortedEntries = [...entries].sort((left, right) =>
-    right.widestSpan.angleWidthDegrees - left.widestSpan.angleWidthDegrees
-    || left.centerPoint.distanceMeters - right.centerPoint.distanceMeters
-    || left.osmId - right.osmId,
+  const sortedEntries = [...entries].sort(
+    (left, right) =>
+      right.widestSpan.angleWidthDegrees - left.widestSpan.angleWidthDegrees ||
+      left.centerPoint.distanceMeters - right.centerPoint.distanceMeters ||
+      left.osmId - right.osmId,
   );
   const representativeEntries = sortedEntries
     .filter((entry) => entry.widestSpan.angleWidthDegrees >= config.representativeMinAngleDegrees)
     .slice(0, config.representativeLimit);
   const anchors = representativeEntries.length > 0 ? representativeEntries : sortedEntries.slice(0, 1);
+  // 同一群里不把全部要素都展开，避免中远距离 prompt 过长失控。
   const omittedCount = Math.max(0, entries.length - anchors.length);
   const directionCluster = entries[0]!.directionCluster;
   const shouldShowOmissionSummary = omittedCount > 0 && entries.length > config.omissionSummaryMinGroupSize;
   const hint = shouldShowOmissionSummary
     ? `，共${entries.length}个要素，展示${anchors.length}个代表要素，其余${omittedCount}个仅保留数量`
     : '';
-  const lines = [
-    `* 群中心方位${formatAngle(directionCluster.centerBearingDegrees)}${hint}`,
-  ];
+  const lines = [`* 群中心方位${formatAngle(directionCluster.centerBearingDegrees)}${hint}`];
 
   for (const anchor of anchors) {
     lines.push(...buildPolarFeatureLines(anchor));
@@ -228,9 +223,9 @@ function buildPolarFeatureLines(summary: NormalizedPolarFeatureSummary): string[
   ];
 }
 
-function buildFeatureDetailEntry(feature: NormalizedFeature): string {
+function buildFeatureDetailEntry(feature: DbFeatureDetail): string {
   const detailTags = collectImportantTags(feature);
-  const lines = [`${getFeatureDisplayTitle(feature)} (id=${toFeatureId(feature)}):`];
+  const lines = [`${getFeatureDisplayTitle(feature)} (id=${feature.featureId}):`];
 
   if (detailTags.length > 0) {
     lines.push(...detailTags.map((tag) => `* ${tag}`));
@@ -241,9 +236,9 @@ function buildFeatureDetailEntry(feature: NormalizedFeature): string {
   return lines.join('\n');
 }
 
-function getFeatureDisplayTitle(feature: NormalizedFeature): string {
-  const name = trimTagValue(feature.properties.tags.name);
-  const brand = trimTagValue(feature.properties.tags.brand);
+function getFeatureDisplayTitle(feature: DbFeatureDetail): string {
+  const name = trimTagValue(feature.tags.name);
+  const brand = trimTagValue(feature.tags.brand);
 
   if (name) {
     return name;
@@ -254,42 +249,33 @@ function getFeatureDisplayTitle(feature: NormalizedFeature): string {
   }
 
   for (const key of [...POI_TAG_KEYS, ...ROAD_TAG_KEYS, ...AREA_TAG_KEYS, 'building'] as const) {
-    const value = trimTagValue(feature.properties.tags[key]);
+    const value = trimTagValue(feature.tags[key]);
     if (value) {
       return `${key}:${value}`;
     }
   }
 
-  return toFeatureId(feature);
+  return feature.featureId;
 }
 
-function collectImportantTags(feature: NormalizedFeature): string[] {
-  const keys = isBuildingOrPoiFeature(feature)
-    ? BUILDING_AND_POI_TAG_KEYS
-    : isLineFeature(feature)
-      ? LINE_DETAIL_TAG_KEYS
-      : AREA_DETAIL_TAG_KEYS;
+function collectImportantTags(feature: DbFeatureDetail): string[] {
+  // grid 细节区域的目标是“给人工检查和 prompt 补上下文”，
+  // 因此只挑各类别最关键的少数标签。
+  const keys =
+    feature.category === 'building' || feature.category === 'poi'
+      ? BUILDING_AND_POI_TAG_KEYS
+      : feature.category === 'line'
+        ? LINE_DETAIL_TAG_KEYS
+        : AREA_DETAIL_TAG_KEYS;
 
   return keys.flatMap((key) => {
-    const value = trimTagValue(feature.properties.tags[key]);
+    const value = trimTagValue(feature.tags[key]);
     return value ? [`${key}: ${value}`] : [];
   });
 }
 
-function isBuildingOrPoiFeature(feature: NormalizedFeature): boolean {
-  if (typeof feature.properties.tags.building === 'string') {
-    return true;
-  }
-
-  return POI_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
-}
-
 function isBuildingOrPoiCategory(category: NormalizedPolarFeatureSummary['category']): boolean {
   return category === 'building' || category === 'poi';
-}
-
-function isLineFeature(feature: NormalizedFeature): boolean {
-  return feature.geometry.type === 'LineString' || feature.geometry.type === 'MultiLineString';
 }
 
 function formatPolarSample(sample: { distanceMeters: number; bearingDegrees: number }): string {
@@ -298,8 +284,4 @@ function formatPolarSample(sample: { distanceMeters: number; bearingDegrees: num
 
 function formatAngle(angleDegrees: number): string {
   return `${Math.round(angleDegrees)}°`;
-}
-
-function toFeatureId(feature: NormalizedFeature): string {
-  return feature.id ? String(feature.id) : `${feature.properties.osmType}/${feature.properties.osmId}`;
 }

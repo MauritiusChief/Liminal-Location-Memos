@@ -153,6 +153,15 @@ export interface NormalizedFeatureCollection {
   features: NormalizedFeature[];
 }
 
+export type DbFeatureCategory = 'building' | 'poi' | 'line' | 'area';
+
+export interface DbNormalizationDiagnostics {
+  featureCountsByCategory: Record<DbFeatureCategory, number>;
+  totalFeatures: number;
+  populatedMicroGridCellCount: number;
+  polarFeatureCount: number;
+}
+
 export interface NormalizationDiagnostics {
   rawElementCounts: Record<string, number>;
   totalRawElements: number;
@@ -194,12 +203,26 @@ export interface SyncOverpassToDbResponse {
   coverageRecorded: boolean;
 }
 
-export interface DbDebugLoadResponse extends NormalizedOverpassResponse {
-  featureSummary: Array<{
-    id?: string;
-    type: string;
-    properties: NormalizedFeatureProperties;
-  }>;
+export interface DbFeatureSummary {
+  featureId: string;
+  osmType: string;
+  osmId: number;
+  category: DbFeatureCategory;
+  geometryType: string;
+  tags: Record<string, string>;
+  relations: RelationReference[];
+  meta: Record<string, string | number>;
+  tainted: boolean;
+  containedPois?: ContainedPoi[];
+}
+
+export interface DbDebugLoadResponse {
+  query: string;
+  diagnostics: DbNormalizationDiagnostics;
+  featureSummary: DbFeatureSummary[];
+  microGrid?: NormalizedMicroGrid;
+  polarView?: NormalizedPolarView;
+  promptPreview?: PromptPreview;
 }
 
 interface ErrorResponse {

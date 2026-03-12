@@ -73,7 +73,6 @@ export function NormalizationDebugPage() {
   }, [chartPolarView]);
 
   const featureSummaryText = normalizedResult ? JSON.stringify(normalizedResult.featureSummary, null, 2) : '';
-  const normalizedGeoJsonText = normalizedResult ? JSON.stringify(normalizedResult.geojson, null, 2) : '';
   const promptPreviewText = normalizedResult?.promptPreview?.userPrompt || '';
 
   const handleSyncSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -147,14 +146,6 @@ export function NormalizationDebugPage() {
       </button>
       <pre style={{ border: '1px solid', maxHeight: '600px', overflowY: 'auto' }}>
         {featureSummaryText || 'No feature summary yet.'}
-      </pre>
-
-      <h3>Normalized GeoJSON</h3>
-      <button type="button" onClick={() => void handleCopyText(normalizedGeoJsonText)} disabled={!normalizedGeoJsonText}>
-        Copy Normalized GeoJSON
-      </button>
-      <pre style={{ border: '1px solid', maxHeight: '600px', overflowY: 'auto' }}>
-        {normalizedGeoJsonText || 'No normalized GeoJSON yet.'}
       </pre>
 
       <h3>Micro Grid Debug</h3>

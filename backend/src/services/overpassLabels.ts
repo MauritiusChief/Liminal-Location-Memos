@@ -1,11 +1,14 @@
-import type { Feature, LineString, MultiLineString, MultiPolygon, Polygon } from 'geojson';
-import { isLinearGeometryType, isPolygonalGeometry } from './overpassGeometry.js';
-import type { ContainedPoi, NormalizedFeature, NormalizedFeatureProperties } from './overpassNormalization.js';
+import type { ContainedPoi } from './overpassNormalization.js';
 
 export const POI_TAG_KEYS = ['shop', 'amenity', 'office', 'tourism', 'leisure', 'craft', 'healthcare'] as const;
 export const AREA_TAG_KEYS = ['landuse', 'natural', 'leisure', 'amenity'] as const;
 export const ROAD_TAG_KEYS = ['highway', 'railway', 'waterway'] as const;
 const BUILDING_POI_LABEL_LIMIT = 1;
+
+export interface BuildingLabelSource {
+  tags: Record<string, string>;
+  containedPois?: ContainedPoi[];
+}
 
 // 这个文件专门承接“如何把 normalized feature 压成短标签”这类规则。
 // 这样 grid 和 polar 可以共享同一套文本风格，而不用各自维护一份相似但逐渐分叉的逻辑。
@@ -69,11 +72,11 @@ export function getAreaDisplayLabel(tags: Record<string, string>): string {
 // 建筑标签只负责回答“这个建筑本身该怎么称呼”，
 // POI / ROAD 的重叠显示由 grid 之类的上层结构再做额外拼接。
 export function buildBuildingBaseLabel(
-  feature: Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>,
+  feature: BuildingLabelSource,
 ): string {
-  const buildingName = trimTagValue(feature.properties.tags.name);
-  const fallbackBuildingLabel = getFallbackBuildingLabel(feature.properties.tags.building);
-  const containedPoi = getDisplayableContainedPois(feature.properties.containedPois);
+  const buildingName = trimTagValue(feature.tags.name);
+  const fallbackBuildingLabel = getFallbackBuildingLabel(feature.tags.building);
+  const containedPoi = getDisplayableContainedPois(feature.containedPois);
   const containedPoiLabel = containedPoi ? getPoiDisplayLabel(containedPoi.tags) : null;
 
   if (buildingName) {
@@ -85,33 +88,4 @@ export function buildBuildingBaseLabel(
   }
 
   return fallbackBuildingLabel;
-}
-
-// 这是给 polar 这类“单 feature 标签”场景准备的统一入口。
-// 它复用 grid 的文本规则，但不参与 cell 级别的 POI / ROAD 叠加拼接。
-export function buildFeatureDisplayLabel(feature: NormalizedFeature): string {
-  if (isPolygonalGeometry(feature.geometry) && typeof feature.properties.tags.building === 'string') {
-    return buildBuildingBaseLabel(feature as Feature<Polygon | MultiPolygon, NormalizedFeatureProperties>);
-  }
-
-  if (isLinearGeometryType(feature.geometry)) {
-    const roadLabel = getRoadDisplayLabel(feature.properties.tags);
-    if (roadLabel !== 'way') {
-      return roadLabel;
-    }
-  }
-
-  const poiLabel = getPoiDisplayLabel(feature.properties.tags);
-  if (poiLabel !== 'poi') {
-    return poiLabel;
-  }
-
-  if (isPolygonalGeometry(feature.geometry)) {
-    const areaLabel = getAreaDisplayLabel(feature.properties.tags);
-    if (areaLabel !== 'area') {
-      return areaLabel;
-    }
-  }
-
-  return `${feature.properties.osmType}/${feature.properties.osmId}`;
 }
