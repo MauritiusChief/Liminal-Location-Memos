@@ -166,7 +166,7 @@ async function fetchBuildingsWithContainedPois(request: NormalizedOverpassReques
         ST_X(p.geom) AS lon,
         ST_Y(p.geom) AS lat
       FROM poi_best_building pbb
-      JOIN osm_pois p
+      JOIN candidate_pois p
         ON p.osm_type = pbb.poi_osm_type
        AND p.osm_id = pbb.poi_osm_id
       WHERE pbb.row_number = 1
