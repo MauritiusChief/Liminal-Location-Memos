@@ -46,6 +46,10 @@ export async function syncNormalizedFeaturesToDb(
     let lines = 0;
     let areas = 0;
 
+    // 这里故意不是把 normalize 后的所有 feature 原样落库，
+    // 而是只保留“后续环境摘要真正会消费的几类对象”。
+    // 因此 DB 路径天然会比直接 `/overpass/normalize` 少一批 feature：
+    // 例如 highway=crossing 的点、行政区 label 点、route relation 线、boundary relation 面。
     for (const feature of features) {
       if (isDbBuildingFeature(feature)) {
         await upsertBuildingFeature(client, feature);
@@ -84,6 +88,8 @@ export async function syncNormalizedFeaturesToDb(
 }
 
 export async function fetchFeaturesFromDb(request: NormalizedOverpassRequest): Promise<NormalizedFeature[]> {
+  // DB 调试链路只能读回“之前真的入过库的子集”。
+  // 所以如果某类 feature 在 sync 阶段就被刻意忽略，这里不会再凭空恢复出来。
   const [buildingRows, poiRows, lineRows, areaRows] = await Promise.all([
     fetchBuildingsWithContainedPois(request),
     fetchPois(request),
@@ -564,16 +570,24 @@ function isDbBuildingFeature(feature: NormalizedFeature): boolean {
 }
 
 function isDbPoiFeature(feature: NormalizedFeature): boolean {
+  // 点要素这里收得很窄，只把可视作 POI 的功能点入库。
+  // 因而像 highway=crossing 这种道路附属点，或 relation 的 label node，
+  // 即使在 `/overpass/normalize` 里存在，也不会进入 `osm_pois`。
   return isPointGeometry(feature.geometry) && POI_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
 }
 
 function isDbLineFeature(feature: NormalizedFeature): boolean {
   const geometryType = feature.geometry.type;
   const isLineGeometry = geometryType === 'LineString' || geometryType === 'MultiLineString';
+
+  // 线要素只保留真正的 highway / railway / waterway。
+  // 所以像 route=bicycle 这种 relation 汇总线，因为主分类键不在 ROAD_TAG_KEYS 中，会被有意略过。
   return isLineGeometry && ROAD_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
 }
 
 function isDbAreaFeature(feature: NormalizedFeature): boolean {
+  // 面要素也不是“所有 Polygon 都入库”，只保留 landuse / natural / leisure / amenity 这几类环境面。
+  // 行政区 boundary、admin_level 之类虽然在 API 结果里能看到，但不属于当前 DB 摘要模型，因此不会写入。
   return isPolygonalGeometry(feature.geometry) && AREA_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
 }
 
