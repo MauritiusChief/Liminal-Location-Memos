@@ -23,6 +23,7 @@
    - 仍在 `overpassNormalization.ts`
    - 先把 raw OSM JSON 转成项目内部 `NormalizedFeature[]`
    - 再用 JS 内存几何逻辑给建筑附加 `containedPois`
+   - 组装成 `NormalizedFeatureCollection`
 4. `buildNormalizedMicroGrid()`
    - 在 `backend/src/services/overpassGrid.ts`
    - 生成近场 12x12 微网格

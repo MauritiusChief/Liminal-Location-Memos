@@ -87,6 +87,10 @@ export async function syncNormalizedFeaturesToDb(
   });
 }
 
+// #####################
+// #region 数据库提取函数
+// #####################
+
 export async function fetchFeaturesFromDb(request: NormalizedOverpassRequest): Promise<NormalizedFeature[]> {
   // DB 调试链路只能读回“之前真的入过库的子集”。
   // 所以如果某类 feature 在 sync 阶段就被刻意忽略，这里不会再凭空恢复出来。
@@ -347,6 +351,10 @@ async function fetchAreaFeatures(request: NormalizedOverpassRequest): Promise<Fe
   return result.rows;
 }
 
+// #####################
+// #region 插入数据库函数
+// #####################
+
 async function upsertBuildingFeature(client: PoolClient, feature: NormalizedFeature): Promise<void> {
   const tags = feature.properties.tags;
   const tagsExtra = omitKeys(tags, BUILDING_TAG_COLUMNS);
@@ -532,6 +540,10 @@ async function upsertAreaFeature(client: PoolClient, feature: NormalizedFeature)
   );
 }
 
+// ##################
+// #region 规整化函数
+// ##################
+
 function toNormalizedBuildingFeature(row: BuildingRow): NormalizedFeature {
   return {
     type: 'Feature',
@@ -564,6 +576,10 @@ function toNormalizedFeature(row: FeatureRow): NormalizedFeature {
     },
   };
 }
+
+// ################
+// #region 把关函数
+// ################
 
 function isDbBuildingFeature(feature: NormalizedFeature): boolean {
   return isPolygonalGeometry(feature.geometry) && typeof feature.properties.tags.building === 'string';

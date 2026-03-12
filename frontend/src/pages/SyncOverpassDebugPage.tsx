@@ -118,7 +118,7 @@ export function SyncOverpassDebugPage() {
       <button type="button" onClick={() => void handleCopyText(polarViewText)} disabled={!polarViewText}>
         Copy Polar View
       </button>
-      <pre style={{ border: '1px solid', maxHeight: '400px', overflowY: 'auto' }}>{polarViewText || 'No polar view yet.'}</pre>
+      <pre style={{ border: '1px solid', maxHeight: '400px', overflowY: 'auto' }}>{polarViewText || 'No polar view yet.'}</pre> */}
 
       <h3>Prompt Preview</h3>
       <button type="button" onClick={() => void handleCopyText(promptPreviewText)} disabled={!promptPreviewText}>
@@ -126,7 +126,7 @@ export function SyncOverpassDebugPage() {
       </button>
       <pre style={{ border: '1px solid', maxHeight: '400px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
         {promptPreviewText || 'No prompt preview yet.'}
-      </pre> */}
+      </pre>
 
       {syncError ? (
         <section>
