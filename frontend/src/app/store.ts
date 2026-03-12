@@ -1,24 +1,25 @@
 import { configureStore } from '@reduxjs/toolkit';
 import chatReducer from '../features/chat/chatSlice';
-import debugReducer from '../features/debug/debugSlice';
 import llmDebugReducer from '../features/llmDebug/llmDebugSlice';
+import normalizationDebugReducer from '../features/normalizationDebug/normalizationDebugSlice';
+import rawOverpassDebugReducer from '../features/rawOverpassDebug/rawOverpassDebugSlice';
 
-// store 是整个前端应用的全局状态仓库。
-// 现在它分成两块：
-// 1. chat：首页单轮 LLM 聊天
-// 2. debug：normalization 和 raw overpass 两个调试页面
+// store 是 Redux 的全局状态仓库。
+// configureStore 会把多个 feature slice 组合成一棵状态树，
+// 页面之后通过 selector 读取自己那一块状态，而不是互相直接共享局部变量。
 export const store = configureStore({
   reducer: {
     chat: chatReducer,
-    debug: debugReducer,
+    normalizationDebug: normalizationDebugReducer,
+    rawOverpassDebug: rawOverpassDebugReducer,
     llmDebug: llmDebugReducer,
   },
 });
 
-// RootState 表示整个 Redux 状态树的类型。
-// 组件里用 useAppSelector 时，state 的类型就是它。
+// RootState 表示“整个 store 长什么样”。
+// 任何 selector 只要接收 state，它的类型都应该基于 RootState 推导。
 export type RootState = ReturnType<typeof store.getState>;
 
-// AppDispatch 表示当前 store 的 dispatch 类型。
-// 有了它，dispatch thunk 时 TypeScript 才能正确知道返回值和参数。
+// AppDispatch 表示当前 store 支持派发哪些 action / thunk。
+// useAppDispatch 用它做类型约束后，组件 dispatch 异步 thunk 时才会有完整提示。
 export type AppDispatch = typeof store.dispatch;

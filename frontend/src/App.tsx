@@ -1,6 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { fetchHealth, type HealthResponse } from './api/chatApi';
+import { fetchHealth, type HealthResponse } from './api/appApi';
 
 function App() {
   const [health, setHealth] = useState<HealthResponse | null>(null);

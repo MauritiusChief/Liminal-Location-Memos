@@ -6,15 +6,20 @@ import type {
   NormalizedPolarFeatureSummary,
   NormalizedPolarLevel,
   NormalizedPolarView,
-} from '../api/chatApi';
-import { submitNormalizedQuery, submitSyncOverpassToDb, updateNormalizeField } from '../features/debug/debugSlice';
+} from '../api/sceneTypes';
+import {
+  loadScene,
+  selectNormalizationDebugState,
+  setCoordinates,
+  setRadius,
+  syncScene,
+} from '../features/normalizationDebug/normalizationDebugSlice';
 
 const DEFAULT_POLAR_RENDER_LIMIT = '100';
 
 export function NormalizationDebugPage() {
   const dispatch = useAppDispatch();
-  const { normalizeForm, normalizeLoading, normalizedResult, normalizeError, syncLoading, syncResult, syncError } =
-    useAppSelector((state) => state.debug);
+  const { form, syncRequest, dbLoadRequest } = useAppSelector(selectNormalizationDebugState);
   const [selectedGridCell, setSelectedGridCell] = useState<NormalizedMicroGridCell | null>(null);
   const [selectedPolarFeature, setSelectedPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
   const [hoveredPolarFeature, setHoveredPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
@@ -22,6 +27,8 @@ export function NormalizationDebugPage() {
   const [showOnlyBuildingAndPoiInChart, setShowOnlyBuildingAndPoiInChart] = useState(false);
   const [renderPolarSvgRequested, setRenderPolarSvgRequested] = useState(false);
   const [polarSvgRenderLimit, setPolarSvgRenderLimit] = useState(DEFAULT_POLAR_RENDER_LIMIT);
+  const normalizedResult = dbLoadRequest.result;
+  const syncResult = syncRequest.result;
 
   useEffect(() => {
     setSelectedGridCell(normalizedResult?.microGrid?.enabled ? normalizedResult.microGrid.cells[0]?.[0] || null : null);
@@ -77,11 +84,11 @@ export function NormalizationDebugPage() {
 
   const handleSyncSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await dispatch(submitSyncOverpassToDb(normalizeForm));
+    await dispatch(syncScene(form));
   };
 
   const handleLoadFromDb = async () => {
-    await dispatch(submitNormalizedQuery(normalizeForm));
+    await dispatch(loadScene(form));
   };
 
   const handleCopyText = async (text: string) => {
@@ -100,8 +107,8 @@ export function NormalizationDebugPage() {
         <br />
         <input
           id="coordinates"
-          value={normalizeForm.coordinates}
-          onChange={(event) => dispatch(updateNormalizeField({ field: 'coordinates', value: event.target.value }))}
+          value={form.coordinates}
+          onChange={(event) => dispatch(setCoordinates(event.target.value))}
           placeholder="34.030519, -84.063091"
         />
         <br />
@@ -109,17 +116,17 @@ export function NormalizationDebugPage() {
         <br />
         <input
           id="radius"
-          value={normalizeForm.radius}
-          onChange={(event) => dispatch(updateNormalizeField({ field: 'radius', value: event.target.value }))}
+          value={form.radius}
+          onChange={(event) => dispatch(setRadius(event.target.value))}
         />
         <br />
         <br />
         <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          <button type="submit" disabled={syncLoading}>
-            {syncLoading ? 'Syncing...' : 'Sync Overpass -> DB'}
+          <button type="submit" disabled={syncRequest.status === 'loading'}>
+            {syncRequest.status === 'loading' ? 'Syncing...' : 'Sync Overpass -> DB'}
           </button>
-          <button type="button" onClick={() => void handleLoadFromDb()} disabled={normalizeLoading}>
-            {normalizeLoading ? 'Loading...' : 'Load From DB'}
+          <button type="button" onClick={() => void handleLoadFromDb()} disabled={dbLoadRequest.status === 'loading'}>
+            {dbLoadRequest.status === 'loading' ? 'Loading...' : 'Load From DB'}
           </button>
         </div>
       </form>
@@ -304,17 +311,17 @@ export function NormalizationDebugPage() {
         {normalizedResult?.raw ? JSON.stringify(normalizedResult.raw, null, 2) : 'Raw payload not included.'}
       </pre> */}
 
-      {syncError ? (
+      {syncRequest.error ? (
         <section>
           <h3>Sync Error</h3>
-          <pre>{syncError}</pre>
+          <pre>{syncRequest.error}</pre>
         </section>
       ) : null}
 
-      {normalizeError ? (
+      {dbLoadRequest.error ? (
         <section>
           <h3>Error</h3>
-          <pre>{normalizeError}</pre>
+          <pre>{dbLoadRequest.error}</pre>
         </section>
       ) : null}
     </section>

@@ -1,4 +1,4 @@
-import type { NormalizedPolarFeatureSummary, NormalizedPolarView } from '../api/chatApi';
+import type { NormalizedPolarFeatureSummary, NormalizedPolarView } from '../api/sceneTypes';
 
 interface PolarFanChartProps {
   polarView: NormalizedPolarView;

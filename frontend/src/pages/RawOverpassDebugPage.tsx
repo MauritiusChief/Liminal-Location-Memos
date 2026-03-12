@@ -1,14 +1,18 @@
 import { FormEvent } from 'react';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
-import { submitRawQuery, updateRawQuery } from '../features/debug/debugSlice';
+import {
+  selectRawOverpassDebugState,
+  setQuery,
+  submitRawOverpassQuery,
+} from '../features/rawOverpassDebug/rawOverpassDebugSlice';
 
 export function RawOverpassDebugPage() {
   const dispatch = useAppDispatch();
-  const { rawQuery, rawLoading, rawResult, rawError } = useAppSelector((state) => state.debug);
+  const { query, request } = useAppSelector(selectRawOverpassDebugState);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await dispatch(submitRawQuery(rawQuery));
+    await dispatch(submitRawOverpassQuery(query));
   };
 
   return (
@@ -21,22 +25,22 @@ export function RawOverpassDebugPage() {
           id="rawQuery"
           rows={8}
           cols={80}
-          value={rawQuery}
-          onChange={(event) => dispatch(updateRawQuery(event.target.value))}
+          value={query}
+          onChange={(event) => dispatch(setQuery(event.target.value))}
         />
         <br />
-        <button type="submit" disabled={rawLoading}>
-          {rawLoading ? 'Sending...' : 'Run Raw Query'}
+        <button type="submit" disabled={request.status === 'loading'}>
+          {request.status === 'loading' ? 'Sending...' : 'Run Raw Query'}
         </button>
       </form>
 
       <h3>Raw Response</h3>
-      <pre>{rawResult ? JSON.stringify(rawResult.data, null, 2) : 'No raw response yet.'}</pre>
+      <pre>{request.result ? JSON.stringify(request.result.data, null, 2) : 'No raw response yet.'}</pre>
 
-      {rawError ? (
+      {request.error ? (
         <section>
           <h3>Error</h3>
-          <pre>{rawError}</pre>
+          <pre>{request.error}</pre>
         </section>
       ) : null}
     </section>
