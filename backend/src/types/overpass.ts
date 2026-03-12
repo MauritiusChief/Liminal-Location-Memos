@@ -1,3 +1,8 @@
+import type {
+  DbFeatureCategory,
+  DbFeatureDetail,
+  DbNormalizationDiagnostics,
+} from '../services/dbSceneTypes.js';
 import type { NormalizedMicroGrid, NormalizedMicroGridCell } from '../services/overpassGrid.js';
 import type { PromptPreview } from '../services/overpassPrompt.js';
 import type {
@@ -39,8 +44,20 @@ export interface NormalizedOverpassResponseBody {
   raw?: unknown;
 }
 
+export interface DbDebugLoadResponseBody {
+  query: string;
+  diagnostics: DbNormalizationDiagnostics;
+  featureSummary: DbFeatureDetail[];
+  microGrid?: NormalizedMicroGrid;
+  polarView?: NormalizedPolarView;
+  promptPreview?: PromptPreview;
+}
+
 export type {
   ContainedPoi,
+  DbFeatureCategory,
+  DbFeatureDetail,
+  DbNormalizationDiagnostics,
   NormalizedFeatureProperties,
   NormalizedMicroGrid,
   NormalizedMicroGridCell,

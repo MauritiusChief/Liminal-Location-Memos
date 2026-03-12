@@ -1,6 +1,10 @@
 export interface HealthResponse {
   ok: boolean;
   service: string;
+  database:
+    | { enabled: false; ok: false; reason: string }
+    | { enabled: true; ok: true; tableNames: string | null }
+    | { enabled: true; ok: false; reason: string };
 }
 
 export interface ChatResponse {
@@ -149,6 +153,15 @@ export interface NormalizedFeatureCollection {
   features: NormalizedFeature[];
 }
 
+export type DbFeatureCategory = 'building' | 'poi' | 'line' | 'area';
+
+export interface DbNormalizationDiagnostics {
+  featureCountsByCategory: Record<DbFeatureCategory, number>;
+  totalFeatures: number;
+  populatedMicroGridCellCount: number;
+  polarFeatureCount: number;
+}
+
 export interface NormalizationDiagnostics {
   rawElementCounts: Record<string, number>;
   totalRawElements: number;
@@ -176,6 +189,40 @@ export interface NormalizedOverpassResponse {
   polarView?: NormalizedPolarView;
   promptPreview?: PromptPreview;
   raw?: unknown;
+}
+
+export interface SyncOverpassToDbResponse {
+  query: string;
+  featureCount: number;
+  counts: {
+    buildings: number;
+    pois: number;
+    lines: number;
+    areas: number;
+  };
+  coverageRecorded: boolean;
+}
+
+export interface DbFeatureSummary {
+  featureId: string;
+  osmType: string;
+  osmId: number;
+  category: DbFeatureCategory;
+  geometryType: string;
+  tags: Record<string, string>;
+  relations: RelationReference[];
+  meta: Record<string, string | number>;
+  tainted: boolean;
+  containedPois?: ContainedPoi[];
+}
+
+export interface DbDebugLoadResponse {
+  query: string;
+  diagnostics: DbNormalizationDiagnostics;
+  featureSummary: DbFeatureSummary[];
+  microGrid?: NormalizedMicroGrid;
+  polarView?: NormalizedPolarView;
+  promptPreview?: PromptPreview;
 }
 
 interface ErrorResponse {
@@ -243,10 +290,10 @@ export async function postOverpassQuery(query: string): Promise<OverpassResponse
   return response.json() as Promise<OverpassResponse>;
 }
 
-export async function postNormalizedOverpassQuery(
+export async function postSyncOverpassToDb(
   request: NormalizedOverpassRequest,
-): Promise<NormalizedOverpassResponse> {
-  const response = await fetch('/api/overpass/normalize', {
+): Promise<SyncOverpassToDbResponse> {
+  const response = await fetch('/api/db/sync-overpass', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -259,5 +306,22 @@ export async function postNormalizedOverpassQuery(
     throw new Error(errorPayload.error || 'Request failed.');
   }
 
-  return response.json() as Promise<NormalizedOverpassResponse>;
+  return response.json() as Promise<SyncOverpassToDbResponse>;
+}
+
+export async function postDbNormalizedLoad(request: NormalizedOverpassRequest): Promise<DbDebugLoadResponse> {
+  const response = await fetch('/api/db/normalized-load', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const errorPayload = (await response.json().catch(() => ({ error: 'Request failed.' }))) as ErrorResponse;
+    throw new Error(errorPayload.error || 'Request failed.');
+  }
+
+  return response.json() as Promise<DbDebugLoadResponse>;
 }

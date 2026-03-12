@@ -1,21 +1,45 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { fetchHealth } from './api/chatApi';
+import { fetchHealth, type HealthResponse } from './api/chatApi';
 
 function App() {
-  const [health, setHealth] = useState<string>('Checking backend...');
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchHealth()
-      .then((result) => setHealth(result.ok ? `${result.service} online` : 'Backend unavailable'))
-      .catch(() => setHealth('Backend unavailable'));
+      .then((result) => {
+        setHealth(result);
+        setHealthError(null);
+      })
+      .catch(() => {
+        setHealth(null);
+        setHealthError('Backend unavailable');
+      });
   }, []);
+
+  const healthSummary = healthError
+    ? healthError
+    : health
+      ? [
+          `backend: ${health.ok ? `${health.service} online` : 'unavailable'}`,
+          `database enabled: ${health.database.enabled ? 'yes' : 'no'}`,
+          `database ok: ${health.database.ok ? 'yes' : 'no'}`,
+          'tableNames' in health.database && health.database.tableNames
+            ? `tables: ${health.database.tableNames}`
+            : 'reason' in health.database
+              ? `reason: ${health.database.reason}`
+              : null,
+        ]
+          .filter(Boolean)
+          .join(' | ')
+      : 'Checking backend...';
 
   return (
     <main style={{ padding: '16px', fontFamily: 'sans-serif' }}>
       <header style={{ marginBottom: '24px' }}>
         <h1>Liminal Location Memos</h1>
-        <p>Backend status: {health}</p>
+        <p>System status: {healthSummary}</p>
         <nav style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
           <NavLink to="/" end>
             Chat

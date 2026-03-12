@@ -12,13 +12,15 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "osmtogeojson": "^3.0.0-beta.5",
-    "overpass-ts": "^4.3.8"
+    "overpass-ts": "^4.3.8",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/geojson": "^7946.0.16",
     "@types/node": "^24.10.1",
     "@types/osmtogeojson": "^2.2.34",
+    "@types/pg": "^8.15.6",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }
