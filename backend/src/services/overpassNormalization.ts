@@ -257,7 +257,7 @@ function toContainedPoi(feature: NormalizedFeature): ContainedPoi | null {
 
 // 这一阶段只做“给建筑面附加 containedPois”，不删除任何原始 Point feature。
 // 也就是说，Point 仍然保留独立表达，Polygon 只是额外携带一个聚合视图。
-function attachContainedPois(features: NormalizedFeature[]): NormalizedFeature[] {
+export function attachContainedPoisInMemory(features: NormalizedFeature[]): NormalizedFeature[] {
   const buildingAreas: BuildingAreaCandidate[] = features.flatMap((feature, featureIndex) => {
     if (!isBuildingAreaFeature(feature)) {
       return [];
@@ -443,29 +443,22 @@ export function buildNormalizedOverpassQuery(request: NormalizedOverpassRequest)
 export function normalizeOverpassData(
   raw: OverpassJsonResponse,
 ): { geojson: NormalizedFeatureCollection; diagnostics: NormalizationDiagnostics } {
+  const baseFeatures = convertOverpassToNormalizedFeatures(raw);
+  const features = attachContainedPoisInMemory(baseFeatures);
+  const taintedFeatures = features.filter((feature) => feature.properties.tainted).length;
+
   const converted = osmtogeojson(raw, { flatProperties: false }) as FeatureCollection;
   const normalizedCandidates = converted.features.map((feature) => normalizeFeature(feature));
   const normalizedFeatures = normalizedCandidates.filter((feature): feature is NormalizedFeature => feature !== null);
   const skippedFeaturesWithoutGeometry = normalizedCandidates.length - normalizedFeatures.length;
-
-  // 第一步过滤：删掉已经被 Polygon / MultiPolygon 逻辑表达过的外环或内环线。
   const filteredRelationOutlineFeatures = normalizedFeatures.filter((feature) =>
     isRelationOutlineCoveredByPolygon(feature),
   ).length;
   const withoutPolygonOutlines = normalizedFeatures.filter((feature) => !isRelationOutlineCoveredByPolygon(feature));
-
-  // 第二步过滤：如果某个 route / waterway relation 自己已经生成了汇总线，
-  // 那么只作为其组成片段、且自身没有有意义标签的 member way 就可以删掉，避免重复表达。
   const relationLineIds = buildRelationLineIndex(withoutPolygonOutlines);
   const filteredRelationMemberLineFeatures = withoutPolygonOutlines.filter((feature) =>
     isMemberLineCoveredByRelationLine(feature, relationLineIds),
   ).length;
-  const withoutRelationMemberLines = withoutPolygonOutlines.filter(
-    (feature) => !isMemberLineCoveredByRelationLine(feature, relationLineIds),
-  );
-  const features = attachContainedPois(withoutRelationMemberLines);
-
-  const taintedFeatures = features.filter((feature) => feature.properties.tainted).length;
 
   return {
     geojson: {
@@ -484,4 +477,24 @@ export function normalizeOverpassData(
       filteredRelationMemberLineFeatures,
     },
   };
+}
+
+// 给数据库同步和数据库链路复用的“基础 normalize”入口。
+// 它只负责把 Overpass JSON 变成项目内部统一 feature 结构，不附加 containedPois。
+export function convertOverpassToNormalizedFeatures(raw: OverpassJsonResponse): NormalizedFeature[] {
+  const converted = osmtogeojson(raw, { flatProperties: false }) as FeatureCollection;
+  const normalizedCandidates = converted.features.map((feature) => normalizeFeature(feature));
+  const normalizedFeatures = normalizedCandidates.filter((feature): feature is NormalizedFeature => feature !== null);
+
+  // 第一步过滤：删掉已经被 Polygon / MultiPolygon 逻辑表达过的外环或内环线。
+  const withoutPolygonOutlines = normalizedFeatures.filter((feature) => !isRelationOutlineCoveredByPolygon(feature));
+
+  // 第二步过滤：如果某个 route / waterway relation 自己已经生成了汇总线，
+  // 那么只作为其组成片段、且自身没有有意义标签的 member way 就可以删掉，避免重复表达。
+  const relationLineIds = buildRelationLineIndex(withoutPolygonOutlines);
+  const withoutRelationMemberLines = withoutPolygonOutlines.filter(
+    (feature) => !isMemberLineCoveredByRelationLine(feature, relationLineIds),
+  );
+
+  return withoutRelationMemberLines;
 }

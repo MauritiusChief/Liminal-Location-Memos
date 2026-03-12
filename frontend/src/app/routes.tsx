@@ -4,6 +4,7 @@ import { HomeChatPage } from '../pages/HomeChatPage';
 import { LlmEnvironmentDebugPage } from '../pages/LlmEnvironmentDebugPage';
 import { NormalizationDebugPage } from '../pages/NormalizationDebugPage';
 import { RawOverpassDebugPage } from '../pages/RawOverpassDebugPage';
+import { SyncOverpassDebugPage } from '../pages/SyncOverpassDebugPage';
 
 export const router = createBrowserRouter([
   {
@@ -17,6 +18,10 @@ export const router = createBrowserRouter([
       {
         path: 'debug/normalization',
         element: <NormalizationDebugPage />,
+      },
+      {
+        path: 'debug/sync-overpass',
+        element: <SyncOverpassDebugPage />,
       },
       {
         path: 'debug/overpass',

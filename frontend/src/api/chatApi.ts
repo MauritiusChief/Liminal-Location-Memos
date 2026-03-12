@@ -1,6 +1,10 @@
 export interface HealthResponse {
   ok: boolean;
   service: string;
+  database:
+    | { enabled: false; ok: false; reason: string }
+    | { enabled: true; ok: true; postgisVersion: string | null }
+    | { enabled: true; ok: false; reason: string };
 }
 
 export interface ChatResponse {
@@ -178,6 +182,25 @@ export interface NormalizedOverpassResponse {
   raw?: unknown;
 }
 
+export interface SyncOverpassToDbResponse {
+  query: string;
+  featureCount: number;
+  counts: {
+    buildings: number;
+    pois: number;
+    linearAreas: number;
+  };
+  coverageRecorded: boolean;
+}
+
+export interface DbDebugLoadResponse extends NormalizedOverpassResponse {
+  featureSummary: Array<{
+    id?: string;
+    type: string;
+    properties: NormalizedFeatureProperties;
+  }>;
+}
+
 interface ErrorResponse {
   error: string;
 }
@@ -260,4 +283,40 @@ export async function postNormalizedOverpassQuery(
   }
 
   return response.json() as Promise<NormalizedOverpassResponse>;
+}
+
+export async function postSyncOverpassToDb(
+  request: NormalizedOverpassRequest,
+): Promise<SyncOverpassToDbResponse> {
+  const response = await fetch('/api/db/sync-overpass', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const errorPayload = (await response.json().catch(() => ({ error: 'Request failed.' }))) as ErrorResponse;
+    throw new Error(errorPayload.error || 'Request failed.');
+  }
+
+  return response.json() as Promise<SyncOverpassToDbResponse>;
+}
+
+export async function postDbDebugLoad(request: NormalizedOverpassRequest): Promise<DbDebugLoadResponse> {
+  const response = await fetch('/api/db/debug-load', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const errorPayload = (await response.json().catch(() => ({ error: 'Request failed.' }))) as ErrorResponse;
+    throw new Error(errorPayload.error || 'Request failed.');
+  }
+
+  return response.json() as Promise<DbDebugLoadResponse>;
 }
