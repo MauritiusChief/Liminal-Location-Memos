@@ -54,7 +54,7 @@ export async function withTransaction<T>(callback: (client: PoolClient) => Promi
 
 export async function checkDatabaseHealth(): Promise<
   | { enabled: false; ok: false; reason: string }
-  | { enabled: true; ok: true; postgisVersion: string | null }
+  | { enabled: true; ok: true; tableNames: string | null }
   | { enabled: true; ok: false; reason: string }
 > {
   if (!config.db.enabled) {
@@ -65,12 +65,22 @@ export async function checkDatabaseHealth(): Promise<
     };
   }
 
+  const queryContent = [
+    "SELECT table_name",
+    "FROM information_schema.tables",
+    "WHERE table_schema = 'public'",
+      "AND table_type = 'BASE TABLE';"
+  ].join(' ')
+
   try {
-    const result = await query<{ postgis_version: string | null }>('SELECT PostGIS_Version() AS postgis_version');
+    // const result = await query<{ postgis_version: string | null }>('SELECT PostGIS_Version() AS postgis_version');
+    const result = await query<{ table_name: string | null }>(queryContent);
+    // console.log(result.rows.map( r => r.table_name).join(', '));
+
     return {
       enabled: true,
       ok: true,
-      postgisVersion: result.rows[0]?.postgis_version || null,
+      tableNames: result.rows.map( r => r.table_name).join(', ') || null,
     };
   } catch (error) {
     return {

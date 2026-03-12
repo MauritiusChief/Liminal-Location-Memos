@@ -25,8 +25,8 @@ function App() {
           `backend: ${health.ok ? `${health.service} online` : 'unavailable'}`,
           `database enabled: ${health.database.enabled ? 'yes' : 'no'}`,
           `database ok: ${health.database.ok ? 'yes' : 'no'}`,
-          'postgisVersion' in health.database && health.database.postgisVersion
-            ? `postgis: ${health.database.postgisVersion}`
+          'tableNames' in health.database && health.database.tableNames
+            ? `tables: ${health.database.tableNames}`
             : 'reason' in health.database
               ? `reason: ${health.database.reason}`
               : null,
