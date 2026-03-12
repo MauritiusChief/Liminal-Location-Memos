@@ -74,18 +74,21 @@ export function NormalizationDebugPage() {
     return getVisiblePolarFeatureCount(chartPolarView.levels, 'all', false);
   }, [chartPolarView]);
 
+  const featureSummaryText = normalizedResult ? JSON.stringify(featuresSummary, null, 2) : '';
+  const normalizedGeoJsonText = normalizedResult ? JSON.stringify(normalizedResult.geojson, null, 2) : '';
+  const promptPreviewText = normalizedResult?.promptPreview?.userPrompt || '';
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     await dispatch(submitNormalizedQuery(normalizeForm));
   };
 
-  const handleCopyPromptPreview = async () => {
-    const prompt = normalizedResult?.promptPreview?.userPrompt;
-    if (!prompt) {
+  const handleCopyText = async (text: string) => {
+    if (!text) {
       return;
     }
 
-    await navigator.clipboard.writeText(prompt);
+    await navigator.clipboard.writeText(text);
   };
 
   return (
@@ -131,14 +134,20 @@ export function NormalizationDebugPage() {
       <pre>{normalizedResult?.query || 'No query generated yet.'}</pre>
 
       <h3>Feature Summary</h3>
+      <button type="button" onClick={() => void handleCopyText(featureSummaryText)} disabled={!featureSummaryText}>
+        Copy Feature Summary
+      </button>
       <pre style={{ border: '1px solid', maxHeight: '600px', overflowY: 'auto' }}>
-        {normalizedResult ? JSON.stringify(featuresSummary, null, 2) : 'No feature summary yet.'}
+        {featureSummaryText || 'No feature summary yet.'}
       </pre>
 
-      {/* <h3>Normalized GeoJSON</h3>
+      <h3>Normalized GeoJSON</h3>
+      <button type="button" onClick={() => void handleCopyText(normalizedGeoJsonText)} disabled={!normalizedGeoJsonText}>
+        Copy Normalized GeoJSON
+      </button>
       <pre style={{ border: '1px solid', maxHeight: '600px', overflowY: 'auto' }}>
-        {normalizedResult ? JSON.stringify(normalizedResult.geojson, null, 2) : 'No normalized GeoJSON yet.'}
-      </pre> */}
+        {normalizedGeoJsonText || 'No normalized GeoJSON yet.'}
+      </pre>
 
       <h3>Micro Grid Debug</h3>
       {normalizedResult?.microGrid?.enabled ? (
@@ -279,17 +288,17 @@ export function NormalizationDebugPage() {
       )}
 
       <h3>Prompt Preview</h3>
-      <button type="button" onClick={() => void handleCopyPromptPreview()} disabled={!normalizedResult?.promptPreview?.userPrompt}>
+      <button type="button" onClick={() => void handleCopyText(promptPreviewText)} disabled={!promptPreviewText}>
         Copy Prompt
       </button>
       <br />
       <br />
-      <textarea
+      {/* <textarea
         readOnly
         rows={20}
         cols={120}
         value={normalizedResult?.promptPreview?.userPrompt || 'No prompt preview yet.'}
-      />
+      /> */}
 
       {/* <h3>Raw Response Snapshot</h3>
       <pre style={{ border: '1px solid', maxHeight: '600px', overflowY: 'auto' }}>

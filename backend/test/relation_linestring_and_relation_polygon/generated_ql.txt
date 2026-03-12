@@ -1,5 +1,0 @@
-[out:json][timeout:25];
-nwr(around:100,34.03051902687699,-84.06309056978101);
-out body geom;
->;
-out skel geom;
