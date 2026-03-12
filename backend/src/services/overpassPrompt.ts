@@ -10,8 +10,30 @@ export interface PromptPreview {
 const BUILDING_AND_POI_TAG_KEYS = ['name', 'brand', ...POI_TAG_KEYS, 'building'] as const;
 const LINE_DETAIL_TAG_KEYS = ['name', ...ROAD_TAG_KEYS] as const;
 const AREA_DETAIL_TAG_KEYS = ['name', ...AREA_TAG_KEYS] as const;
-const LEVEL3_REPRESENTATIVE_MIN_ANGLE = 5;
-const LEVEL3_REPRESENTATIVE_LIMIT = 4;
+const POLAR_LEVEL_PROMPT_CONFIG: Record<
+  1 | 2 | 3,
+  {
+    representativeLimit: number;
+    representativeMinAngleDegrees: number;
+    omissionSummaryMinGroupSize: number;
+  }
+> = {
+  1: {
+    representativeLimit: 3,
+    representativeMinAngleDegrees: 0,
+    omissionSummaryMinGroupSize: 3,
+  },
+  2: {
+    representativeLimit: 3,
+    representativeMinAngleDegrees: 3,
+    omissionSummaryMinGroupSize: 3,
+  },
+  3: {
+    representativeLimit: 4,
+    representativeMinAngleDegrees: 5,
+    omissionSummaryMinGroupSize: 0,
+  },
+};
 
 // 这个文件把 grid / polar 结果压成 LLM 更容易直接阅读的中文文本。
 // 它不重新做几何计算，只负责组织层级、排序和文本格式。
@@ -130,38 +152,62 @@ function buildPolarLevelBlock(
       continue;
     }
 
-    const existingGroup = groupedEntries.get(summary.displayLabel) || [];
+    const existingGroup = groupedEntries.get(summary.directionCluster.clusterId) || [];
     existingGroup.push(summary);
-    groupedEntries.set(summary.displayLabel, existingGroup);
+    groupedEntries.set(summary.directionCluster.clusterId, existingGroup);
   }
 
   if (groupedEntries.size === 0) {
     return `#### 等级${level}：无`;
   }
 
-  const groupLines = Array.from(groupedEntries.entries()).map(([label, entries]) => {
-    const itemLines = level === 3 ? buildPolarClusterSummaryLines(entries) : entries.flatMap((summary) => buildPolarFeatureLines(summary));
-    return [`${label}:`, '', ...itemLines, ''].join('\n');
+  const groupLines = Array.from(groupedEntries.values()).map((entries) => {
+    const groupBlock = buildPolarGroupBlock(level, entries);
+    return [groupBlock.title + ':', '', ...groupBlock.lines, ''].join('\n');
   });
 
   return [`#### 等级${level}(${levelDesc[level]})：`, ...groupLines].join('\n');
 }
 
-function buildPolarClusterSummaryLines(entries: NormalizedPolarFeatureSummary[]): string[] {
+function buildPolarGroupBlock(
+  level: 1 | 2 | 3,
+  entries: NormalizedPolarFeatureSummary[],
+): {
+  title: string;
+  lines: string[];
+} {
+  if (entries.length === 1) {
+    return {
+      title: entries[0]!.baseLabel,
+      lines: buildPolarFeatureLines(entries[0]!),
+    };
+  }
+
+  return {
+    title: entries[0]!.clusterLabel,
+    lines: buildPolarClusterSummaryLines(level, entries),
+  };
+}
+
+function buildPolarClusterSummaryLines(level: 1 | 2 | 3, entries: NormalizedPolarFeatureSummary[]): string[] {
+  const config = POLAR_LEVEL_PROMPT_CONFIG[level];
   const sortedEntries = [...entries].sort((left, right) =>
     right.widestSpan.angleWidthDegrees - left.widestSpan.angleWidthDegrees
     || left.centerPoint.distanceMeters - right.centerPoint.distanceMeters
     || left.osmId - right.osmId,
   );
   const representativeEntries = sortedEntries
-    .filter((entry) => entry.widestSpan.angleWidthDegrees >= LEVEL3_REPRESENTATIVE_MIN_ANGLE)
-    .slice(0, LEVEL3_REPRESENTATIVE_LIMIT);
+    .filter((entry) => entry.widestSpan.angleWidthDegrees >= config.representativeMinAngleDegrees)
+    .slice(0, config.representativeLimit);
   const anchors = representativeEntries.length > 0 ? representativeEntries : sortedEntries.slice(0, 1);
   const omittedCount = Math.max(0, entries.length - anchors.length);
   const directionCluster = entries[0]!.directionCluster;
-  const hint = entries.length > anchors.length ? `，共${entries.length}个要素，展示${anchors.length}个代表要素，其余${omittedCount}个仅保留数量` : ""
+  const shouldShowOmissionSummary = omittedCount > 0 && entries.length > config.omissionSummaryMinGroupSize;
+  const hint = shouldShowOmissionSummary
+    ? `，共${entries.length}个要素，展示${anchors.length}个代表要素，其余${omittedCount}个仅保留数量`
+    : '';
   const lines = [
-    `* 群中心方位${formatAngle(directionCluster.centerBearingDegrees)}`+hint,
+    `* 群中心方位${formatAngle(directionCluster.centerBearingDegrees)}${hint}`,
   ];
 
   for (const anchor of anchors) {

@@ -84,7 +84,8 @@ const POLAR_LEVELS: Array<{ level: 1 | 2 | 3; minExclusive: number; maxInclusive
   { level: 2, minExclusive: 100, maxInclusive: 300 },
   { level: 3, minExclusive: 300, maxInclusive: 1000 },
 ];
-const DIRECTION_CLUSTER_THRESHOLD_DEGREES: Record<2 | 3, number> = {
+const DIRECTION_CLUSTER_THRESHOLD_DEGREES: Record<1 | 2 | 3, number> = {
+  1: 20,
   2: 30,
   3: 45,
 };
@@ -425,24 +426,13 @@ function applyDirectionClusters(summaries: NormalizedPolarFeatureSummary[]): Nor
 
   const clustered = new Map<string, NormalizedPolarFeatureSummary>();
 
-  for (const summary of summaries) {
-    if (summary.level === 1) {
-      clustered.set(summary.featureId, {
-        ...summary,
-        clusterLabel: summary.baseLabel,
-        displayLabel: summary.baseLabel,
-        directionCluster: buildSingletonDirectionCluster(summary.featureId, summary.centerPoint.bearingDegrees),
-      });
-    }
-  }
-
   for (const entries of groupedByLevelAndLabel.values()) {
     const level = entries[0]?.level;
-    if (level !== 2 && level !== 3) {
+    if (level !== 1 && level !== 2 && level !== 3) {
       continue;
     }
 
-    // L2 / L3 才做方向分群；L1 保持原始标签，避免近距离信息被切得过碎。
+    // 三个等级都做方向分群，只是 L1 阈值更保守，尽量保留近距离信息的细腻度。
     const clusters = splitEntriesIntoDirectionClusters(entries, DIRECTION_CLUSTER_THRESHOLD_DEGREES[level]);
     clusters.forEach((clusterEntries, clusterIndex) => {
       const centerBearingDegrees = computeCircularMeanDegrees(

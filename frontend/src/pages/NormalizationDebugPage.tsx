@@ -254,7 +254,7 @@ export function NormalizationDebugPage() {
                 onFeatureHover={setHoveredPolarFeature}
                 onFeatureSelect={setSelectedPolarFeature}
               />
-              <pre style={{ border: '1px solid', padding: '8px', minWidth: '300px', maxWidth: '420px', whiteSpace: 'pre-wrap' }}>
+              <pre style={{ border: '1px solid', padding: '8px', minWidth: '300px', maxWidth: '420px', whiteSpace: 'pre-wrap', maxHeight: '500px', overflowY: 'auto' }}>
                 {selectedPolarFeature || hoveredPolarFeature
                   ? JSON.stringify(selectedPolarFeature || hoveredPolarFeature, null, 2)
                   : 'Hover or click a sector to inspect it.'}
@@ -263,7 +263,7 @@ export function NormalizationDebugPage() {
           ) : (
             <p>Polar fan chart is idle. Click the render button to draw the SVG.</p>
           )}
-          {normalizedResult.polarView.levels.map((level) => (
+          {/* {normalizedResult.polarView.levels.map((level) => (
             <section key={level.level}>
               <h4>
                 Level {level.level} ({level.distanceRangeMeters[0]}m, {level.distanceRangeMeters[1]}m]
@@ -272,7 +272,7 @@ export function NormalizationDebugPage() {
                 {JSON.stringify(level.features, null, 2)}
               </pre>
             </section>
-          ))}
+          ))} */}
         </>
       ) : (
         <p>No polar view yet.</p>
