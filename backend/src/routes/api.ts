@@ -9,7 +9,6 @@ import { buildDefaultDebugSystemPrompt, buildNormalizationPrompt } from '../serv
 import {
   buildNormalizedOverpassQuery,
   convertOverpassToNormalizedFeatures,
-  normalizeOverpassData,
   type NormalizedOverpassRequest,
   type NormalizedFeatureCollection,
 } from '../services/overpassNormalization.js';
@@ -40,18 +39,12 @@ function buildFeatureSummary(geojson: NormalizedFeatureCollection) {
 
 function buildDbDiagnostics(geojson: NormalizedFeatureCollection) {
   return {
-    rawElementCounts: {},
-    totalRawElements: 0,
-    totalConvertedFeatures: geojson.features.length,
     totalNormalizedFeatures: geojson.features.length,
     featureCountsByGeometryType: geojson.features.reduce<Record<string, number>>((counts, feature) => {
       counts[feature.geometry.type] = (counts[feature.geometry.type] || 0) + 1;
       return counts;
     }, {}),
     taintedFeatures: geojson.features.filter((feature) => feature.properties.tainted).length,
-    skippedFeaturesWithoutGeometry: 0,
-    filteredRelationOutlineFeatures: 0,
-    filteredRelationMemberLineFeatures: 0,
   };
 }
 
@@ -82,7 +75,7 @@ function buildNormalizationDebugPayload(
 }
 
 function parseNormalizedRequest(body: NormalizedOverpassRequestBody) {
-  const { lat, lon, radius, includeRaw } = body;
+  const { lat, lon, radius } = body;
 
   if (
     typeof lat !== 'number' ||
@@ -104,7 +97,6 @@ function parseNormalizedRequest(body: NormalizedOverpassRequestBody) {
       lat,
       lon,
       radius,
-      includeRaw: Boolean(includeRaw),
     },
   } as const;
 }
@@ -178,50 +170,6 @@ apiRouter.post('/overpass', async (request, response) => {
   }
 });
 
-apiRouter.post('/overpass/normalize', async (request, response) => {
-  const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
-
-  if ('error' in parsed) {
-    response.status(400).json({ error: parsed.error });
-    return;
-  }
-
-  const normalizedRequest = parsed.value;
-  const query = buildNormalizedOverpassQuery(normalizedRequest);
-
-  try {
-    const raw = (await overpassJson(query, {
-      endpoint: 'https://overpass-api.de/api/interpreter',
-    })) as Parameters<typeof normalizeOverpassData>[0];
-
-    const { geojson, diagnostics } = normalizeOverpassData(raw);
-    const microGrid = buildNormalizedMicroGrid(geojson.features, normalizedRequest);
-    const polarView = buildNormalizedPolarView(geojson.features, normalizedRequest);
-    const promptPreview = {
-      userPrompt: buildNormalizationPrompt({
-        request: normalizedRequest,
-        geojson,
-        microGrid,
-        polarView,
-      }),
-    };
-
-    response.json({
-      query,
-      geojson,
-      diagnostics,
-      microGrid,
-      polarView,
-      promptPreview,
-      raw: normalizedRequest.includeRaw ? raw : undefined,
-    });
-  } catch (error) {
-    response.status(502).json({
-      error: error instanceof Error ? error.message : 'Unexpected Overpass normalization error.',
-    });
-  }
-});
-
 apiRouter.post('/db/sync-overpass', async (request, response) => {
   const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
 
@@ -253,7 +201,7 @@ apiRouter.post('/db/sync-overpass', async (request, response) => {
   }
 });
 
-apiRouter.post('/db/debug-load', async (request, response) => {
+apiRouter.post('/db/normalized-load', async (request, response) => {
   const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
 
   if ('error' in parsed) {
@@ -278,7 +226,7 @@ apiRouter.post('/db/debug-load', async (request, response) => {
     });
   } catch (error) {
     response.status(502).json({
-      error: error instanceof Error ? error.message : 'Unexpected database debug load error.',
+      error: error instanceof Error ? error.message : 'Unexpected database normalized load error.',
     });
   }
 });

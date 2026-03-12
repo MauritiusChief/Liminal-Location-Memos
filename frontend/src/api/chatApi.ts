@@ -267,25 +267,6 @@ export async function postOverpassQuery(query: string): Promise<OverpassResponse
   return response.json() as Promise<OverpassResponse>;
 }
 
-export async function postNormalizedOverpassQuery(
-  request: NormalizedOverpassRequest,
-): Promise<NormalizedOverpassResponse> {
-  const response = await fetch('/api/overpass/normalize', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(request),
-  });
-
-  if (!response.ok) {
-    const errorPayload = (await response.json().catch(() => ({ error: 'Request failed.' }))) as ErrorResponse;
-    throw new Error(errorPayload.error || 'Request failed.');
-  }
-
-  return response.json() as Promise<NormalizedOverpassResponse>;
-}
-
 export async function postSyncOverpassToDb(
   request: NormalizedOverpassRequest,
 ): Promise<SyncOverpassToDbResponse> {
@@ -305,8 +286,8 @@ export async function postSyncOverpassToDb(
   return response.json() as Promise<SyncOverpassToDbResponse>;
 }
 
-export async function postDbDebugLoad(request: NormalizedOverpassRequest): Promise<DbDebugLoadResponse> {
-  const response = await fetch('/api/db/debug-load', {
+export async function postDbNormalizedLoad(request: NormalizedOverpassRequest): Promise<DbDebugLoadResponse> {
+  const response = await fetch('/api/db/normalized-load', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

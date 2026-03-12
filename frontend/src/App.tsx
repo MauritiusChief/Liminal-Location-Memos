@@ -45,7 +45,6 @@ function App() {
             Chat
           </NavLink>
           <NavLink to="/debug/normalization">Debug / Normalization</NavLink>
-          <NavLink to="/debug/sync-overpass">Debug / Sync Overpass</NavLink>
           <NavLink to="/debug/overpass">Debug / Overpass</NavLink>
           <NavLink to="/debug/llm-environment">Debug / LLM Environment</NavLink>
         </nav>

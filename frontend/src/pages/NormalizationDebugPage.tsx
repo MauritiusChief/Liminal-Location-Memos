@@ -7,16 +7,14 @@ import type {
   NormalizedPolarLevel,
   NormalizedPolarView,
 } from '../api/chatApi';
-import { submitNormalizedQuery, updateIncludeRaw, updateNormalizeField } from '../features/debug/debugSlice';
+import { submitNormalizedQuery, submitSyncOverpassToDb, updateNormalizeField } from '../features/debug/debugSlice';
 
 const DEFAULT_POLAR_RENDER_LIMIT = '100';
 
 export function NormalizationDebugPage() {
   const dispatch = useAppDispatch();
-  const { normalizeForm, normalizeLoading, normalizedResult, normalizeError } = useAppSelector((state) => state.debug);
-  const featuresSummary = normalizedResult?.geojson.features.map((feature) => {
-    return { id: feature.id, type: feature.geometry.type, properties: feature.properties };
-  });
+  const { normalizeForm, normalizeLoading, normalizedResult, normalizeError, syncLoading, syncResult, syncError } =
+    useAppSelector((state) => state.debug);
   const [selectedGridCell, setSelectedGridCell] = useState<NormalizedMicroGridCell | null>(null);
   const [selectedPolarFeature, setSelectedPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
   const [hoveredPolarFeature, setHoveredPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
@@ -74,12 +72,16 @@ export function NormalizationDebugPage() {
     return getVisiblePolarFeatureCount(chartPolarView.levels, 'all', false);
   }, [chartPolarView]);
 
-  const featureSummaryText = normalizedResult ? JSON.stringify(featuresSummary, null, 2) : '';
+  const featureSummaryText = normalizedResult ? JSON.stringify(normalizedResult.featureSummary, null, 2) : '';
   const normalizedGeoJsonText = normalizedResult ? JSON.stringify(normalizedResult.geojson, null, 2) : '';
   const promptPreviewText = normalizedResult?.promptPreview?.userPrompt || '';
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleSyncSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    await dispatch(submitSyncOverpassToDb(normalizeForm));
+  };
+
+  const handleLoadFromDb = async () => {
     await dispatch(submitNormalizedQuery(normalizeForm));
   };
 
@@ -94,7 +96,7 @@ export function NormalizationDebugPage() {
   return (
     <section>
       <h2>Normalization Debug</h2>
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSyncSubmit}>
         <label htmlFor="coordinates">Coordinates</label>
         <br />
         <input
@@ -112,26 +114,32 @@ export function NormalizationDebugPage() {
           onChange={(event) => dispatch(updateNormalizeField({ field: 'radius', value: event.target.value }))}
         />
         <br />
-        <label>
-          <input
-            type="checkbox"
-            checked={normalizeForm.includeRaw}
-            onChange={(event) => dispatch(updateIncludeRaw(event.target.checked))}
-          />
-          Include raw Overpass JSON
-        </label>
         <br />
-        <br />
-        <button type="submit" disabled={normalizeLoading}>
-          {normalizeLoading ? 'Normalizing...' : 'Normalize'}
-        </button>
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <button type="submit" disabled={syncLoading}>
+            {syncLoading ? 'Syncing...' : 'Sync Overpass -> DB'}
+          </button>
+          <button type="button" onClick={() => void handleLoadFromDb()} disabled={normalizeLoading}>
+            {normalizeLoading ? 'Loading...' : 'Load From DB'}
+          </button>
+        </div>
       </form>
+
+      <h3>Sync Result</h3>
+      <p>
+        Feature count: {syncResult?.featureCount ?? 'n/a'} | buildings: {syncResult?.counts.buildings ?? 'n/a'} | pois:{' '}
+        {syncResult?.counts.pois ?? 'n/a'} | lines: {syncResult?.counts.lines ?? 'n/a'} | areas:{' '}
+        {syncResult?.counts.areas ?? 'n/a'} | coverage recorded: {syncResult ? String(syncResult.coverageRecorded) : 'n/a'}
+      </p>
+      <pre style={{ border: '1px solid', maxHeight: '300px', overflowY: 'auto' }}>
+        {syncResult?.query || 'No sync result yet.'}
+      </pre>
 
       <h3>Diagnostics</h3>
       <pre>{normalizedResult ? JSON.stringify(normalizedResult.diagnostics, null, 2) : 'No normalized result yet.'}</pre>
 
       <h3>Generated Overpass QL</h3>
-      <pre>{normalizedResult?.query || 'No query generated yet.'}</pre>
+      <pre>{syncResult?.query || 'No query generated yet.'}</pre>
 
       <h3>Feature Summary</h3>
       <button type="button" onClick={() => void handleCopyText(featureSummaryText)} disabled={!featureSummaryText}>
@@ -304,6 +312,13 @@ export function NormalizationDebugPage() {
       <pre style={{ border: '1px solid', maxHeight: '600px', overflowY: 'auto' }}>
         {normalizedResult?.raw ? JSON.stringify(normalizedResult.raw, null, 2) : 'Raw payload not included.'}
       </pre> */}
+
+      {syncError ? (
+        <section>
+          <h3>Sync Error</h3>
+          <pre>{syncError}</pre>
+        </section>
+      ) : null}
 
       {normalizeError ? (
         <section>

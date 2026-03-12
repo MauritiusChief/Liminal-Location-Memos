@@ -1,9 +1,11 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import {
-  postNormalizedOverpassQuery,
+  type DbDebugLoadResponse,
+  postDbNormalizedLoad,
   postOverpassQuery,
-  type NormalizedOverpassResponse,
+  postSyncOverpassToDb,
   type OverpassResponse,
+  type SyncOverpassToDbResponse,
 } from '../../api/chatApi';
 
 // 规范化查询表单在 Redux 里的形状。
@@ -12,7 +14,6 @@ import {
 interface NormalizeFormState {
   coordinates: string;
   radius: string;
-  includeRaw: boolean;
 }
 
 // debug slice 统一管理两个调试页面的数据：
@@ -23,42 +24,51 @@ interface DebugState {
   normalizeForm: NormalizeFormState;
   rawQuery: string;
   normalizeLoading: boolean;
+  syncLoading: boolean;
   rawLoading: boolean;
-  normalizedResult: NormalizedOverpassResponse | null;
+  normalizedResult: DbDebugLoadResponse | null;
+  syncResult: SyncOverpassToDbResponse | null;
   rawResult: OverpassResponse | null;
   normalizeError: string | null;
+  syncError: string | null;
   rawError: string | null;
 }
+
+type ParsedNormalizedForm =
+  | { error: string }
+  | {
+      value: {
+        lat: number;
+        lon: number;
+        radius: number;
+      };
+    };
 
 const initialState: DebugState = {
   normalizeForm: {
     coordinates: '34.03051902687699, -84.06309056978101',
     radius: '30',
-    includeRaw: false,
   },
   rawQuery: '[out:json];\nnwr(around:30, 34.02466920711174, -84.09143822250903)(if:count_tags()>0);\nout center geom;',
   normalizeLoading: false,
+  syncLoading: false,
   rawLoading: false,
   normalizedResult: null,
+  syncResult: null,
   rawResult: null,
   normalizeError: null,
+  syncError: null,
   rawError: null,
 };
 
-// 这个 thunk 负责 normalization 页面整条异步链路：
-// 表单字符串 -> 解析经纬度/半径 -> 调 /api/overpass/normalize -> 返回规范化结果。
-export const submitNormalizedQuery = createAsyncThunk<
-  NormalizedOverpassResponse,
-  NormalizeFormState,
-  { rejectValue: string }
->('debug/submitNormalizedQuery', async (form, { rejectWithValue }) => {
+function parseNormalizedForm(form: NormalizeFormState): ParsedNormalizedForm {
   const coordinateParts = form.coordinates
     .trim()
     .split(/[\s,，;；]+/)
     .filter((part) => part.length > 0);
 
   if (coordinateParts.length !== 2) {
-    return rejectWithValue('Coordinates must contain latitude and longitude, separated by a comma, space, or similar delimiter.');
+    return { error: 'Coordinates must contain latitude and longitude, separated by a comma, space, or similar delimiter.' } as const;
   }
 
   const lat = Number(coordinateParts[0]);
@@ -66,20 +76,53 @@ export const submitNormalizedQuery = createAsyncThunk<
   const radius = Number(form.radius);
 
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radius)) {
-    return rejectWithValue('Coordinates and radius must be valid numbers.');
+    return { error: 'Coordinates and radius must be valid numbers.' } as const;
   }
 
   if (radius <= 0) {
-    return rejectWithValue('Radius must be greater than 0.');
+    return { error: 'Radius must be greater than 0.' } as const;
   }
 
-  try {
-    return await postNormalizedOverpassQuery({
+  return {
+    value: {
       lat,
       lon,
       radius,
-      includeRaw: form.includeRaw,
-    });
+    },
+  } as const;
+}
+
+// normalization 页面现在走数据库正式链路：
+// 先 Sync Overpass -> DB，再显式 Load From DB。
+export const submitSyncOverpassToDb = createAsyncThunk<
+  SyncOverpassToDbResponse,
+  NormalizeFormState,
+  { rejectValue: string }
+>('debug/submitSyncOverpassToDb', async (form, { rejectWithValue }) => {
+  const parsed = parseNormalizedForm(form);
+  if ('error' in parsed) {
+    return rejectWithValue(parsed.error);
+  }
+
+  try {
+    return await postSyncOverpassToDb(parsed.value);
+  } catch (error) {
+    return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
+  }
+});
+
+export const submitNormalizedQuery = createAsyncThunk<
+  DbDebugLoadResponse,
+  NormalizeFormState,
+  { rejectValue: string }
+>('debug/submitNormalizedQuery', async (form, { rejectWithValue }) => {
+  const parsed = parseNormalizedForm(form);
+  if ('error' in parsed) {
+    return rejectWithValue(parsed.error);
+  }
+
+  try {
+    return await postDbNormalizedLoad(parsed.value);
   } catch (error) {
     return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
   }
@@ -112,12 +155,9 @@ const debugSlice = createSlice({
     // 用户每敲一个字符，就立刻回写到 Redux。
     updateNormalizeField(
       state,
-      action: PayloadAction<{ field: keyof Omit<NormalizeFormState, 'includeRaw'>; value: string }>,
+      action: PayloadAction<{ field: keyof NormalizeFormState; value: string }>,
     ) {
       state.normalizeForm[action.payload.field] = action.payload.value;
-    },
-    updateIncludeRaw(state, action: PayloadAction<boolean>) {
-      state.normalizeForm.includeRaw = action.payload;
     },
     updateRawQuery(state, action: PayloadAction<string>) {
       state.rawQuery = action.payload;
@@ -129,6 +169,18 @@ const debugSlice = createSlice({
     // 2. rawLoading / rawResult / rawError
     // 这样两个 debug 页面即使来回切换，也不会互相覆盖对方的结果。
     builder
+      .addCase(submitSyncOverpassToDb.pending, (state) => {
+        state.syncLoading = true;
+        state.syncError = null;
+      })
+      .addCase(submitSyncOverpassToDb.fulfilled, (state, action) => {
+        state.syncLoading = false;
+        state.syncResult = action.payload;
+      })
+      .addCase(submitSyncOverpassToDb.rejected, (state, action) => {
+        state.syncLoading = false;
+        state.syncError = action.payload || 'Unknown error.';
+      })
       .addCase(submitNormalizedQuery.pending, (state) => {
         state.normalizeLoading = true;
         state.normalizeError = null;
@@ -156,5 +208,5 @@ const debugSlice = createSlice({
   },
 });
 
-export const { updateNormalizeField, updateIncludeRaw, updateRawQuery } = debugSlice.actions;
+export const { updateNormalizeField, updateRawQuery } = debugSlice.actions;
 export default debugSlice.reducer;
