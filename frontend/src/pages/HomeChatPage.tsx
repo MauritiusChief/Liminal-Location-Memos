@@ -1,12 +1,13 @@
 import { FormEvent } from 'react';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
-import { selectChatState, setMessage, submitChatMessage } from '../features/chat/chatSlice';
+import { selectChatState, setMessage, startGame, submitChatMessage } from '../features/chat/chatSlice';
 
 export function HomeChatPage() {
   const dispatch = useAppDispatch();
   const {
     message,
     messages,
+    hasStarted,
     playerPosition,
     activeLargeDescription,
     nearbySmallDescriptions,
@@ -17,6 +18,10 @@ export function HomeChatPage() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     await dispatch(submitChatMessage());
+  };
+
+  const handleStartGame = async () => {
+    await dispatch(startGame());
   };
 
   return (
@@ -34,22 +39,30 @@ export function HomeChatPage() {
             )) : 'No messages yet.'}
           </div>
 
-          <form onSubmit={handleSubmit} style={{ marginTop: '16px' }}>
-            <label htmlFor="chatMessage">Message</label>
-            <br />
-            <textarea
-              id="chatMessage"
-              rows={8}
-              cols={80}
-              value={message}
-              onChange={(event) => dispatch(setMessage(event.target.value))}
-              placeholder="Ask the LLM about the world, or tell it where to move."
-            />
-            <br />
-            <button type="submit" disabled={request.status === 'loading'}>
-              {request.status === 'loading' ? 'Sending...' : 'Send'}
-            </button>
-          </form>
+          {hasStarted ? (
+            <form onSubmit={handleSubmit} style={{ marginTop: '16px' }}>
+              <label htmlFor="chatMessage">Message</label>
+              <br />
+              <textarea
+                id="chatMessage"
+                rows={8}
+                cols={80}
+                value={message}
+                onChange={(event) => dispatch(setMessage(event.target.value))}
+                placeholder="Ask the LLM about the world, or tell it where to move."
+              />
+              <br />
+              <button type="submit" disabled={request.status === 'loading'}>
+                {request.status === 'loading' ? 'Sending...' : 'Send'}
+              </button>
+            </form>
+          ) : (
+            <section style={{ marginTop: '16px' }}>
+              <button type="button" onClick={() => void handleStartGame()} disabled={request.status === 'loading'}>
+                {request.status === 'loading' ? 'Starting...' : '开始游戏'}
+              </button>
+            </section>
+          )}
         </section>
 
         <aside style={{ border: '1px solid', padding: '12px' }}>

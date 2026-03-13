@@ -55,6 +55,7 @@ export async function runGameChatTurn(input: {
 
   // 由于有提供了工具，modelResponse 可能为实际的文本回复，或者是一个工具调用请求
   // 类似 [sys, user, res] 或者 [sys, user, toolcall]
+  console.log('[DEBUG] runGameChatTurn() - runChatCompletionWithTools() call');
   const modelResponse = await runChatCompletionWithTools({
     messages: [
       { role: 'system', content: buildGameSystemPrompt(sceneContext, activeLargeDescription.descriptionText, nearbySmallDescriptions) },
@@ -63,6 +64,7 @@ export async function runGameChatTurn(input: {
     ],
     tools: [MOVE_PLAYER_TOOL],
   });
+  console.log('[DEBUG] runGameChatTurn() - runChatCompletionWithTools() call');
 
   let movementResult: MovePlayerToolResult | null = null;
   // 这里先假设 modelResponse 为实际的文本回复，也就是 [sys, user, res] 结构。
@@ -101,6 +103,7 @@ export async function runGameChatTurn(input: {
     // TODO:
     // 由于目前的结构非常简单，LLM 不用处理信息，只负责描述和判断移动，所以可以这么处理（把 toolreturn 种种全部打包伪装成 assistant）
     // 这是这一版的妥协，以后肯定得想办法改掉。
+    console.log('[DEBUG] runGameChatTurn() - generateReplyWithSystemPrompt() call');
     assistantMessage = (
       await generateReplyWithSystemPrompt(
         [
@@ -118,6 +121,7 @@ export async function runGameChatTurn(input: {
         ].join('\n\n'),
       )
     ).reply;
+    console.log('[DEBUG] runGameChatTurn() - generateReplyWithSystemPrompt() return');
 
     session.save.playerPosition = nextPosition;
   }

@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { submitGameChat } from '../../api/gameApi';
+import { OPENING_GAME_PROMPT } from './openingPrompt';
 import type {
   GameChatResponse,
   GameMessage,
@@ -23,6 +24,7 @@ interface ChatState {
   sessionId: string | null;
   message: string;
   messages: GameMessage[];
+  hasStarted: boolean;
   playerPosition: GamePosition | null;
   activeLargeDescription: LargeDescriptionRecord | null;
   nearbySmallDescriptions: SmallDescriptionRecord[];
@@ -34,6 +36,7 @@ const initialState: ChatState = {
   sessionId: null,
   message: '',
   messages: [],
+  hasStarted: false,
   playerPosition: null,
   activeLargeDescription: null,
   nearbySmallDescriptions: [],
@@ -67,6 +70,22 @@ export const submitChatMessage = createAsyncThunk<GameChatResponse, void, { stat
   },
 );
 
+export const startGame = createAsyncThunk<GameChatResponse, void, { state: RootState; rejectValue: string }>(
+  'chat/startGame',
+  async (_unused, { getState, rejectWithValue }) => {
+    const { chat } = getState();
+
+    try {
+      return await submitGameChat({
+        sessionId: chat.sessionId || undefined,
+        message: OPENING_GAME_PROMPT,
+      });
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
+    }
+  },
+);
+
 const chatSlice = createSlice({
   name: 'chat',
   initialState,
@@ -88,6 +107,7 @@ const chatSlice = createSlice({
         const userMessage = state.message.trim();
 
         state.request.status = 'succeeded';
+        state.hasStarted = true;
         state.sessionId = action.payload.sessionId;
         state.playerPosition = action.payload.playerPosition;
         state.activeLargeDescription = action.payload.activeLargeDescription;
@@ -102,6 +122,27 @@ const chatSlice = createSlice({
       .addCase(submitChatMessage.rejected, (state, action) => {
         state.request.status = 'failed';
         state.request.error = action.payload || 'Unknown error.';
+      })
+      .addCase(startGame.pending, (state) => {
+        state.request.status = 'loading';
+        state.request.error = null;
+      })
+      .addCase(startGame.fulfilled, (state, action) => {
+        state.request.status = 'succeeded';
+        state.hasStarted = true;
+        state.sessionId = action.payload.sessionId;
+        state.playerPosition = action.payload.playerPosition;
+        state.activeLargeDescription = action.payload.activeLargeDescription;
+        state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
+        state.latestMovementResult = action.payload.movementResult;
+        state.messages.push(
+          { role: 'assistant', content: action.payload.assistantMessage },
+        );
+      })
+      .addCase(startGame.rejected, (state, action) => {
+        state.request.status = 'failed';
+        state.request.error = action.payload || 'Unknown error.';
+        state.hasStarted = false;
       });
   },
 });

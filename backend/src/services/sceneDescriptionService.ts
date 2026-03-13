@@ -19,6 +19,7 @@ export async function ensureLargeDescription(
     return existing;
   }
 
+  console.log('[DEBUG] ensureLargeDescription() - generateReplyWithSystemPrompt() call');
   const generated = await generateReplyWithSystemPrompt(
     [
       '你是一个环境叙述生成器。你的任务是将结构化的地理环境数据转换为用于文字探索游戏的环境描述。',
@@ -37,6 +38,7 @@ export async function ensureLargeDescription(
     ].join('\n'),
     sceneContext.largeSummary,
   );
+  console.log('[DEBUG] ensureLargeDescription() - generateReplyWithSystemPrompt() return');
 
   return insertLargeDescription(session, {
     position: sceneContext.position,
@@ -55,8 +57,10 @@ export async function ensureSmallDescription(
     return existing;
   }
 
+  console.log('[DEBUG] ensureSmallDescription() - generateSmallDescription() call');
   const nearby = await findNearbySmallDescriptions(session, sceneContext.position, 200);
   const generated = await generateSmallDescription(sceneContext, nearby);
+  console.log('[DEBUG] ensureSmallDescription() - generateSmallDescription() return');
   return insertSmallDescription(session, {
     position: sceneContext.position,
     sourceSceneSignature: sceneContext.smallSceneSignature,
