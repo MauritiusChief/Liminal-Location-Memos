@@ -13,6 +13,7 @@ import type {
   SceneContext,
   SmallDescriptionRecord,
 } from '../types/game.js';
+import { styleRule } from './sharedDefaultSysPromptPart.js';
 
 // 目前正式游戏回合只暴露一个工具：
 // 模型如果判断用户想移动，就必须把结果收敛为“角度 + 距离”。
@@ -185,6 +186,7 @@ function buildGameSystemPrompt(
   return [
     '你是一个文字探索游戏的会话助手。',
     '如果用户要求移动，调用 move_player 工具；如果没有移动意图，则直接自然回复。',
+    styleRule,
     '不要在文本回复里暴露经纬度、网格、极坐标等内部实现。',
     '请优先保持空间连续性，并参考当前区域的总体环境描述和附近其他地点的远距可见细节。',
     '',
