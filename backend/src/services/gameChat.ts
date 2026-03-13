@@ -94,36 +94,29 @@ export async function runGameChatTurn(input: {
       coverageSyncTriggered: moveCoverageSyncTriggered,
     };
 
-    // TODO 搞清楚到底 tool call 是个什么流程
-
     // 由于已确认 modelResponse 是一个工具调用请求，结构为 [sys, user, toolcall]
     // toolcall 经过上面步骤的计算，变成了 movementResult 等信息
-    // 为什么要在这里动用 LLM 生成 assistant？？
     // 下一步可以组装成 [sys, user, assist(来自movementResult, activeXxxDescription等), <slot for next 'user'>]
-
-    assistantMessage = [
-      `移动结果：方位${Math.round(movementResult.bearingDegrees)}°，距离${Math.round(movementResult.distanceMeters)}m。`,
-      `移动后的当前总体描述：${activeLargeDescription.descriptionText}`,
-      `移动后的当前局部描述：\n${activeSmallDescription.descriptionText}\n${activeSmallDescription.farVisibleNotes}`,
-    ].join('\n\n')
-
-    // assistantMessage = (
-    //   await generateReplyWithSystemPrompt(
-    //     [
-    //       '你是一个文字探索游戏中的叙述助手。',
-    //       '玩家已经完成一次移动。',
-    //       '请根据新的环境上下文，输出自然语言回复。',
-    //       '如果用户输入是移动指令，应确认移动后的所见环境。',
-    //       '不要提及工具调用、经纬度或内部实现。',
-    //     ].join('\n'),
-    //     [
-    //       `用户输入：${input.message}`,
-    //       `移动结果：方位${Math.round(movementResult.bearingDegrees)}°，距离${Math.round(movementResult.distanceMeters)}m。`,
-    //       `当前总体描述：${activeLargeDescription.descriptionText}`,
-    //       `当前局部描述：\n${activeSmallDescription.descriptionText}\n${activeSmallDescription.farVisibleNotes}`,
-    //     ].join('\n\n'),
-    //   )
-    // ).reply;
+    // TODO:
+    // 由于目前的结构非常简单，LLM 不用处理信息，只负责描述和判断移动，所以可以这么处理（把 toolreturn 种种全部打包伪装成 assistant）
+    // 这是这一版的妥协，以后肯定得想办法改掉。
+    assistantMessage = (
+      await generateReplyWithSystemPrompt(
+        [
+          '你是一个文字探索游戏中的叙述助手。',
+          '玩家已经完成一次移动。',
+          '请根据新的环境上下文，输出自然语言回复。',
+          '如果用户输入是移动指令，应确认移动后的所见环境。',
+          '不要提及工具调用、经纬度或内部实现。',
+        ].join('\n'),
+        [
+          `用户输入：${input.message}`,
+          `移动过程：方位${Math.round(movementResult.bearingDegrees)}°，距离${Math.round(movementResult.distanceMeters)}m。`,
+          `移动后总体描述：${activeLargeDescription.descriptionText}`,
+          `移动后局部描述：\n${activeSmallDescription.descriptionText}\n${activeSmallDescription.farVisibleNotes}`,
+        ].join('\n\n'),
+      )
+    ).reply;
 
     session.save.playerPosition = nextPosition;
   }
