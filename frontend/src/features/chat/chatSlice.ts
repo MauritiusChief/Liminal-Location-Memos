@@ -1,10 +1,12 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { submitGameChat } from '../../api/gameApi';
+import { fetchGameSessionSnapshot, submitGameChat } from '../../api/gameApi';
 import { OPENING_GAME_PROMPT } from './openingPrompt';
+import { readStoredSessionId, writeStoredSessionId } from './sessionStorage';
 import type {
   GameChatResponse,
   GameMessage,
   GamePosition,
+  GameSessionSnapshotResponse,
   LargeDescriptionRecord,
   SmallDescriptionRecord,
   MovePlayerToolResult,
@@ -25,6 +27,8 @@ interface ChatState {
   message: string;
   messages: GameMessage[];
   hasStarted: boolean;
+  detectedStoredSessionId: string | null;
+  hasCheckedStoredSessionId: boolean;
   playerPosition: GamePosition | null;
   activeLargeDescription: LargeDescriptionRecord | null;
   nearbySmallDescriptions: SmallDescriptionRecord[];
@@ -37,6 +41,8 @@ const initialState: ChatState = {
   message: '',
   messages: [],
   hasStarted: false,
+  detectedStoredSessionId: null,
+  hasCheckedStoredSessionId: false,
   playerPosition: null,
   activeLargeDescription: null,
   nearbySmallDescriptions: [],
@@ -70,6 +76,11 @@ export const submitChatMessage = createAsyncThunk<GameChatResponse, void, { stat
   },
 );
 
+export const hydrateStoredSessionId = createAsyncThunk<string | null>(
+  'chat/hydrateStoredSessionId',
+  async () => readStoredSessionId(),
+);
+
 export const startGame = createAsyncThunk<GameChatResponse, void, { state: RootState; rejectValue: string }>(
   'chat/startGame',
   async (_unused, { getState, rejectWithValue }) => {
@@ -77,9 +88,27 @@ export const startGame = createAsyncThunk<GameChatResponse, void, { state: RootS
 
     try {
       return await submitGameChat({
-        sessionId: chat.sessionId || undefined,
+        sessionId: undefined,
         message: OPENING_GAME_PROMPT,
       });
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
+    }
+  },
+);
+
+export const restoreStoredSession = createAsyncThunk<GameSessionSnapshotResponse, void, { state: RootState; rejectValue: string }>(
+  'chat/restoreStoredSession',
+  async (_unused, { getState, rejectWithValue }) => {
+    const { chat } = getState();
+    const sessionId = chat.detectedStoredSessionId;
+
+    if (!sessionId) {
+      return rejectWithValue('No stored session detected.');
+    }
+
+    try {
+      return await fetchGameSessionSnapshot(sessionId);
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
     }
@@ -109,6 +138,7 @@ const chatSlice = createSlice({
         state.request.status = 'succeeded';
         state.hasStarted = true;
         state.sessionId = action.payload.sessionId;
+        state.detectedStoredSessionId = action.payload.sessionId;
         state.playerPosition = action.payload.playerPosition;
         state.activeLargeDescription = action.payload.activeLargeDescription;
         state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
@@ -118,10 +148,15 @@ const chatSlice = createSlice({
           { role: 'assistant', content: action.payload.assistantMessage },
         );
         state.message = '';
+        writeStoredSessionId(action.payload.sessionId);
       })
       .addCase(submitChatMessage.rejected, (state, action) => {
         state.request.status = 'failed';
         state.request.error = action.payload || 'Unknown error.';
+      })
+      .addCase(hydrateStoredSessionId.fulfilled, (state, action) => {
+        state.detectedStoredSessionId = action.payload;
+        state.hasCheckedStoredSessionId = true;
       })
       .addCase(startGame.pending, (state) => {
         state.request.status = 'loading';
@@ -131,6 +166,7 @@ const chatSlice = createSlice({
         state.request.status = 'succeeded';
         state.hasStarted = true;
         state.sessionId = action.payload.sessionId;
+        state.detectedStoredSessionId = action.payload.sessionId;
         state.playerPosition = action.payload.playerPosition;
         state.activeLargeDescription = action.payload.activeLargeDescription;
         state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
@@ -138,11 +174,32 @@ const chatSlice = createSlice({
         state.messages.push(
           { role: 'assistant', content: action.payload.assistantMessage },
         );
+        writeStoredSessionId(action.payload.sessionId);
       })
       .addCase(startGame.rejected, (state, action) => {
         state.request.status = 'failed';
         state.request.error = action.payload || 'Unknown error.';
         state.hasStarted = false;
+      })
+      .addCase(restoreStoredSession.pending, (state) => {
+        state.request.status = 'loading';
+        state.request.error = null;
+      })
+      .addCase(restoreStoredSession.fulfilled, (state, action) => {
+        state.request.status = 'succeeded';
+        state.hasStarted = action.payload.hasStarted;
+        state.sessionId = action.payload.sessionId;
+        state.detectedStoredSessionId = action.payload.sessionId;
+        state.messages = action.payload.messages;
+        state.playerPosition = action.payload.playerPosition;
+        state.activeLargeDescription = action.payload.activeLargeDescription;
+        state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
+        state.latestMovementResult = null;
+        writeStoredSessionId(action.payload.sessionId);
+      })
+      .addCase(restoreStoredSession.rejected, (state, action) => {
+        state.request.status = 'failed';
+        state.request.error = action.payload || 'Unknown error.';
       });
   },
 });

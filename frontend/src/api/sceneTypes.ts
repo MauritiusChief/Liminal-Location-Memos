@@ -274,3 +274,17 @@ export interface GameChatResponse {
     coverageSyncTriggered: boolean;
   } | null;
 }
+
+export interface GameSessionSnapshotResponse {
+  sessionId: string;
+  hasStarted: boolean;
+  messages: GameMessage[];
+  playerPosition: GamePosition;
+  activeLargeDescription: LargeDescriptionRecord | null;
+  nearbySmallDescriptions: SmallDescriptionRecord[];
+  debugSceneMeta: {
+    diagnostics: DbNormalizationDiagnostics;
+    largeSceneSignature: string;
+    smallSceneSignature: string;
+  } | null;
+}

@@ -1,6 +1,13 @@
-import { FormEvent } from 'react';
+import { FormEvent, useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
-import { selectChatState, setMessage, startGame, submitChatMessage } from '../features/chat/chatSlice';
+import {
+  hydrateStoredSessionId,
+  restoreStoredSession,
+  selectChatState,
+  setMessage,
+  startGame,
+  submitChatMessage,
+} from '../features/chat/chatSlice';
 
 export function HomeChatPage() {
   const dispatch = useAppDispatch();
@@ -8,12 +15,20 @@ export function HomeChatPage() {
     message,
     messages,
     hasStarted,
+    detectedStoredSessionId,
+    hasCheckedStoredSessionId,
     playerPosition,
     activeLargeDescription,
     nearbySmallDescriptions,
     latestMovementResult,
     request,
   } = useAppSelector(selectChatState);
+
+  useEffect(() => {
+    if (!hasCheckedStoredSessionId) {
+      void dispatch(hydrateStoredSessionId());
+    }
+  }, [dispatch, hasCheckedStoredSessionId]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -22,6 +37,10 @@ export function HomeChatPage() {
 
   const handleStartGame = async () => {
     await dispatch(startGame());
+  };
+
+  const handleRestoreStoredSession = async () => {
+    await dispatch(restoreStoredSession());
   };
 
   return (
@@ -58,6 +77,19 @@ export function HomeChatPage() {
             </form>
           ) : (
             <section style={{ marginTop: '16px' }}>
+              {detectedStoredSessionId ? (
+                <div style={{ marginBottom: '12px' }}>
+                  <p>检测到已有存档。</p>
+                  <button
+                    type="button"
+                    onClick={() => void handleRestoreStoredSession()}
+                    disabled={request.status === 'loading'}
+                    style={{ marginRight: '8px' }}
+                  >
+                    {request.status === 'loading' ? 'Restoring...' : '读取检测到的存档'}
+                  </button>
+                </div>
+              ) : null}
               <button type="button" onClick={() => void handleStartGame()} disabled={request.status === 'loading'}>
                 {request.status === 'loading' ? 'Starting...' : '开始游戏'}
               </button>

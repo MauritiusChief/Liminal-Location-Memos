@@ -18,6 +18,7 @@ import {
   type NormalizedOverpassRequest,
 } from '../services/overpassNormalization.js';
 import { runGameChatTurn } from '../services/gameChat.js';
+import { getSessionSnapshot } from '../services/gameSessionStore.js';
 import type { GameChatRequest } from '../types/game.js';
 import type { NormalizedOverpassRequestBody } from '../types/overpass.js';
 
@@ -180,6 +181,29 @@ apiRouter.post('/game/chat', async (request, response) => {
   } catch (error) {
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected game chat error.',
+    });
+  }
+});
+
+apiRouter.get('/game/session/:sessionId', async (request, response) => {
+  const sessionId = typeof request.params.sessionId === 'string' ? request.params.sessionId.trim() : '';
+
+  if (!sessionId) {
+    response.status(400).json({ error: 'sessionId is required.' });
+    return;
+  }
+
+  try {
+    const snapshot = await getSessionSnapshot(sessionId);
+    if (!snapshot) {
+      response.status(404).json({ error: 'Session not found.' });
+      return;
+    }
+
+    response.json(snapshot);
+  } catch (error) {
+    response.status(502).json({
+      error: error instanceof Error ? error.message : 'Unexpected session restore error.',
     });
   }
 });

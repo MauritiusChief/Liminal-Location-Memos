@@ -129,3 +129,18 @@ export interface GameChatResponse {
     coverageSyncTriggered: boolean;
   } | null;
 }
+
+export interface GameSessionSnapshotResponse {
+  // 这是“恢复旧存档”专用的只读快照，不会产生新消息。
+  sessionId: string;
+  hasStarted: boolean;
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  playerPosition: GamePosition;
+  activeLargeDescription: LargeDescriptionRecord | null;
+  nearbySmallDescriptions: SmallDescriptionRecord[];
+  debugSceneMeta: {
+    diagnostics: DbNormalizationDiagnostics;
+    largeSceneSignature: string;
+    smallSceneSignature: string;
+  } | null;
+}

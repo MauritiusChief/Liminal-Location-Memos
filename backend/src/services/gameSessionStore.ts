@@ -5,6 +5,7 @@ import { buildDescriptionIndex } from './gameDescriptionIndex.js';
 import type {
   GamePosition,
   GameSaveDocument,
+  GameSessionSnapshotResponse,
   LoadedGameSession,
   LastSceneContextMeta,
 } from '../types/game.js';
@@ -44,6 +45,42 @@ export async function updateSession(session: LoadedGameSession): Promise<void> {
   session.descriptionIndex = buildDescriptionIndex(session.save);
   sessions.set(session.save.sessionId, session);
   await persistSaveDocument(session.save);
+}
+
+export async function getSessionSnapshot(sessionId: string): Promise<GameSessionSnapshotResponse | null> {
+  const session = await getOrCreateSession(sessionId);
+  const activeLargeDescription = session.save.activeLargeDescriptionId
+    ? session.save.largeDescriptions.find((record) => record.id === session.save.activeLargeDescriptionId) || null
+    : null;
+  const nearbySmallDescriptions = session.save.visibleSmallDescriptionIds
+    .map((id) => session.save.smallDescriptions.find((record) => record.id === id) || null)
+    .filter((record): record is NonNullable<typeof record> => record !== null);
+
+  // 若 sessionId 对应的 JSON 根本不存在，则 getOrCreateSession 会新建一个空存档。
+  // 恢复接口不应该把“新建空存档”误认为成功恢复，因此这里要求至少已有历史或描述才算可恢复。
+  const hasPersistedState = session.save.messageHistory.length > 0
+    || session.save.largeDescriptions.length > 0
+    || session.save.smallDescriptions.length > 0;
+
+  if (!hasPersistedState) {
+    return null;
+  }
+
+  return {
+    sessionId: session.save.sessionId,
+    hasStarted: true,
+    messages: session.save.messageHistory
+      .filter((message): message is { role: 'user' | 'assistant'; content: string } =>
+        message.role === 'user' || message.role === 'assistant')
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+    playerPosition: session.save.playerPosition,
+    activeLargeDescription,
+    nearbySmallDescriptions,
+    debugSceneMeta: session.save.lastSceneContextMeta,
+  };
 }
 
 export function updateLastSceneContextMeta(
