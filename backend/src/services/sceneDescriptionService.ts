@@ -15,6 +15,9 @@ export async function ensureLargeDescription(
 ): Promise<LargeDescriptionRecord> {
   // 大描述优先复用；只有同 scene 的描述不存在时才调用 LLM 生成。
   const existing = await findActiveLargeDescription(session, sceneContext.position, sceneContext.largeSceneSignature);
+  // TODO 为何没有找到可复用内容？
+  console.log('[DEBUG] ensureLargeDescription() - 找到可复用 large description 了吗？', existing !== null);
+
   if (existing) {
     return existing;
   }
@@ -53,6 +56,9 @@ export async function ensureSmallDescription(
 ): Promise<SmallDescriptionRecord> {
   // 小描述也是“先查再生”，只是生成时会额外参考周边小描述的远距可见细节。
   const existing = await findReusableSmallDescription(session, sceneContext.position, sceneContext.smallSceneSignature);
+  // TODO 为何没有找到可复用内容？
+  console.log('[DEBUG] ensureSmallDescription() - 找到可复用 small description 了吗？', existing !== null);
+
   if (existing) {
     return existing;
   }

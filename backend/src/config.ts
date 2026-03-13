@@ -36,6 +36,7 @@ export const config = {
   llmApiKey: readRequiredEnv('LLM_API_KEY'),
   llmBaseUrl: readRequiredEnv('LLM_BASE_URL'),
   llmModel: readRequiredEnv('LLM_MODEL'),
+  gameChatDebugLogEnabled: /^true$/i.test(process.env.GAME_CHAT_DEBUG_LOG || ''),
   db: {
     enabled: Boolean(dbHost && dbPort && dbDatabase && dbUser && dbPassword),
     host: dbHost,

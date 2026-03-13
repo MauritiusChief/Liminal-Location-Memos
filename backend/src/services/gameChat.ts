@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { movePosition } from './gameMovement.js';
 import { ensureCoverageForPosition, loadSceneContext } from './gameScene.js';
 import { getOrCreateSession, updateLastSceneContextMeta, updateSession } from './gameSessionStore.js';
@@ -7,6 +8,7 @@ import {
   type ChatRequestMessage,
   type ToolDefinition,
 } from './llm.js';
+// import { appendGameChatDebugLog, buildMessageDebugSummary, logGameChatDebugSummary } from './gameChatDebugLog.js';
 import { findNearbySmallDescriptions } from './sceneDescriptionRepository.js';
 import { ensureLargeDescription, ensureSmallDescription, filterFarVisibleSmallDescriptions } from './sceneDescriptionService.js';
 import type {
@@ -52,6 +54,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   // 4. 让模型决定是否调用 move_player
   // 5. 若移动则刷新场景和描述，并把 assistant(tool_call) + tool(tool_return) 带回第二轮生成最终自然语言回复
   const session = await getOrCreateSession(input.sessionId);
+  const turnId = randomUUID();
   let coverageSyncTriggered = await ensureCoverageForPosition(session.save.playerPosition);
   let sceneContext = await loadSceneContext(session.save.playerPosition);
   let activeLargeDescription = await ensureLargeDescription(sceneContext, session);
@@ -63,9 +66,6 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     isOpeningPrompt: input.isOpeningPrompt === true,
   };
 
-  // 由于有提供了工具，modelResponse 可能为实际的文本回复，或者是一个工具调用请求
-  // 类似 [sys, user, res] 或者 [sys, user, toolcall]
-  console.log('[DEBUG] runGameChatTurn() - runChatCompletionWithTools() call');
   const modelResponse = await runChatCompletionWithTools({
     messages: [
       { role: 'system', content: buildGameSystemPrompt(sceneContext, activeLargeDescription.descriptionText, nearbySmallDescriptions) },
@@ -73,8 +73,12 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
       { role: 'user', content: input.message },
     ],
     tools: [MOVE_PLAYER_TOOL],
+    debugContext: {
+      sessionId: session.save.sessionId,
+      turnId,
+      stage: 'initial',
+    },
   });
-  console.log('[DEBUG] runGameChatTurn() - runChatCompletionWithTools() return');
 
   let movementResult: MovePlayerToolResult | null = null;
   // 这里先假设 modelResponse 为实际的文本回复，也就是 [sys, user, res] 结构。
@@ -113,27 +117,42 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
       role: 'tool',
       content: JSON.stringify({
         movementResult,
-        activeLargeDescription,
-        activeSmallDescription,
+        // activeLargeDescription,
+        // activeSmallDescription,
       }),
       toolCallId: assistantToolCallMessage.toolCallId,
       toolName: assistantToolCallMessage.toolName,
     };
 
+    const followUpMessages = [
+      { role: 'system', content: buildGameSystemPrompt(sceneContext, activeLargeDescription.descriptionText, nearbySmallDescriptions) },
+      ...buildHistoryMessages(session.save.messageHistory),
+      { role: 'user', content: input.message },
+      ...buildHistoryMessages([assistantToolCallMessage, toolReturnMessage]),
+    ] as ChatRequestMessage[];
+
+    // logGameChatDebugSummary('[game-chat][follow-up-messages]', {
+    //   sessionId: session.save.sessionId,
+    //   turnId,
+    //   stage: 'follow_up',
+    //   messages: buildMessageDebugSummary(followUpMessages).slice(-4),
+    // });
+
     const followUpResponse = await runChatCompletionWithTools({
-      messages: [
-        { role: 'system', content: buildGameSystemPrompt(sceneContext, activeLargeDescription.descriptionText, nearbySmallDescriptions) },
-        ...buildHistoryMessages(session.save.messageHistory),
-        { role: 'user', content: input.message },
-        ...buildHistoryMessages([assistantToolCallMessage, toolReturnMessage]),
-      ],
+      messages: followUpMessages,
       tools: [MOVE_PLAYER_TOOL],
+      // debugContext: {
+      //   sessionId: session.save.sessionId,
+      //   turnId,
+      //   stage: 'follow_up',
+      // },
     });
 
     if (followUpResponse.toolCall) {
       throw new Error('Nested tool calls are not supported in a single turn.');
     }
 
+    // 由于已确认 modelResponse 是一个工具调用请求，结构为 [sys, user, toolcall]
     assistantMessage = followUpResponse.reply || activeLargeDescription.descriptionText;
     messagesToAppend.push(
       assistantToolCallMessage,
@@ -141,6 +160,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
       {
         role: 'assistant',
         content: assistantMessage,
+        reasoningContent: followUpResponse.assistantMessageForHistory.reasoningContent,
       },
     );
     session.save.playerPosition = nextPosition;
@@ -148,6 +168,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     messagesToAppend.push({
       role: 'assistant',
       content: assistantMessage,
+      reasoningContent: modelResponse.assistantMessageForHistory.reasoningContent,
     });
   }
 
@@ -164,6 +185,19 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   ];
   session.save.messageHistory = nextHistory.slice(-12);
   await updateSession(session);
+  // await appendGameChatDebugLog({
+  //   type: 'game_turn_summary',
+  //   timestamp: new Date().toISOString(),
+  //   sessionId: session.save.sessionId,
+  //   turnId,
+  //   stage: movementResult ? 'follow_up' : 'initial',
+  //   summary: {
+  //     messageCount: session.save.messageHistory.length,
+  //     toolCallDetected: modelResponse.toolCall?.name === 'move_player',
+  //     movementResult,
+  //     playerPosition: session.save.playerPosition,
+  //   },
+  // });
 
   return {
     sessionId: session.save.sessionId,
@@ -196,6 +230,7 @@ function buildHistoryMessages(history: GameMessage[]): ChatRequestMessage[] {
       messages.push({
         role: 'assistant',
         content: message.content,
+        reasoning_content: message.reasoningContent,
         tool_calls: [{
           id: message.toolCallId,
           type: 'function',
@@ -209,7 +244,11 @@ function buildHistoryMessages(history: GameMessage[]): ChatRequestMessage[] {
     }
 
     if (message.role === 'assistant') {
-      messages.push({ role: 'assistant', content: message.content });
+      messages.push({
+        role: 'assistant',
+        content: message.content,
+        reasoning_content: message.reasoningContent,
+      });
       continue;
     }
 
@@ -306,6 +345,7 @@ function toStoredAssistantToolCallMessage(
   return {
     role: 'assistant',
     content: message.content,
+    reasoningContent: message.reasoningContent,
     isToolCallMessage: true,
     toolCallId: toolCall.id,
     toolName: toolCall.name,

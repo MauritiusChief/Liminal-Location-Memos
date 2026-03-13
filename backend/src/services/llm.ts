@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+// import { appendGameChatDebugLog, buildMessageDebugSummary, logGameChatDebugSummary } from './gameChatDebugLog.js';
 
 interface ChatCompletionContentPart {
   type?: string;
@@ -61,10 +62,11 @@ export interface ToolEnabledChatResponse extends LlmDebugResponse {
 }
 
 export type AssistantHistoryMessage =
-  | { role: 'assistant'; content: string; isToolCallMessage?: false }
+  | { role: 'assistant'; content: string; reasoningContent?: string; isToolCallMessage?: false }
   | {
       role: 'assistant';
       content: string;
+      reasoningContent?: string;
       isToolCallMessage: true;
       toolCallId: string;
       toolName: string;
@@ -76,6 +78,7 @@ export type ChatRequestMessage =
   | {
       role: 'assistant';
       content: string;
+      reasoning_content?: string;
       tool_calls?: Array<{
         id: string;
         type: 'function';
@@ -109,10 +112,16 @@ export async function generateReplyWithSystemPrompt(systemPrompt: string, messag
 export async function runChatCompletionWithTools(input: {
   messages: ChatRequestMessage[];
   tools: ToolDefinition[];
+  debugContext?: {
+    sessionId: string;
+    turnId: string;
+    stage: string;
+  };
 }): Promise<ToolEnabledChatResponse> {
   const payload = await requestChatCompletion({
     messages: input.messages,
     tools: input.tools,
+    debugContext: input.debugContext,
   });
   const message = payload?.choices?.[0]?.message;
 
@@ -126,7 +135,35 @@ export async function runChatCompletionWithTools(input: {
 async function requestChatCompletion(input: {
   messages: ChatRequestMessage[];
   tools?: ToolDefinition[];
+  debugContext?: {
+    sessionId: string;
+    turnId: string;
+    stage: string;
+  };
 }): Promise<ChatCompletionResponse | null> {
+  // if (input.debugContext) {
+  //   const summary = buildMessageDebugSummary(input.messages);
+  //   logGameChatDebugSummary('[game-chat][request]', {
+  //     stage: input.debugContext.stage,
+  //     sessionId: input.debugContext.sessionId,
+  //     turnId: input.debugContext.turnId,
+  //     messages: summary,
+  //   });
+  //   await appendGameChatDebugLog({
+  //     type: 'chat_completion_request',
+  //     timestamp: new Date().toISOString(),
+  //     sessionId: input.debugContext.sessionId,
+  //     turnId: input.debugContext.turnId,
+  //     stage: input.debugContext.stage,
+  //     model: config.llmModel,
+  //     summary,
+  //     raw: {
+  //       messages: input.messages,
+  //       tools: input.tools,
+  //     },
+  //   });
+  // }
+
   const response = await fetch(`${config.llmBaseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
     method: 'POST',
     headers: {
@@ -141,6 +178,31 @@ async function requestChatCompletion(input: {
   });
 
   const payload = (await response.json().catch(() => null)) as ChatCompletionResponse | null;
+
+  // if (input.debugContext) {
+  //   const message = payload?.choices?.[0]?.message;
+  //   const responseSummary = {
+  //     hasToolCall: extractToolCall(message) !== null,
+  //     hasReasoningContent: extractReasoningContent(message) !== null,
+  //     replyLength: extractReplyText(message).length,
+  //   };
+  //   logGameChatDebugSummary('[game-chat][response]', {
+  //     stage: input.debugContext.stage,
+  //     sessionId: input.debugContext.sessionId,
+  //     turnId: input.debugContext.turnId,
+  //     ...responseSummary,
+  //   });
+  //   await appendGameChatDebugLog({
+  //     type: 'chat_completion_response',
+  //     timestamp: new Date().toISOString(),
+  //     sessionId: input.debugContext.sessionId,
+  //     turnId: input.debugContext.turnId,
+  //     stage: input.debugContext.stage,
+  //     model: config.llmModel,
+  //     summary: responseSummary,
+  //     raw: payload,
+  //   });
+  // }
 
   if (!response.ok) {
     throw new Error(payload?.error?.message || 'LLM request failed.');
@@ -195,17 +257,20 @@ function extractToolCall(message: ChatCompletionMessage | undefined): ToolCallRe
 function extractAssistantMessageForHistory(message: ChatCompletionMessage | undefined): AssistantHistoryMessage {
   const toolCall = extractToolCall(message);
   const content = extractReplyText(message);
+  const reasoningContent = extractReasoningContent(message) || undefined;
 
   if (!toolCall) {
     return {
       role: 'assistant',
       content,
+      reasoningContent,
     };
   }
 
   return {
     role: 'assistant',
     content,
+    reasoningContent,
     isToolCallMessage: true,
     toolCallId: toolCall.id,
     toolName: toolCall.name,
@@ -233,6 +298,12 @@ function extractReasoningText(message: ChatCompletionMessage | undefined): strin
     .trim();
 
   return reasoningText || null;
+}
+
+function extractReasoningContent(message: ChatCompletionMessage | undefined): string | null {
+  return collectTextFromUnknownContent(message?.reasoning_content)
+    || collectTextFromUnknownContent(message?.reasoning)
+    || null;
 }
 
 function collectTextFromUnknownContent(content: string | ChatCompletionContentPart[] | undefined): string | null {

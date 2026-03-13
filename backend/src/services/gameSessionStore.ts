@@ -154,12 +154,13 @@ function normalizeMessageHistory(history: unknown): GameMessage[] {
       messages.push({
         role: 'user' as const,
         content,
-        isOpeningPrompt: isLikelyOpeningPrompt(content) || (typeof item.isOpeningPrompt === 'boolean' ? item.isOpeningPrompt : undefined),
+        isOpeningPrompt: typeof item.isOpeningPrompt === 'boolean' ? item.isOpeningPrompt : undefined,
       });
       continue;
     }
 
     if (role === 'assistant') {
+      const reasoningContent = typeof item.reasoningContent === 'string' ? item.reasoningContent : undefined;
       const isToolCallMessage = item.isToolCallMessage === true;
       if (isToolCallMessage
         && typeof item.toolCallId === 'string'
@@ -168,6 +169,7 @@ function normalizeMessageHistory(history: unknown): GameMessage[] {
         messages.push({
           role: 'assistant' as const,
           content,
+          reasoningContent,
           isToolCallMessage: true,
           toolCallId: item.toolCallId,
           toolName: item.toolName,
@@ -179,6 +181,7 @@ function normalizeMessageHistory(history: unknown): GameMessage[] {
       messages.push({
         role: 'assistant' as const,
         content,
+        reasoningContent,
       });
       continue;
     }
@@ -214,8 +217,4 @@ function isFileNotFound(error: unknown): boolean {
     && error !== null
     && 'code' in error
     && error.code === 'ENOENT';
-}
-
-function isLikelyOpeningPrompt(content: string): boolean {
-  return content.startsWith('请作为游戏开场描述当前环境。');
 }

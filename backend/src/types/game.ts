@@ -18,11 +18,13 @@ export type GameMessage =
   | {
       role: 'assistant';
       content: string;
+      reasoningContent?: string;
       isToolCallMessage?: false;
     }
   | {
       role: 'assistant';
       content: string;
+      reasoningContent?: string;
       isToolCallMessage: true;
       toolCallId: string;
       toolName: string;
