@@ -206,3 +206,71 @@ export interface SceneLoadResponse {
 export interface RawOverpassResponse {
   data: unknown;
 }
+
+// 下面这一组是首页“正式游戏会话”使用的类型。
+export interface GamePosition {
+  lat: number;
+  lon: number;
+}
+
+export interface GameMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface MovePlayerToolResult {
+  previousPosition: GamePosition;
+  nextPosition: GamePosition;
+  bearingDegrees: number;
+  distanceMeters: number;
+  reason: string;
+  targetLabel?: string;
+  coverageSyncTriggered: boolean;
+}
+
+export interface LargeDescriptionRecord {
+  id: string;
+  center: GamePosition;
+  sourceRadiusM: number;
+  effectiveRadiusM: number;
+  sourceSceneSignature: string;
+  descriptionText: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SmallDescriptionRecord {
+  // distanceMeters 由后端查询或补算后带回，主要给 debug 列表排序和展示。
+  id: string;
+  center: GamePosition;
+  sourceRadiusM: number;
+  effectiveRadiusM: number;
+  sourceSceneSignature: string;
+  descriptionText: string;
+  farVisibleNotes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  distanceMeters?: number;
+}
+
+export interface GameChatRequest {
+  sessionId?: string;
+  message: string;
+}
+
+export interface GameChatResponse {
+  // 首页每次提交消息后拿到的就是这一包数据：
+  // 新的 assistant 回复、当前位置、当前大描述、附近小描述以及调试元数据。
+  sessionId: string;
+  assistantMessage: string;
+  playerPosition: GamePosition;
+  movementResult: MovePlayerToolResult | null;
+  activeLargeDescription: LargeDescriptionRecord | null;
+  nearbySmallDescriptions: SmallDescriptionRecord[];
+  debugSceneMeta: {
+    diagnostics: DbNormalizationDiagnostics;
+    largeSceneSignature: string;
+    smallSceneSignature: string;
+    coverageSyncTriggered: boolean;
+  } | null;
+}

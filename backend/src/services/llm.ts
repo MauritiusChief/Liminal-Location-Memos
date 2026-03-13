@@ -8,10 +8,20 @@ interface ChatCompletionContentPart {
   content?: string;
 }
 
+interface ChatCompletionToolCall {
+  id?: string;
+  type?: string;
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
+}
+
 interface ChatCompletionMessage {
   content?: string | ChatCompletionContentPart[];
   reasoning?: string | ChatCompletionContentPart[];
   reasoning_content?: string | ChatCompletionContentPart[];
+  tool_calls?: ChatCompletionToolCall[];
 }
 
 interface ChatCompletionChoice {
@@ -30,12 +40,31 @@ export interface LlmDebugResponse {
   reasoning: string | null;
 }
 
-export async function generateReply(message: string): Promise<LlmDebugResponse> {
-  return generateReplyWithSystemPrompt('', message);
+export interface ToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
 }
 
+export interface ToolCallResult {
+  id: string;
+  name: string;
+  argumentsText: string;
+}
+
+export interface ToolEnabledChatResponse extends LlmDebugResponse {
+  toolCall: ToolCallResult | null;
+}
+
+type ChatRequestMessage =
+  | { role: 'system' | 'user' | 'assistant'; content: string }
+  | { role: 'tool'; content: string; tool_call_id: string };
+
 export async function generateReplyWithSystemPrompt(systemPrompt: string, message: string): Promise<LlmDebugResponse> {
-  const messages: Array<{ role: 'system' | 'user'; content: string }> = [];
+  const messages: ChatRequestMessage[] = [];
 
   if (systemPrompt.trim()) {
     messages.push({
@@ -49,6 +78,30 @@ export async function generateReplyWithSystemPrompt(systemPrompt: string, messag
     content: message,
   });
 
+  const payload = await requestChatCompletion({ messages });
+  return extractLlmDebugResponse(payload?.choices?.[0]?.message);
+}
+
+export async function runChatCompletionWithTools(input: {
+  messages: ChatRequestMessage[];
+  tools: ToolDefinition[];
+}): Promise<ToolEnabledChatResponse> {
+  const payload = await requestChatCompletion({
+    messages: input.messages,
+    tools: input.tools,
+  });
+  const message = payload?.choices?.[0]?.message;
+
+  return {
+    ...extractLlmDebugResponse(message),
+    toolCall: extractToolCall(message),
+  };
+}
+
+async function requestChatCompletion(input: {
+  messages: ChatRequestMessage[];
+  tools?: ToolDefinition[];
+}): Promise<ChatCompletionResponse | null> {
   const response = await fetch(`${config.llmBaseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
     method: 'POST',
     headers: {
@@ -57,7 +110,8 @@ export async function generateReplyWithSystemPrompt(systemPrompt: string, messag
     },
     body: JSON.stringify({
       model: config.llmModel,
-      messages,
+      messages: input.messages,
+      tools: input.tools,
     }),
   });
 
@@ -67,16 +121,12 @@ export async function generateReplyWithSystemPrompt(systemPrompt: string, messag
     throw new Error(payload?.error?.message || 'LLM request failed.');
   }
 
-  return extractLlmDebugResponse(payload?.choices?.[0]?.message);
+  return payload;
 }
 
 function extractLlmDebugResponse(message: ChatCompletionMessage | undefined): LlmDebugResponse {
   const reasoning = extractReasoningText(message);
   const reply = extractReplyText(message);
-
-  if (!reply) {
-    throw new Error('LLM response did not include a reply.');
-  }
 
   return {
     reply,
@@ -101,6 +151,20 @@ function extractReplyText(message: ChatCompletionMessage | undefined): string {
     .filter((text) => text.length > 0)
     .join('')
     .trim();
+}
+
+function extractToolCall(message: ChatCompletionMessage | undefined): ToolCallResult | null {
+  const toolCall = message?.tool_calls?.find((item) => item.type === 'function' && item.function?.name);
+
+  if (!toolCall?.function?.name) {
+    return null;
+  }
+
+  return {
+    id: toolCall.id || toolCall.function.name,
+    name: toolCall.function.name,
+    argumentsText: toolCall.function.arguments || '{}',
+  };
 }
 
 function extractReasoningText(message: ChatCompletionMessage | undefined): string | null {
