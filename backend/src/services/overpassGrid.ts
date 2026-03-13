@@ -48,7 +48,7 @@ export function buildNormalizedMicroGrid(input: {
 }): NormalizedMicroGrid {
   const { request, cells: cellRecords, featureDetails } = input;
 
-  if (request.radius <= 50) {
+  if (request.radius < 50) {
     return {
       enabled: false,
       reason: 'radius_too_small',

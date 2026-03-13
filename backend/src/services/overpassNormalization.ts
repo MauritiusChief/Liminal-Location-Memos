@@ -183,6 +183,8 @@ function buildRelationLineIndex(features: NormalizedFeature[]): Set<number> {
   return relationIds;
 }
 
+// TODO 思考如何在 overpass query 时把 relation 引入，以解决整条大路被分成许多段的问题
+// 不过目前而言不是大问题，因为有聚类与省略机制
 function isMemberLineCoveredByRelationLine(feature: NormalizedFeature, relationLineIds: Set<number>): boolean {
   if (!isLinearGeometry(feature) || feature.properties.osmType !== 'way') {
     return false;

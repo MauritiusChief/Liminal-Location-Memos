@@ -11,7 +11,7 @@ SELECT
   v.relations,
   v.meta,
   v.tainted
-FROM osm_debug_feature_index_v v
+FROM osm_combined_feature_index_v v
 CROSS JOIN query_circle qc
 WHERE v.category <> 'building'
   AND ST_Intersects(v.geom, qc.geom)

@@ -61,7 +61,7 @@ type PolarFeatureRow = {
   center_coordinate: [number, number] | null;
 };
 
-const BUILDING_TAG_COLUMNS = ['name', 'building', 'height', 'level', 'building_levels'] as const;
+const BUILDING_TAG_COLUMNS = ['name', 'building', 'height', 'level', 'building:levels'] as const;
 const POI_TAG_COLUMNS = ['name', 'brand', ...POI_TAG_KEYS] as const;
 const ROAD_TAG_COLUMNS = ['name', ...ROAD_TAG_KEYS] as const;
 const AREA_TAG_COLUMNS = ['name', ...AREA_TAG_KEYS] as const;

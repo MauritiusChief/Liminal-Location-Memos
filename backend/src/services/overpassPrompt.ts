@@ -116,7 +116,7 @@ function buildGridSection(
 
 function buildPolarSection(polarView: NormalizedPolarView | undefined): string {
   if (!polarView) {
-    return '## 等级1到等级3（30米到1公里极坐标摘要）：无';
+    return '## 极坐标摘要：无';
   }
 
   const buildingAndPoiBlocks = polarView.levels.map((level) => buildPolarLevelBlock(level.level, level.features, true));
@@ -153,7 +153,7 @@ function buildPolarLevelBlock(
   }
 
   if (groupedEntries.size === 0) {
-    return `#### 等级${level}：无`;
+    return `#### 等级${level}(${levelDesc[level]})：\n信息不足，未生成极坐标摘要\n`;
   }
 
   const groupLines = Array.from(groupedEntries.values()).map((entries) => {

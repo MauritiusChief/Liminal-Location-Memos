@@ -1,4 +1,4 @@
-CREATE OR REPLACE VIEW osm_debug_feature_index_v AS
+CREATE OR REPLACE VIEW osm_combined_feature_index_v AS
 SELECT
   'building'::text AS category,
   osm_type || '/' || osm_id AS feature_id,

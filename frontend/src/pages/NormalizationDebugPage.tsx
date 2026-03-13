@@ -299,17 +299,12 @@ export function NormalizationDebugPage() {
       </button>
       <br />
       <br />
-      {/* <textarea
+      <textarea
         readOnly
         rows={20}
         cols={120}
         value={normalizedResult?.promptPreview?.userPrompt || 'No prompt preview yet.'}
-      /> */}
-
-      {/* <h3>Raw Response Snapshot</h3>
-      <pre style={{ border: '1px solid', maxHeight: '600px', overflowY: 'auto' }}>
-        {normalizedResult?.raw ? JSON.stringify(normalizedResult.raw, null, 2) : 'Raw payload not included.'}
-      </pre> */}
+      />
 
       {syncRequest.error ? (
         <section>

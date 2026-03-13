@@ -20,7 +20,7 @@ candidates AS (
       WHEN GeometryType(v.geom) = 'POINT' THEN v.geom
       ELSE ST_PointOnSurface(ST_Intersection(v.geom, qc.geom))
     END AS center_geom
-  FROM osm_debug_feature_index_v v
+  FROM osm_combined_feature_index_v v
   CROSS JOIN query_circle qc
   WHERE ST_Intersects(v.geom, qc.geom)
 ),
