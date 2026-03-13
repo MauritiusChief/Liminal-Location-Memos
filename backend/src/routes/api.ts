@@ -163,7 +163,7 @@ apiRouter.post('/debug/llm', async (request, response) => {
 });
 
 apiRouter.post('/game/chat', async (request, response) => {
-  const { sessionId, message } = request.body as GameChatRequest;
+  const { sessionId, message, isOpeningPrompt } = request.body as GameChatRequest;
 
   if (!message || !message.trim()) {
     response.status(400).json({ error: 'Message is required.' });
@@ -176,6 +176,7 @@ apiRouter.post('/game/chat', async (request, response) => {
     const result = await runGameChatTurn({
       sessionId: typeof sessionId === 'string' ? sessionId : undefined,
       message: message.trim(),
+      isOpeningPrompt: isOpeningPrompt === true,
     });
     response.json(result);
   } catch (error) {

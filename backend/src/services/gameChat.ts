@@ -1,12 +1,18 @@
 import { movePosition } from './gameMovement.js';
 import { ensureCoverageForPosition, loadSceneContext } from './gameScene.js';
 import { getOrCreateSession, updateLastSceneContextMeta, updateSession } from './gameSessionStore.js';
-import { generateReplyWithSystemPrompt, runChatCompletionWithTools, type ToolDefinition } from './llm.js';
+import {
+  runChatCompletionWithTools,
+  type AssistantHistoryMessage,
+  type ChatRequestMessage,
+  type ToolDefinition,
+} from './llm.js';
 import { findNearbySmallDescriptions } from './sceneDescriptionRepository.js';
 import { ensureLargeDescription, ensureSmallDescription, filterFarVisibleSmallDescriptions } from './sceneDescriptionService.js';
 import type {
   GameChatResponse,
   GameMessage,
+  GameChatRequest,
   LoadedGameSession,
   MovePlayerToolInput,
   MovePlayerToolResult,
@@ -36,8 +42,7 @@ const MOVE_PLAYER_TOOL: ToolDefinition = {
   },
 };
 
-export async function runGameChatTurn(input: {
-  sessionId?: string;
+export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' | 'message' | 'isOpeningPrompt'> & {
   message: string;
 }): Promise<GameChatResponse> {
   // 一次正式回合的主流程：
@@ -45,13 +50,18 @@ export async function runGameChatTurn(input: {
   // 2. 确保当前位置有覆盖数据
   // 3. 装载场景并复用/生成描述
   // 4. 让模型决定是否调用 move_player
-  // 5. 若移动则刷新场景和描述，再生成最终自然语言回复
+  // 5. 若移动则刷新场景和描述，并把 assistant(tool_call) + tool(tool_return) 带回第二轮生成最终自然语言回复
   const session = await getOrCreateSession(input.sessionId);
   let coverageSyncTriggered = await ensureCoverageForPosition(session.save.playerPosition);
   let sceneContext = await loadSceneContext(session.save.playerPosition);
   let activeLargeDescription = await ensureLargeDescription(sceneContext, session);
   let activeSmallDescription = await ensureSmallDescription(sceneContext, session);
   let nearbySmallDescriptions = await mergeNearbySmallDescriptions(session, session.save.playerPosition, activeSmallDescription);
+  const userMessage: GameMessage = {
+    role: 'user',
+    content: input.message,
+    isOpeningPrompt: input.isOpeningPrompt === true,
+  };
 
   // 由于有提供了工具，modelResponse 可能为实际的文本回复，或者是一个工具调用请求
   // 类似 [sys, user, res] 或者 [sys, user, toolcall]
@@ -64,16 +74,18 @@ export async function runGameChatTurn(input: {
     ],
     tools: [MOVE_PLAYER_TOOL],
   });
-  console.log('[DEBUG] runGameChatTurn() - runChatCompletionWithTools() call');
+  console.log('[DEBUG] runGameChatTurn() - runChatCompletionWithTools() return');
 
   let movementResult: MovePlayerToolResult | null = null;
   // 这里先假设 modelResponse 为实际的文本回复，也就是 [sys, user, res] 结构。
   // 因此便可以顺利组装成 [sys, user, assist(来自res), <slot for next 'user'>]
   let assistantMessage = modelResponse.reply || activeLargeDescription.descriptionText;
+  const messagesToAppend: GameMessage[] = [userMessage];
 
   if (modelResponse.toolCall?.name === 'move_player') {
     // 工具调用只负责决定位移；真正的坐标计算、补洞和描述更新都由后端执行。
     const toolInput = parseMovePlayerArguments(modelResponse.toolCall.argumentsText);
+    const assistantToolCallMessage = toStoredAssistantToolCallMessage(modelResponse.toolCall, modelResponse.assistantMessageForHistory);
     const nextPosition = movePosition({
       position: session.save.playerPosition,
       bearingDegrees: toolInput.bearingDegrees,
@@ -97,33 +109,46 @@ export async function runGameChatTurn(input: {
       coverageSyncTriggered: moveCoverageSyncTriggered,
     };
 
-    // 由于已确认 modelResponse 是一个工具调用请求，结构为 [sys, user, toolcall]
-    // toolcall 经过上面步骤的计算，变成了 movementResult 等信息
-    // 下一步可以组装成 [sys, user, assist(来自movementResult, activeXxxDescription等), <slot for next 'user'>]
-    // TODO:
-    // 由于目前的结构非常简单，LLM 不用处理信息，只负责描述和判断移动，所以可以这么处理（把 toolreturn 种种全部打包伪装成 assistant）
-    // 这是这一版的妥协，以后肯定得想办法改掉。
-    console.log('[DEBUG] runGameChatTurn() - generateReplyWithSystemPrompt() call');
-    assistantMessage = (
-      await generateReplyWithSystemPrompt(
-        [
-          '你是一个文字探索游戏中的叙述助手。',
-          '玩家已经完成一次移动。',
-          '请根据新的环境上下文，输出自然语言回复。',
-          '如果用户输入是移动指令，应确认移动后的所见环境。',
-          '不要提及工具调用、经纬度或内部实现。',
-        ].join('\n'),
-        [
-          `用户输入：${input.message}`,
-          `移动过程：方位${Math.round(movementResult.bearingDegrees)}°，距离${Math.round(movementResult.distanceMeters)}m。`,
-          `移动后总体描述：${activeLargeDescription.descriptionText}`,
-          `移动后局部描述：\n${activeSmallDescription.descriptionText}\n${activeSmallDescription.farVisibleNotes}`,
-        ].join('\n\n'),
-      )
-    ).reply;
-    console.log('[DEBUG] runGameChatTurn() - generateReplyWithSystemPrompt() return');
+    const toolReturnMessage: GameMessage = {
+      role: 'tool',
+      content: JSON.stringify({
+        movementResult,
+        activeLargeDescription,
+        activeSmallDescription,
+      }),
+      toolCallId: assistantToolCallMessage.toolCallId,
+      toolName: assistantToolCallMessage.toolName,
+    };
 
+    const followUpResponse = await runChatCompletionWithTools({
+      messages: [
+        { role: 'system', content: buildGameSystemPrompt(sceneContext, activeLargeDescription.descriptionText, nearbySmallDescriptions) },
+        ...buildHistoryMessages(session.save.messageHistory),
+        { role: 'user', content: input.message },
+        ...buildHistoryMessages([assistantToolCallMessage, toolReturnMessage]),
+      ],
+      tools: [MOVE_PLAYER_TOOL],
+    });
+
+    if (followUpResponse.toolCall) {
+      throw new Error('Nested tool calls are not supported in a single turn.');
+    }
+
+    assistantMessage = followUpResponse.reply || activeLargeDescription.descriptionText;
+    messagesToAppend.push(
+      assistantToolCallMessage,
+      toolReturnMessage,
+      {
+        role: 'assistant',
+        content: assistantMessage,
+      },
+    );
     session.save.playerPosition = nextPosition;
+  } else {
+    messagesToAppend.push({
+      role: 'assistant',
+      content: assistantMessage,
+    });
   }
 
   session.save.activeLargeDescriptionId = activeLargeDescription.id;
@@ -135,14 +160,14 @@ export async function runGameChatTurn(input: {
   });
   const nextHistory: GameMessage[] = [
     ...session.save.messageHistory,
-    { role: 'user', content: input.message },
-    { role: 'assistant', content: assistantMessage },
+    ...messagesToAppend,
   ];
   session.save.messageHistory = nextHistory.slice(-12);
   await updateSession(session);
 
   return {
     sessionId: session.save.sessionId,
+    messages: session.save.messageHistory,
     assistantMessage,
     playerPosition: session.save.playerPosition,
     movementResult,
@@ -157,15 +182,45 @@ export async function runGameChatTurn(input: {
   };
 }
 
-function buildHistoryMessages(history: GameMessage[]): Array<{ role: 'user' | 'assistant'; content: string }> {
-  // 正式游戏回合只把 user/assistant 历史喂给模型，
-  // system prompt 与 tool 结果则由当前回合显式重建。
-  return history
-    .filter((message) => message.role === 'user' || message.role === 'assistant')
-    .map((message) => ({
-      role: message.role as 'user' | 'assistant',
+function buildHistoryMessages(history: GameMessage[]): ChatRequestMessage[] {
+  // 这里把存档中的规范化消息重新转回 chat completion API 能接受的消息数组。
+  const messages: ChatRequestMessage[] = [];
+
+  for (const message of history) {
+    if (message.role === 'user') {
+      messages.push({ role: 'user', content: message.content });
+      continue;
+    }
+
+    if (message.role === 'assistant' && message.isToolCallMessage) {
+      messages.push({
+        role: 'assistant',
+        content: message.content,
+        tool_calls: [{
+          id: message.toolCallId,
+          type: 'function',
+          function: {
+            name: message.toolName,
+            arguments: message.toolArgumentsText,
+          },
+        }],
+      });
+      continue;
+    }
+
+    if (message.role === 'assistant') {
+      messages.push({ role: 'assistant', content: message.content });
+      continue;
+    }
+
+    messages.push({
+      role: 'tool',
       content: message.content,
-    }));
+      tool_call_id: message.toolCallId,
+    });
+  }
+
+  return messages;
 }
 
 /**
@@ -241,5 +296,19 @@ function parseMovePlayerArguments(argumentsText: string): MovePlayerToolInput {
     distanceMeters,
     reason: typeof parsed.reason === 'string' ? parsed.reason : undefined,
     targetLabel: typeof parsed.targetLabel === 'string' ? parsed.targetLabel : undefined,
+  };
+}
+
+function toStoredAssistantToolCallMessage(
+  toolCall: { id: string; name: string; argumentsText: string },
+  message: AssistantHistoryMessage,
+): Extract<GameMessage, { role: 'assistant'; isToolCallMessage: true }> {
+  return {
+    role: 'assistant',
+    content: message.content,
+    isToolCallMessage: true,
+    toolCallId: toolCall.id,
+    toolName: toolCall.name,
+    toolArgumentsText: toolCall.argumentsText,
   };
 }

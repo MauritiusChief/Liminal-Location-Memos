@@ -57,10 +57,34 @@ export interface ToolCallResult {
 
 export interface ToolEnabledChatResponse extends LlmDebugResponse {
   toolCall: ToolCallResult | null;
+  assistantMessageForHistory: AssistantHistoryMessage;
 }
 
-type ChatRequestMessage =
-  | { role: 'system' | 'user' | 'assistant'; content: string }
+export type AssistantHistoryMessage =
+  | { role: 'assistant'; content: string; isToolCallMessage?: false }
+  | {
+      role: 'assistant';
+      content: string;
+      isToolCallMessage: true;
+      toolCallId: string;
+      toolName: string;
+      toolArgumentsText: string;
+    };
+
+export type ChatRequestMessage =
+  | { role: 'system' | 'user'; content: string }
+  | {
+      role: 'assistant';
+      content: string;
+      tool_calls?: Array<{
+        id: string;
+        type: 'function';
+        function: {
+          name: string;
+          arguments: string;
+        };
+      }>;
+    }
   | { role: 'tool'; content: string; tool_call_id: string };
 
 export async function generateReplyWithSystemPrompt(systemPrompt: string, message: string): Promise<LlmDebugResponse> {
@@ -95,6 +119,7 @@ export async function runChatCompletionWithTools(input: {
   return {
     ...extractLlmDebugResponse(message),
     toolCall: extractToolCall(message),
+    assistantMessageForHistory: extractAssistantMessageForHistory(message),
   };
 }
 
@@ -164,6 +189,27 @@ function extractToolCall(message: ChatCompletionMessage | undefined): ToolCallRe
     id: toolCall.id || toolCall.function.name,
     name: toolCall.function.name,
     argumentsText: toolCall.function.arguments || '{}',
+  };
+}
+
+function extractAssistantMessageForHistory(message: ChatCompletionMessage | undefined): AssistantHistoryMessage {
+  const toolCall = extractToolCall(message);
+  const content = extractReplyText(message);
+
+  if (!toolCall) {
+    return {
+      role: 'assistant',
+      content,
+    };
+  }
+
+  return {
+    role: 'assistant',
+    content,
+    isToolCallMessage: true,
+    toolCallId: toolCall.id,
+    toolName: toolCall.name,
+    toolArgumentsText: toolCall.argumentsText,
   };
 }
 

@@ -9,11 +9,31 @@ export interface GamePosition {
   lon: number;
 }
 
-export interface GameMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
-  toolCallId?: string;
-}
+export type GameMessage =
+  | {
+      role: 'user';
+      content: string;
+      isOpeningPrompt?: boolean;
+    }
+  | {
+      role: 'assistant';
+      content: string;
+      isToolCallMessage?: false;
+    }
+  | {
+      role: 'assistant';
+      content: string;
+      isToolCallMessage: true;
+      toolCallId: string;
+      toolName: string;
+      toolArgumentsText: string;
+    }
+  | {
+      role: 'tool';
+      content: string;
+      toolCallId: string;
+      toolName: string;
+    };
 
 export interface MovePlayerToolInput {
   bearingDegrees: number;
@@ -112,11 +132,13 @@ export interface LoadedGameSession {
 export interface GameChatRequest {
   sessionId?: string;
   message?: string;
+  isOpeningPrompt?: boolean;
 }
 
 export interface GameChatResponse {
   // 首页每次发送消息后，都会拿到最新位置、描述和调试元数据。
   sessionId: string;
+  messages: GameMessage[];
   assistantMessage: string;
   playerPosition: GamePosition;
   movementResult: MovePlayerToolResult | null;
@@ -134,7 +156,7 @@ export interface GameSessionSnapshotResponse {
   // 这是“恢复旧存档”专用的只读快照，不会产生新消息。
   sessionId: string;
   hasStarted: boolean;
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  messages: GameMessage[];
   playerPosition: GamePosition;
   activeLargeDescription: LargeDescriptionRecord | null;
   nearbySmallDescriptions: SmallDescriptionRecord[];

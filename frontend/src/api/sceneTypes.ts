@@ -213,10 +213,31 @@ export interface GamePosition {
   lon: number;
 }
 
-export interface GameMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
+export type GameMessage =
+  | {
+      role: 'user';
+      content: string;
+      isOpeningPrompt?: boolean;
+    }
+  | {
+      role: 'assistant';
+      content: string;
+      isToolCallMessage?: false;
+    }
+  | {
+      role: 'assistant';
+      content: string;
+      isToolCallMessage: true;
+      toolCallId: string;
+      toolName: string;
+      toolArgumentsText: string;
+    }
+  | {
+      role: 'tool';
+      content: string;
+      toolCallId: string;
+      toolName: string;
+    };
 
 export interface MovePlayerToolResult {
   previousPosition: GamePosition;
@@ -256,12 +277,14 @@ export interface SmallDescriptionRecord {
 export interface GameChatRequest {
   sessionId?: string;
   message: string;
+  isOpeningPrompt?: boolean;
 }
 
 export interface GameChatResponse {
   // 首页每次提交消息后拿到的就是这一包数据：
   // 新的 assistant 回复、当前位置、当前大描述、附近小描述以及调试元数据。
   sessionId: string;
+  messages: GameMessage[];
   assistantMessage: string;
   playerPosition: GamePosition;
   movementResult: MovePlayerToolResult | null;

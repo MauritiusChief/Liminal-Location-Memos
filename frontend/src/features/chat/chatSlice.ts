@@ -9,7 +9,6 @@ import type {
   GameSessionSnapshotResponse,
   LargeDescriptionRecord,
   SmallDescriptionRecord,
-  MovePlayerToolResult,
 } from '../../api/sceneTypes';
 import type { RootState } from '../../app/store';
 
@@ -32,7 +31,6 @@ interface ChatState {
   playerPosition: GamePosition | null;
   activeLargeDescription: LargeDescriptionRecord | null;
   nearbySmallDescriptions: SmallDescriptionRecord[];
-  latestMovementResult: MovePlayerToolResult | null;
   request: ChatRequestState;
 }
 
@@ -46,7 +44,6 @@ const initialState: ChatState = {
   playerPosition: null,
   activeLargeDescription: null,
   nearbySmallDescriptions: [],
-  latestMovementResult: null,
   request: {
     status: 'idle',
     error: null,
@@ -69,6 +66,7 @@ export const submitChatMessage = createAsyncThunk<GameChatResponse, void, { stat
       return await submitGameChat({
         sessionId: chat.sessionId || undefined,
         message: trimmedMessage,
+        isOpeningPrompt: false,
       });
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
@@ -90,6 +88,7 @@ export const startGame = createAsyncThunk<GameChatResponse, void, { state: RootS
       return await submitGameChat({
         sessionId: undefined,
         message: OPENING_GAME_PROMPT,
+        isOpeningPrompt: true,
       });
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
@@ -133,8 +132,6 @@ const chatSlice = createSlice({
         state.request.error = null;
       })
       .addCase(submitChatMessage.fulfilled, (state, action) => {
-        const userMessage = state.message.trim();
-
         state.request.status = 'succeeded';
         state.hasStarted = true;
         state.sessionId = action.payload.sessionId;
@@ -142,11 +139,7 @@ const chatSlice = createSlice({
         state.playerPosition = action.payload.playerPosition;
         state.activeLargeDescription = action.payload.activeLargeDescription;
         state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
-        state.latestMovementResult = action.payload.movementResult;
-        state.messages.push(
-          { role: 'user', content: userMessage },
-          { role: 'assistant', content: action.payload.assistantMessage },
-        );
+        state.messages = action.payload.messages;
         state.message = '';
         writeStoredSessionId(action.payload.sessionId);
       })
@@ -170,10 +163,7 @@ const chatSlice = createSlice({
         state.playerPosition = action.payload.playerPosition;
         state.activeLargeDescription = action.payload.activeLargeDescription;
         state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
-        state.latestMovementResult = action.payload.movementResult;
-        state.messages.push(
-          { role: 'assistant', content: action.payload.assistantMessage },
-        );
+        state.messages = action.payload.messages;
         writeStoredSessionId(action.payload.sessionId);
       })
       .addCase(startGame.rejected, (state, action) => {
@@ -194,7 +184,6 @@ const chatSlice = createSlice({
         state.playerPosition = action.payload.playerPosition;
         state.activeLargeDescription = action.payload.activeLargeDescription;
         state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
-        state.latestMovementResult = null;
         writeStoredSessionId(action.payload.sessionId);
       })
       .addCase(restoreStoredSession.rejected, (state, action) => {

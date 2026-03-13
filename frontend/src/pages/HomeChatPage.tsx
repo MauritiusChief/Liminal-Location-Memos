@@ -8,6 +8,12 @@ import {
   startGame,
   submitChatMessage,
 } from '../features/chat/chatSlice';
+import {
+  findLatestMovementFromMessages,
+  formatMovePlayerToolMessage,
+  parseMovePlayerToolMessage,
+  shouldDisplayGameMessage,
+} from '../features/chat/messagePresentation';
 
 export function HomeChatPage() {
   const dispatch = useAppDispatch();
@@ -20,9 +26,10 @@ export function HomeChatPage() {
     playerPosition,
     activeLargeDescription,
     nearbySmallDescriptions,
-    latestMovementResult,
     request,
   } = useAppSelector(selectChatState);
+  const latestMovementResult = findLatestMovementFromMessages(messages);
+  const visibleMessages = messages.filter(shouldDisplayGameMessage);
 
   useEffect(() => {
     if (!hasCheckedStoredSessionId) {
@@ -50,12 +57,26 @@ export function HomeChatPage() {
       <div style={{ display: 'grid', gap: '16px', gridTemplateColumns: 'minmax(0, 2fr) minmax(320px, 1fr)' }}>
         <section>
           <div style={{ border: '1px solid', minHeight: '240px', padding: '8px' }}>
-            {messages.length > 0 ? messages.map((entry, index) => (
-              <article key={`${entry.role}-${index}`} style={{ marginBottom: '12px' }}>
-                <strong>{entry.role === 'user' ? 'You' : 'World'}</strong>
-                <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap' }}>{entry.content}</pre>
-              </article>
-            )) : 'No messages yet.'}
+            {visibleMessages.length > 0 ? visibleMessages.map((entry, index) => {
+              const movement = parseMovePlayerToolMessage(entry);
+              if (movement) {
+                return (
+                  <article
+                    key={`${entry.role}-${index}`}
+                    style={{ marginBottom: '12px', color: '#666', fontStyle: 'italic' }}
+                  >
+                    <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{formatMovePlayerToolMessage(movement)}</pre>
+                  </article>
+                );
+              }
+
+              return (
+                <article key={`${entry.role}-${index}`} style={{ marginBottom: '12px' }}>
+                  <strong>{entry.role === 'user' ? 'You' : 'World'}</strong>
+                  <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap' }}>{entry.content}</pre>
+                </article>
+              );
+            }) : 'No messages yet.'}
           </div>
 
           {hasStarted ? (

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { buildDescriptionIndex } from './gameDescriptionIndex.js';
 import type {
   GamePosition,
+  GameMessage,
   GameSaveDocument,
   GameSessionSnapshotResponse,
   LoadedGameSession,
@@ -69,13 +70,7 @@ export async function getSessionSnapshot(sessionId: string): Promise<GameSession
   return {
     sessionId: session.save.sessionId,
     hasStarted: true,
-    messages: session.save.messageHistory
-      .filter((message): message is { role: 'user' | 'assistant'; content: string } =>
-        message.role === 'user' || message.role === 'assistant')
-      .map((message) => ({
-        role: message.role,
-        content: message.content,
-      })),
+    messages: session.save.messageHistory,
     playerPosition: session.save.playerPosition,
     activeLargeDescription,
     nearbySmallDescriptions,
@@ -131,13 +126,76 @@ function normalizeSaveDocument(input: Partial<GameSaveDocument>, sessionId: stri
   return {
     sessionId: input.sessionId || sessionId,
     playerPosition: normalizePosition(input.playerPosition),
-    messageHistory: Array.isArray(input.messageHistory) ? input.messageHistory : [],
+    messageHistory: normalizeMessageHistory(input.messageHistory),
     activeLargeDescriptionId: typeof input.activeLargeDescriptionId === 'string' ? input.activeLargeDescriptionId : null,
     visibleSmallDescriptionIds: Array.isArray(input.visibleSmallDescriptionIds) ? input.visibleSmallDescriptionIds : [],
     largeDescriptions: Array.isArray(input.largeDescriptions) ? input.largeDescriptions : [],
     smallDescriptions: Array.isArray(input.smallDescriptions) ? input.smallDescriptions : [],
     lastSceneContextMeta: input.lastSceneContextMeta || null,
   };
+}
+
+function normalizeMessageHistory(history: unknown): GameMessage[] {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+
+  const messages: GameMessage[] = [];
+
+  for (const item of history) {
+    if (!item || typeof item !== 'object' || !('role' in item) || !('content' in item)) {
+      continue;
+    }
+
+    const role = typeof item.role === 'string' ? item.role : '';
+    const content = typeof item.content === 'string' ? item.content : '';
+
+    if (role === 'user') {
+      messages.push({
+        role: 'user' as const,
+        content,
+        isOpeningPrompt: isLikelyOpeningPrompt(content) || (typeof item.isOpeningPrompt === 'boolean' ? item.isOpeningPrompt : undefined),
+      });
+      continue;
+    }
+
+    if (role === 'assistant') {
+      const isToolCallMessage = item.isToolCallMessage === true;
+      if (isToolCallMessage
+        && typeof item.toolCallId === 'string'
+        && typeof item.toolName === 'string'
+        && typeof item.toolArgumentsText === 'string') {
+        messages.push({
+          role: 'assistant' as const,
+          content,
+          isToolCallMessage: true,
+          toolCallId: item.toolCallId,
+          toolName: item.toolName,
+          toolArgumentsText: item.toolArgumentsText,
+        });
+        continue;
+      }
+
+      messages.push({
+        role: 'assistant' as const,
+        content,
+      });
+      continue;
+    }
+
+    if (role === 'tool' && typeof item.toolCallId === 'string' && typeof item.toolName === 'string') {
+      messages.push({
+        role: 'tool' as const,
+        content,
+        toolCallId: item.toolCallId,
+        toolName: item.toolName,
+      });
+      continue;
+    }
+
+  }
+
+  return messages;
 }
 
 function normalizePosition(position: Partial<GamePosition> | undefined): GamePosition {
@@ -156,4 +214,8 @@ function isFileNotFound(error: unknown): boolean {
     && error !== null
     && 'code' in error
     && error.code === 'ENOENT';
+}
+
+function isLikelyOpeningPrompt(content: string): boolean {
+  return content.startsWith('请作为游戏开场描述当前环境。');
 }
