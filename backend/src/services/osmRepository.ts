@@ -15,6 +15,7 @@ import type {
   DbPolarFeatureRecord,
 } from './dbSceneTypes.js';
 import { AREA_TAG_KEYS, POI_TAG_KEYS, ROAD_TAG_KEYS } from './overpassLabels.js';
+import type { GamePosition } from '../types/game.js';
 
 type BuildingRow = {
   feature_id: string;
@@ -207,6 +208,19 @@ export async function fetchPolarFeaturesFromDb(request: NormalizedOverpassReques
       ? [Number(row.center_coordinate[0]), Number(row.center_coordinate[1])]
       : null,
   }));
+}
+
+export async function findNearestCoverageDistanceMeters(position: GamePosition): Promise<number | null> {
+  const result = await query<{ distance_meters: number | null }>(
+    `
+    SELECT MIN(ST_DistanceSphere(center, ST_SetSRID(ST_MakePoint($1, $2), 4326))) AS distance_meters
+    FROM osm_sync_coverage
+    `,
+    [position.lon, position.lat],
+  );
+
+  const value = result.rows[0]?.distance_meters;
+  return value === null || value === undefined ? null : Number(value);
 }
 
 // 这里取的是“建筑详情 + 建筑内 POI”，供标签、grid 补充细节、prompt 共用。

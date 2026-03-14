@@ -1,5 +1,15 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { submitChat, type ChatResponse } from '../../api/chatApi';
+import { fetchGameSessionSnapshot, submitGameChat } from '../../api/gameApi';
+import { OPENING_GAME_PROMPT } from './openingPrompt';
+import { readStoredSessionId, writeStoredSessionId } from './sessionStorage';
+import type {
+  GameChatResponse,
+  GameMessage,
+  GamePosition,
+  GameSessionSnapshotResponse,
+  LargeDescriptionRecord,
+  SmallDescriptionRecord,
+} from '../../api/sceneTypes';
 import type { RootState } from '../../app/store';
 
 type RequestStatus = 'idle' | 'loading' | 'succeeded' | 'failed';
@@ -7,42 +17,97 @@ type RequestStatus = 'idle' | 'loading' | 'succeeded' | 'failed';
 interface ChatRequestState {
   status: RequestStatus;
   error: string | null;
-  reply: string | null;
 }
 
-// 首页聊天页的 Redux 状态只保留三类信息：
-// 1. 用户正在编辑的输入框内容
-// 2. 当前请求处于什么阶段
-// 3. 后端返回的最后一次回复
-// 这样页面组件只负责渲染，状态变化统一交给 slice 管理。
 interface ChatState {
+  // 首页状态除了消息流，还额外保留“世界状态”：
+  // 当前 session、玩家位置、大描述、小描述列表、最近移动结果。
+  sessionId: string | null;
   message: string;
+  messages: GameMessage[];
+  hasStarted: boolean;
+  detectedStoredSessionId: string | null;
+  hasCheckedStoredSessionId: boolean;
+  playerPosition: GamePosition | null;
+  activeLargeDescription: LargeDescriptionRecord | null;
+  nearbySmallDescriptions: SmallDescriptionRecord[];
   request: ChatRequestState;
 }
 
 const initialState: ChatState = {
+  sessionId: null,
   message: '',
+  messages: [],
+  hasStarted: false,
+  detectedStoredSessionId: null,
+  hasCheckedStoredSessionId: false,
+  playerPosition: null,
+  activeLargeDescription: null,
+  nearbySmallDescriptions: [],
   request: {
     status: 'idle',
     error: null,
-    reply: null,
   },
 };
 
-// 这个 thunk 负责把首页输入发送给 /api/chat。
-// 组件先 dispatch 它，Redux Toolkit 会自动派生 pending / fulfilled / rejected 三个阶段，
-// extraReducers 再根据这三个阶段回写 loading、reply 和 error。
-export const submitChatMessage = createAsyncThunk<ChatResponse, string, { rejectValue: string }>(
+export const submitChatMessage = createAsyncThunk<GameChatResponse, void, { state: RootState; rejectValue: string }>(
   'chat/submitChatMessage',
-  async (message, { rejectWithValue }) => {
-    const trimmedMessage = message.trim();
+  async (_unused, { getState, rejectWithValue }) => {
+    // thunk 直接从 Redux 里取当前输入和 sessionId，
+    // 页面组件不需要关心请求体拼装细节。
+    const { chat } = getState();
+    const trimmedMessage = chat.message.trim();
 
     if (!trimmedMessage) {
       return rejectWithValue('Message is required.');
     }
 
     try {
-      return await submitChat({ message: trimmedMessage });
+      return await submitGameChat({
+        sessionId: chat.sessionId || undefined,
+        message: trimmedMessage,
+        isOpeningPrompt: false,
+      });
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
+    }
+  },
+);
+
+export const hydrateStoredSessionId = createAsyncThunk<string | null>(
+  'chat/hydrateStoredSessionId',
+  async () => readStoredSessionId(),
+);
+
+export const startGame = createAsyncThunk<GameChatResponse, void, { state: RootState; rejectValue: string }>(
+  'chat/startGame',
+  async (_unused, { getState, rejectWithValue }) => {
+    const { chat } = getState();
+
+    try {
+      return await submitGameChat({
+        sessionId: undefined,
+        message: OPENING_GAME_PROMPT,
+        isOpeningPrompt: true,
+      });
+    } catch (error) {
+      return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
+    }
+  },
+);
+
+export const restoreStoredSession = createAsyncThunk<GameSessionSnapshotResponse, void, { state: RootState; rejectValue: string }>(
+  'chat/restoreStoredSession',
+  async (_unused, { getState, rejectWithValue }) => {
+    const { chat } = getState();
+    const sessionId = chat.detectedStoredSessionId;
+
+    if (!sessionId) {
+      return rejectWithValue('No stored session detected.');
+    }
+
+    try {
+      return await fetchGameSessionSnapshot(sessionId);
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
     }
@@ -53,15 +118,14 @@ const chatSlice = createSlice({
   name: 'chat',
   initialState,
   reducers: {
-    // 同步 reducer 专门处理“用户输入过程中立刻更新状态”的场景。
-    // 组件不会直接改 state.message，而是 dispatch 一个 action，请 reducer 来改。
     setMessage(state, action: PayloadAction<string>) {
       state.message = action.payload;
     },
   },
   extraReducers: (builder) => {
-    // extraReducers 只处理异步 thunk 的生命周期。
-    // pending 表示请求开始，fulfilled 表示成功写入 reply，rejected 表示失败写入 error。
+    // fulfilled 时同时更新两条线：
+    // 1. 对话消息流
+    // 2. 世界状态 / debug 面板数据
     builder
       .addCase(submitChatMessage.pending, (state) => {
         state.request.status = 'loading';
@@ -69,17 +133,66 @@ const chatSlice = createSlice({
       })
       .addCase(submitChatMessage.fulfilled, (state, action) => {
         state.request.status = 'succeeded';
-        state.request.reply = action.payload.reply;
+        state.hasStarted = true;
+        state.sessionId = action.payload.sessionId;
+        state.detectedStoredSessionId = action.payload.sessionId;
+        state.playerPosition = action.payload.playerPosition;
+        state.activeLargeDescription = action.payload.activeLargeDescription;
+        state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
+        state.messages = action.payload.messages;
+        state.message = '';
+        writeStoredSessionId(action.payload.sessionId);
       })
       .addCase(submitChatMessage.rejected, (state, action) => {
+        state.request.status = 'failed';
+        state.request.error = action.payload || 'Unknown error.';
+      })
+      .addCase(hydrateStoredSessionId.fulfilled, (state, action) => {
+        state.detectedStoredSessionId = action.payload;
+        state.hasCheckedStoredSessionId = true;
+      })
+      .addCase(startGame.pending, (state) => {
+        state.request.status = 'loading';
+        state.request.error = null;
+      })
+      .addCase(startGame.fulfilled, (state, action) => {
+        state.request.status = 'succeeded';
+        state.hasStarted = true;
+        state.sessionId = action.payload.sessionId;
+        state.detectedStoredSessionId = action.payload.sessionId;
+        state.playerPosition = action.payload.playerPosition;
+        state.activeLargeDescription = action.payload.activeLargeDescription;
+        state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
+        state.messages = action.payload.messages;
+        writeStoredSessionId(action.payload.sessionId);
+      })
+      .addCase(startGame.rejected, (state, action) => {
+        state.request.status = 'failed';
+        state.request.error = action.payload || 'Unknown error.';
+        state.hasStarted = false;
+      })
+      .addCase(restoreStoredSession.pending, (state) => {
+        state.request.status = 'loading';
+        state.request.error = null;
+      })
+      .addCase(restoreStoredSession.fulfilled, (state, action) => {
+        state.request.status = 'succeeded';
+        state.hasStarted = action.payload.hasStarted;
+        state.sessionId = action.payload.sessionId;
+        state.detectedStoredSessionId = action.payload.sessionId;
+        state.messages = action.payload.messages;
+        state.playerPosition = action.payload.playerPosition;
+        state.activeLargeDescription = action.payload.activeLargeDescription;
+        state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
+        writeStoredSessionId(action.payload.sessionId);
+      })
+      .addCase(restoreStoredSession.rejected, (state, action) => {
         state.request.status = 'failed';
         state.request.error = action.payload || 'Unknown error.';
       });
   },
 });
 
-// selector 的作用是把“组件需要读什么状态”集中声明出来。
-// 页面只调用 selector，不需要知道 store 里更深层的字段路径细节。
 export const selectChatState = (state: RootState) => state.chat;
 
 export const { setMessage } = chatSlice.actions;

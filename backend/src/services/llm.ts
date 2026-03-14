@@ -8,10 +8,20 @@ interface ChatCompletionContentPart {
   content?: string;
 }
 
+interface ChatCompletionToolCall {
+  id?: string;
+  type?: string;
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
+}
+
 interface ChatCompletionMessage {
   content?: string | ChatCompletionContentPart[];
   reasoning?: string | ChatCompletionContentPart[];
   reasoning_content?: string | ChatCompletionContentPart[];
+  tool_calls?: ChatCompletionToolCall[];
 }
 
 interface ChatCompletionChoice {
@@ -30,12 +40,57 @@ export interface LlmDebugResponse {
   reasoning: string | null;
 }
 
-export async function generateReply(message: string): Promise<LlmDebugResponse> {
-  return generateReplyWithSystemPrompt('', message);
+export interface ToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
 }
 
+export interface ToolCallResult {
+  id: string;
+  name: string;
+  argumentsText: string;
+}
+
+export interface ToolEnabledChatResponse extends LlmDebugResponse {
+  toolCall: ToolCallResult | null;
+  assistantMessageForHistory: AssistantHistoryMessage;
+}
+
+export type AssistantHistoryMessage =
+  | { role: 'assistant'; content: string; reasoningContent?: string; isToolCallMessage?: false }
+  | {
+      role: 'assistant';
+      content: string;
+      reasoningContent?: string;
+      isToolCallMessage: true;
+      toolCallId: string;
+      toolName: string;
+      toolArgumentsText: string;
+    };
+
+export type ChatRequestMessage =
+  | { role: 'system' | 'user'; content: string }
+  | {
+      role: 'assistant';
+      content: string;
+      reasoning_content?: string;
+      tool_calls?: Array<{
+        id: string;
+        type: 'function';
+        function: {
+          name: string;
+          arguments: string;
+        };
+      }>;
+    }
+  | { role: 'tool'; content: string; tool_call_id: string };
+
 export async function generateReplyWithSystemPrompt(systemPrompt: string, message: string): Promise<LlmDebugResponse> {
-  const messages: Array<{ role: 'system' | 'user'; content: string }> = [];
+  const messages: ChatRequestMessage[] = [];
 
   if (systemPrompt.trim()) {
     messages.push({
@@ -49,6 +104,31 @@ export async function generateReplyWithSystemPrompt(systemPrompt: string, messag
     content: message,
   });
 
+  const payload = await requestChatCompletion({ messages });
+  return extractLlmDebugResponse(payload?.choices?.[0]?.message);
+}
+
+export async function runChatCompletionWithTools(input: {
+  messages: ChatRequestMessage[];
+  tools: ToolDefinition[];
+}): Promise<ToolEnabledChatResponse> {
+  const payload = await requestChatCompletion({
+    messages: input.messages,
+    tools: input.tools,
+  });
+  const message = payload?.choices?.[0]?.message;
+
+  return {
+    ...extractLlmDebugResponse(message),
+    toolCall: extractToolCall(message),
+    assistantMessageForHistory: extractAssistantMessageForHistory(message),
+  };
+}
+
+async function requestChatCompletion(input: {
+  messages: ChatRequestMessage[];
+  tools?: ToolDefinition[];
+}): Promise<ChatCompletionResponse | null> {
   const response = await fetch(`${config.llmBaseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
     method: 'POST',
     headers: {
@@ -57,7 +137,8 @@ export async function generateReplyWithSystemPrompt(systemPrompt: string, messag
     },
     body: JSON.stringify({
       model: config.llmModel,
-      messages,
+      messages: input.messages,
+      tools: input.tools,
     }),
   });
 
@@ -67,16 +148,12 @@ export async function generateReplyWithSystemPrompt(systemPrompt: string, messag
     throw new Error(payload?.error?.message || 'LLM request failed.');
   }
 
-  return extractLlmDebugResponse(payload?.choices?.[0]?.message);
+  return payload;
 }
 
 function extractLlmDebugResponse(message: ChatCompletionMessage | undefined): LlmDebugResponse {
   const reasoning = extractReasoningText(message);
   const reply = extractReplyText(message);
-
-  if (!reply) {
-    throw new Error('LLM response did not include a reply.');
-  }
 
   return {
     reply,
@@ -103,6 +180,44 @@ function extractReplyText(message: ChatCompletionMessage | undefined): string {
     .trim();
 }
 
+function extractToolCall(message: ChatCompletionMessage | undefined): ToolCallResult | null {
+  const toolCall = message?.tool_calls?.find((item) => item.type === 'function' && item.function?.name);
+
+  if (!toolCall?.function?.name) {
+    return null;
+  }
+
+  return {
+    id: toolCall.id || toolCall.function.name,
+    name: toolCall.function.name,
+    argumentsText: toolCall.function.arguments || '{}',
+  };
+}
+
+function extractAssistantMessageForHistory(message: ChatCompletionMessage | undefined): AssistantHistoryMessage {
+  const toolCall = extractToolCall(message);
+  const content = extractReplyText(message);
+  const reasoningContent = extractReasoningContent(message) || undefined;
+
+  if (!toolCall) {
+    return {
+      role: 'assistant',
+      content,
+      reasoningContent,
+    };
+  }
+
+  return {
+    role: 'assistant',
+    content,
+    reasoningContent,
+    isToolCallMessage: true,
+    toolCallId: toolCall.id,
+    toolName: toolCall.name,
+    toolArgumentsText: toolCall.argumentsText,
+  };
+}
+
 function extractReasoningText(message: ChatCompletionMessage | undefined): string | null {
   const explicitReasoning = collectTextFromUnknownContent(message?.reasoning)
     || collectTextFromUnknownContent(message?.reasoning_content);
@@ -123,6 +238,12 @@ function extractReasoningText(message: ChatCompletionMessage | undefined): strin
     .trim();
 
   return reasoningText || null;
+}
+
+function extractReasoningContent(message: ChatCompletionMessage | undefined): string | null {
+  return collectTextFromUnknownContent(message?.reasoning_content)
+    || collectTextFromUnknownContent(message?.reasoning)
+    || null;
 }
 
 function collectTextFromUnknownContent(content: string | ChatCompletionContentPart[] | undefined): string | null {
