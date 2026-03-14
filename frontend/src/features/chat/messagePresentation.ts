@@ -49,38 +49,3 @@ export function findLatestMovementFromMessages(messages: GameMessage[]): MovePla
 
   return null;
 }
-
-export function formatMovePlayerToolMessage(movement: MovePlayerToolResult): string {
-  const bearingLabel = formatBearing(movement.bearingDegrees);
-  const distanceText = `${Math.round(movement.distanceMeters)} 米`;
-  const targetText = movement.targetLabel ? `，朝着 ${movement.targetLabel} 的方向` : '';
-
-  return `你${targetText}向${bearingLabel}移动了约 ${distanceText}。`;
-}
-
-function formatBearing(bearingDegrees: number): string {
-  const normalized = ((bearingDegrees % 360) + 360) % 360;
-  if (normalized >= 337.5 || normalized < 22.5) {
-    return '北';
-  }
-  if (normalized < 67.5) {
-    return '东北';
-  }
-  if (normalized < 112.5) {
-    return '东';
-  }
-  if (normalized < 157.5) {
-    return '东南';
-  }
-  if (normalized < 202.5) {
-    return '南';
-  }
-  if (normalized < 247.5) {
-    return '西南';
-  }
-  if (normalized < 292.5) {
-    return '西';
-  }
-
-  return '西北';
-}

@@ -52,7 +52,6 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   // 3. 装载场景并复用/生成描述
   // 4. 让模型决定是否调用 move_player
   // 5. 若移动则刷新场景和描述，并把 assistant(tool_call) + tool(tool_return) 带回第二轮生成最终自然语言回复
-  // TODO 确保移动后，要根据复用规则复用描述，而不是移动后一定生成新的描述，不管移动距离多么短
   const session = await getOrCreateSession(input.sessionId);
   let coverageSyncTriggered = await ensureCoverageForPosition(session.save.playerPosition);
   let sceneContext = await loadSceneContext(session.save.playerPosition);
@@ -120,6 +119,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
       coverageSyncTriggered: moveCoverageSyncTriggered,
     };
 
+    // TODO：针对移动之后的状况，编更合适的提示词
     const toolReturnMessage: GameMessage = {
       role: 'tool',
       content: JSON.stringify(movementResult),
@@ -281,6 +281,7 @@ function buildGameSystemPrompt(
   return [
     '你是一个文字探索游戏的会话助手。',
     '如果用户要求移动，调用 move_player 工具；如果没有移动意图，则直接自然回复。',
+    '即使用户要求移动了，也需要结合周遭环境信息分析能否成功到达，是否有阻碍移动的要素。如果有，可以将移动的目的地截停在障碍前。',
     styleRule,
     '不要在文本回复里暴露经纬度、网格、极坐标等内部实现。',
     '请优先保持空间连续性，并参考当前区域的总体环境描述和附近其他地点的远距可见细节。',
