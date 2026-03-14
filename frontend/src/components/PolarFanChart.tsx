@@ -92,6 +92,46 @@ export function PolarFanChart({
       {visibleFeatures.map((feature) => {
         const isSelected = feature.featureId === selectedFeatureId;
         const fill = LEVEL_COLORS[feature.level];
+        const linePoints = feature.linePath?.map((point) => polarToCartesian(point.distanceMeters, point.bearingDegrees)) || [];
+
+        if (feature.category === 'line' && linePoints.length >= 2) {
+          const polylinePoints = linePoints.map(([x, y]) => `${x},${y}`).join(' ');
+
+          return (
+            <g key={feature.featureId}>
+              <polyline
+                points={polylinePoints}
+                fill="none"
+                stroke="transparent"
+                strokeWidth={isSelected ? 12 : 10}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                onMouseEnter={() => onFeatureHover(feature)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onFeatureSelect(feature);
+                }}
+                style={{ cursor: 'pointer' }}
+              />
+              <polyline
+                points={polylinePoints}
+                fill="none"
+                stroke={fill}
+                strokeOpacity={isSelected ? 0.98 : 0.72}
+                strokeWidth={isSelected ? 4 : 2.4}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                pointerEvents="none"
+              >
+                <title>
+                  {feature.displayLabel} ({Math.round(feature.centerPoint.distanceMeters)}m /{' '}
+                  {Math.round(feature.centerPoint.bearingDegrees)}deg)
+                </title>
+              </polyline>
+            </g>
+          );
+        }
+
         const path = describeAnnularSectorPath(
           feature.nearestPoint.distanceMeters,
           feature.farthestPoint.distanceMeters,
@@ -124,6 +164,8 @@ export function PolarFanChart({
                 {Math.round(feature.centerPoint.bearingDegrees)}deg)
               </title>
             </path>
+            {/* line 的 centerPoint 仍用于摘要和分层，但不参与 SVG；
+                这里的中心点标记仅保留给扇区类要素。 */}
             <circle
               cx={centerX}
               cy={centerY}

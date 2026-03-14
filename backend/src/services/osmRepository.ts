@@ -60,6 +60,8 @@ type PolarFeatureRow = {
   geometry_type: string;
   sample_coordinates: Array<[number, number]> | null;
   center_coordinate: [number, number] | null;
+  line_path_coordinates: Array<[number, number]> | null;
+  line_vertex_coordinates: Array<[number, number]> | null;
 };
 
 const BUILDING_TAG_COLUMNS = ['name', 'building', 'height', 'level', 'building:levels'] as const;
@@ -207,6 +209,12 @@ export async function fetchPolarFeaturesFromDb(request: NormalizedOverpassReques
     centerCoordinate: row.center_coordinate
       ? [Number(row.center_coordinate[0]), Number(row.center_coordinate[1])]
       : null,
+    linePathCoordinates: row.line_path_coordinates
+      ? row.line_path_coordinates.map((pair) => [Number(pair[0]), Number(pair[1])])
+      : undefined,
+    lineVertexCoordinates: row.line_vertex_coordinates
+      ? row.line_vertex_coordinates.map((pair) => [Number(pair[0]), Number(pair[1])])
+      : undefined,
   }));
 }
 

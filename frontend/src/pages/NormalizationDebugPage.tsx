@@ -3,6 +3,7 @@ import { PolarFanChart } from '../components/PolarFanChart';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
 import type {
   NormalizedMicroGridCell,
+  PolarFeatureCategory,
   NormalizedPolarFeatureSummary,
   NormalizedPolarLevel,
   NormalizedPolarView,
@@ -16,6 +17,12 @@ import {
 } from '../features/normalizationDebug/normalizationDebugSlice';
 
 const DEFAULT_POLAR_RENDER_LIMIT = '100';
+const DEFAULT_VISIBLE_POLAR_CATEGORIES: Record<PolarFeatureCategory, boolean> = {
+  building: true,
+  poi: true,
+  line: true,
+  area: true,
+};
 
 export function NormalizationDebugPage() {
   const dispatch = useAppDispatch();
@@ -24,7 +31,7 @@ export function NormalizationDebugPage() {
   const [selectedPolarFeature, setSelectedPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
   const [hoveredPolarFeature, setHoveredPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
   const [selectedPolarLevel, setSelectedPolarLevel] = useState<'all' | 1 | 2 | 3>('all');
-  const [showOnlyBuildingAndPoiInChart, setShowOnlyBuildingAndPoiInChart] = useState(false);
+  const [visiblePolarCategories, setVisiblePolarCategories] = useState(DEFAULT_VISIBLE_POLAR_CATEGORIES);
   const [renderPolarSvgRequested, setRenderPolarSvgRequested] = useState(false);
   const [polarSvgRenderLimit, setPolarSvgRenderLimit] = useState(DEFAULT_POLAR_RENDER_LIMIT);
   const normalizedResult = dbLoadRequest.result;
@@ -38,6 +45,7 @@ export function NormalizationDebugPage() {
     setSelectedPolarFeature(null);
     setHoveredPolarFeature(null);
     setSelectedPolarLevel('all');
+    setVisiblePolarCategories(DEFAULT_VISIBLE_POLAR_CATEGORIES);
     setRenderPolarSvgRequested(false);
   }, [normalizedResult]);
 
@@ -55,9 +63,9 @@ export function NormalizationDebugPage() {
       normalizedResult.polarView,
       selectedPolarLevel,
       polarRenderLimit,
-      showOnlyBuildingAndPoiInChart,
+      visiblePolarCategories,
     );
-  }, [normalizedResult, polarRenderLimit, selectedPolarLevel, showOnlyBuildingAndPoiInChart]);
+  }, [normalizedResult, polarRenderLimit, selectedPolarLevel, visiblePolarCategories]);
 
   const totalVisiblePolarFeatures = useMemo(() => {
     if (!normalizedResult?.polarView) {
@@ -67,16 +75,16 @@ export function NormalizationDebugPage() {
     return getVisiblePolarFeatureCount(
       normalizedResult.polarView.levels,
       selectedPolarLevel,
-      showOnlyBuildingAndPoiInChart,
+      visiblePolarCategories,
     );
-  }, [normalizedResult, selectedPolarLevel, showOnlyBuildingAndPoiInChart]);
+  }, [normalizedResult, selectedPolarLevel, visiblePolarCategories]);
 
   const renderedPolarFeatures = useMemo(() => {
     if (!chartPolarView) {
       return 0;
     }
 
-    return getVisiblePolarFeatureCount(chartPolarView.levels, 'all', false);
+    return getVisiblePolarFeatureCount(chartPolarView.levels, 'all', DEFAULT_VISIBLE_POLAR_CATEGORIES);
   }, [chartPolarView]);
 
   const featureSummaryText = normalizedResult ? JSON.stringify(normalizedResult.featureSummary, null, 2) : '';
@@ -97,6 +105,13 @@ export function NormalizationDebugPage() {
     }
 
     await navigator.clipboard.writeText(text);
+  };
+
+  const handleTogglePolarCategory = (category: PolarFeatureCategory, checked: boolean) => {
+    setVisiblePolarCategories((current) => ({
+      ...current,
+      [category]: checked,
+    }));
   };
 
   return (
@@ -239,14 +254,35 @@ export function NormalizationDebugPage() {
               onChange={(event) => setPolarSvgRenderLimit(event.target.value)}
               style={{ width: '100px' }}
             />
-            <label htmlFor="polarBuildingPoiOnly" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <label htmlFor="polarBuildingsPoi" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
               <input
-                id="polarBuildingPoiOnly"
+                id="polarBuildingsPoi"
                 type="checkbox"
-                checked={showOnlyBuildingAndPoiInChart}
-                onChange={(event) => setShowOnlyBuildingAndPoiInChart(event.target.checked)}
+                checked={visiblePolarCategories.building || visiblePolarCategories.poi}
+                onChange={(event) => {
+                  handleTogglePolarCategory('building', event.target.checked);
+                  handleTogglePolarCategory('poi', event.target.checked);
+                }}
               />
-              Only buildings & POI
+              Buildings & POI
+            </label>
+            <label htmlFor="polarLineFeatures" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <input
+                id="polarLineFeatures"
+                type="checkbox"
+                checked={visiblePolarCategories.line}
+                onChange={(event) => handleTogglePolarCategory('line', event.target.checked)}
+              />
+              Line features
+            </label>
+            <label htmlFor="polarAreaFeatures" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <input
+                id="polarAreaFeatures"
+                type="checkbox"
+                checked={visiblePolarCategories.area}
+                onChange={(event) => handleTogglePolarCategory('area', event.target.checked)}
+              />
+              Area features
             </label>
             <button
               type="button"
@@ -327,7 +363,7 @@ function filterPolarViewForChart(
   polarView: NormalizedPolarView,
   selectedLevel: 'all' | 1 | 2 | 3,
   limit: number,
-  showOnlyBuildingAndPoi: boolean,
+  visibleCategories: Record<PolarFeatureCategory, boolean>,
 ): NormalizedPolarView {
   let remaining = limit;
 
@@ -341,9 +377,7 @@ function filterPolarViewForChart(
         };
       }
 
-      const filteredFeatures = showOnlyBuildingAndPoi
-        ? level.features.filter((feature) => feature.category === 'building' || feature.category === 'poi')
-        : level.features;
+      const filteredFeatures = level.features.filter((feature) => visibleCategories[feature.category]);
 
       if (remaining <= 0) {
         return {
@@ -366,16 +400,14 @@ function filterPolarViewForChart(
 function getVisiblePolarFeatureCount(
   levels: NormalizedPolarLevel[],
   selectedLevel: 'all' | 1 | 2 | 3,
-  showOnlyBuildingAndPoi: boolean,
+  visibleCategories: Record<PolarFeatureCategory, boolean>,
 ): number {
   return levels.reduce((count, level) => {
     if (selectedLevel !== 'all' && level.level !== selectedLevel) {
       return count;
     }
 
-    const filteredFeatures = showOnlyBuildingAndPoi
-      ? level.features.filter((feature) => feature.category === 'building' || feature.category === 'poi')
-      : level.features;
+    const filteredFeatures = level.features.filter((feature) => visibleCategories[feature.category]);
 
     return count + filteredFeatures.length;
   }, 0);

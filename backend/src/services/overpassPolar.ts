@@ -55,6 +55,10 @@ export interface NormalizedPolarFeatureSummary {
   farthestPoint: PolarCoordinateSample;
   centerPoint: PolarCoordinateSample;
   widestSpan: PolarAngularSpan;
+  linePoints?: PolarCoordinateSample[];
+  linePath?: PolarCoordinateSample[];
+  orientationDegrees?: number;
+  lineLengthMeters?: number;
 }
 
 export interface NormalizedPolarLevel {
@@ -72,6 +76,18 @@ export interface NormalizedPolarView {
   levels: NormalizedPolarLevel[];
 }
 
+interface PolarFeatureMetrics {
+  category: PolarFeatureCategory;
+  nearestPoint: PolarCoordinateSample;
+  farthestPoint: PolarCoordinateSample;
+  centerPoint: PolarCoordinateSample;
+  widestSpan: PolarAngularSpan;
+  linePoints?: PolarCoordinateSample[];
+  linePath?: PolarCoordinateSample[];
+  orientationDegrees?: number;
+  lineLengthMeters?: number;
+}
+
 const MAX_POLAR_RADIUS_METERS = 1000 as const;
 const POLAR_LEVELS: Array<{ level: 1 | 2 | 3; minExclusive: number; maxInclusive: number }> = [
   { level: 1, minExclusive: 30, maxInclusive: 100 },
@@ -84,8 +100,8 @@ const DIRECTION_CLUSTER_THRESHOLD_DEGREES: Record<1 | 2 | 3, number> = {
   3: 45,
 };
 
-// polar 层现在的职责是“把 DB 导出的坐标样本压缩成叙述友好的极坐标摘要”。
-// 它不再关心原始 GeoJSON 拓扑，只关心样本点、标签和分层/聚类规则。
+// polar 层的职责是“把 DB 导出的空间样本压缩成叙述友好的极坐标摘要”。
+// 这里不再回看原始 GeoJSON，只消费已经投影好的点、路径和标签。
 export function buildNormalizedPolarView(input: {
   records: DbPolarFeatureRecord[];
   featureDetails: Map<string, DbFeatureDetail>;
@@ -97,7 +113,7 @@ export function buildNormalizedPolarView(input: {
     const summary = detail ? buildPolarFeatureSummary(record, detail, origin) : null;
     return summary ? [summary] : [];
   });
-  // 先对单个要素完成摘要，再按 level + label 做方向聚类。
+  // 先完成单要素摘要，再按 level + label 做方向聚类。
   const clusteredSummaries = applyDirectionClusters(summaries);
 
   const levels = POLAR_LEVELS.map<NormalizedPolarLevel>((definition) => ({
@@ -126,30 +142,21 @@ function buildPolarFeatureSummary(
   detail: DbFeatureDetail,
   origin: [number, number],
 ): NormalizedPolarFeatureSummary | null {
-  if (record.sampleCoordinates.length === 0) {
+  const metrics = buildPolarFeatureMetrics(record, origin);
+  if (!metrics) {
     return null;
   }
 
-  const samples = record.sampleCoordinates.map((coordinate) => toPolarCoordinateSample(origin, coordinate));
-  const nearestPoint = selectNearestSample(samples);
-  const farthestPoint = selectFarthestSample(samples);
-  // centerCoordinate 来自 SQL 的“中心候选点”；
-  // 如果缺失，退回到第一个采样点，保证极端数据下仍可产出摘要。
-  const centerCoordinate = record.centerCoordinate || record.sampleCoordinates[0] || null;
-
-  if (!nearestPoint || !farthestPoint || !centerCoordinate) {
-    return null;
-  }
-
-  const centerPoint = toPolarCoordinateSample(origin, centerCoordinate);
-  const level = classifyPolarLevel(nearestPoint.distanceMeters);
+  // line 的层级判断改为看 centerPoint，
+  // 因为它现在明确承担“线整体相对位置”的职责。
+  const levelDistanceMeters =
+    record.category === 'line' ? metrics.centerPoint.distanceMeters : metrics.nearestPoint.distanceMeters;
+  const level = classifyPolarLevel(levelDistanceMeters);
   if (!level) {
     return null;
   }
 
-  const widestSpan = computeWidestSpan(record.geometryType, samples);
-  // level filter 决定不同距离层保留哪些类别、展示哪些标签。
-  const filteredPresentation = applyPolarLevelFilter(detail, record.category, level, widestSpan);
+  const filteredPresentation = applyPolarLevelFilter(detail, level, metrics);
   if (!filteredPresentation.shouldInclude) {
     return null;
   }
@@ -162,14 +169,94 @@ function buildPolarFeatureSummary(
     category: record.category,
     baseLabel: filteredPresentation.baseLabel,
     clusterLabel: filteredPresentation.baseLabel,
-    directionCluster: buildSingletonDirectionCluster(record.featureId, centerPoint.bearingDegrees),
+    directionCluster: buildSingletonDirectionCluster(record.featureId, metrics.centerPoint.bearingDegrees),
     displayLabel: filteredPresentation.baseLabel,
     visibleTags: filteredPresentation.visibleTags,
     level,
+    nearestPoint: metrics.nearestPoint,
+    farthestPoint: metrics.farthestPoint,
+    centerPoint: metrics.centerPoint,
+    widestSpan: metrics.widestSpan,
+    linePoints: metrics.linePoints,
+    linePath: metrics.linePath,
+    orientationDegrees: metrics.orientationDegrees,
+    lineLengthMeters: metrics.lineLengthMeters,
+  };
+}
+
+function buildPolarFeatureMetrics(
+  record: DbPolarFeatureRecord,
+  origin: [number, number],
+): PolarFeatureMetrics | null {
+  if (record.category === 'line') {
+    return buildLineFeatureMetrics(record, origin);
+  }
+
+  if (record.sampleCoordinates.length === 0) {
+    return null;
+  }
+
+  const samples = record.sampleCoordinates.map((coordinate) => toPolarCoordinateSample(origin, coordinate));
+  const nearestPoint = selectNearestSample(samples);
+  const farthestPoint = selectFarthestSample(samples);
+  const centerCoordinate = record.centerCoordinate || record.sampleCoordinates[0] || null;
+
+  if (!nearestPoint || !farthestPoint || !centerCoordinate) {
+    return null;
+  }
+
+  return {
+    category: record.category,
     nearestPoint,
     farthestPoint,
-    centerPoint,
-    widestSpan,
+    centerPoint: toPolarCoordinateSample(origin, centerCoordinate),
+    widestSpan: computeWidestSpan(record.geometryType, samples),
+  };
+}
+
+function buildLineFeatureMetrics(
+  record: DbPolarFeatureRecord,
+  origin: [number, number],
+): PolarFeatureMetrics | null {
+  const linePathCoordinates = dedupeConsecutiveCoordinates(record.linePathCoordinates || record.sampleCoordinates);
+  const lineVertexCoordinates = dedupeConsecutiveCoordinates(record.lineVertexCoordinates || linePathCoordinates);
+  const centerCoordinate = record.centerCoordinate || linePathCoordinates[0] || null;
+
+  if (linePathCoordinates.length < 2 || lineVertexCoordinates.length < 2 || !centerCoordinate) {
+    return null;
+  }
+
+  const linePath = linePathCoordinates.map((coordinate) => toPolarCoordinateSample(origin, coordinate));
+  const nearestPoint = selectNearestSample(linePath);
+  const farthestPoint = selectFarthestSample(linePath);
+  if (!nearestPoint || !farthestPoint) {
+    return null;
+  }
+
+  // linePoints 是“供回归和 debug 展示的 4 个代表顶点”，
+  // centerPoint 则单独沿用 SQL 的 centerCoordinate，两者职责完全分离。
+  const representativeLineCoordinates = selectRepresentativeLineCoordinates(lineVertexCoordinates, 4);
+  const linePoints = representativeLineCoordinates.map((coordinate) => toPolarCoordinateSample(origin, coordinate));
+  const orientationDegrees = computeLineOrientationDegrees(representativeLineCoordinates);
+  if (linePoints.length < 4 || orientationDegrees === null) {
+    return null;
+  }
+
+  const startPoint = linePoints[0]!;
+  const endPoint = linePoints[linePoints.length - 1]!;
+
+  return {
+    category: 'line',
+    nearestPoint,
+    farthestPoint,
+    centerPoint: toPolarCoordinateSample(origin, centerCoordinate),
+    // line 的 widestSpan 不再尝试描述“整条线的包络扇区”，
+    // 而只反映起点与终点形成的方位开口。
+    widestSpan: computeLineEndpointSpan(startPoint, endPoint),
+    linePoints,
+    linePath,
+    orientationDegrees,
+    lineLengthMeters: computePathLengthMeters(linePathCoordinates),
   };
 }
 
@@ -213,7 +300,7 @@ function computeWidestSpan(geometryType: string, samples: PolarCoordinateSample[
   let largestGap = -1;
   let gapStartIndex = 0;
 
-  // 这里沿用旧逻辑：找出 bearing 序列中的最大空隙，
+  // 旧逻辑：在 bearing 序列中找到最大空隙，
   // 再用 360 - gap 得到最小包络视野角。
   for (let index = 0; index < sortedSamples.length; index += 1) {
     const current = sortedSamples[index]!;
@@ -236,6 +323,26 @@ function computeWidestSpan(geometryType: string, samples: PolarCoordinateSample[
   };
 }
 
+function computeLineEndpointSpan(
+  startPoint: PolarCoordinateSample,
+  endPoint: PolarCoordinateSample,
+): PolarAngularSpan {
+  const deltaForward = circularAngleDeltaDegrees(startPoint.bearingDegrees, endPoint.bearingDegrees);
+  if (deltaForward <= 180) {
+    return {
+      clockwiseEarlyPoint: startPoint,
+      clockwiseLatePoint: endPoint,
+      angleWidthDegrees: deltaForward,
+    };
+  }
+
+  return {
+    clockwiseEarlyPoint: endPoint,
+    clockwiseLatePoint: startPoint,
+    angleWidthDegrees: 360 - deltaForward,
+  };
+}
+
 function classifyPolarLevel(distanceMeters: number): 1 | 2 | 3 | null {
   const match = POLAR_LEVELS.find(
     (definition) => distanceMeters > definition.minExclusive && distanceMeters <= definition.maxInclusive,
@@ -245,34 +352,33 @@ function classifyPolarLevel(distanceMeters: number): 1 | 2 | 3 | null {
 
 function applyPolarLevelFilter(
   detail: DbFeatureDetail,
-  category: PolarFeatureCategory,
   level: 1 | 2 | 3,
-  widestSpan: PolarAngularSpan,
+  metrics: PolarFeatureMetrics,
 ): {
   shouldInclude: boolean;
   baseLabel: string;
   visibleTags: PolarVisibleTag[];
 } {
   if (level === 1) {
-    return applyLevel1Filter(detail, category);
+    return applyLevel1Filter(detail, metrics);
   }
 
   if (level === 2) {
-    return applyLevel2Filter(detail, category);
+    return applyLevel2Filter(detail, metrics);
   }
 
-  return applyLevel3Filter(detail, category, widestSpan);
+  return applyLevel3Filter(detail, metrics);
 }
 
 function applyLevel1Filter(
   detail: DbFeatureDetail,
-  category: PolarFeatureCategory,
+  metrics: PolarFeatureMetrics,
 ): {
   shouldInclude: boolean;
   baseLabel: string;
   visibleTags: PolarVisibleTag[];
 } {
-  switch (category) {
+  switch (metrics.category) {
     case 'building':
       return {
         shouldInclude: true,
@@ -287,7 +393,7 @@ function applyLevel1Filter(
       };
     case 'line':
       return {
-        shouldInclude: true,
+        shouldInclude: metrics.orientationDegrees !== undefined,
         baseLabel: getPrimaryLabel(ROAD_TAG_KEYS, detail.tags) || 'way',
         visibleTags: collectVisibleTags(detail.tags, ['name', ...ROAD_TAG_KEYS]),
       };
@@ -302,13 +408,13 @@ function applyLevel1Filter(
 
 function applyLevel2Filter(
   detail: DbFeatureDetail,
-  category: PolarFeatureCategory,
+  metrics: PolarFeatureMetrics,
 ): {
   shouldInclude: boolean;
   baseLabel: string;
   visibleTags: PolarVisibleTag[];
 } {
-  switch (category) {
+  switch (metrics.category) {
     case 'building':
       return {
         shouldInclude: true,
@@ -326,7 +432,7 @@ function applyLevel2Filter(
     case 'line': {
       const primaryTag = getPrimaryVisibleTag(detail.tags, ROAD_TAG_KEYS);
       return {
-        shouldInclude: primaryTag !== null,
+        shouldInclude: primaryTag !== null && metrics.orientationDegrees !== undefined,
         baseLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'way',
         visibleTags: primaryTag ? [primaryTag] : [],
       };
@@ -344,14 +450,13 @@ function applyLevel2Filter(
 
 function applyLevel3Filter(
   detail: DbFeatureDetail,
-  category: PolarFeatureCategory,
-  widestSpan: PolarAngularSpan,
+  metrics: PolarFeatureMetrics,
 ): {
   shouldInclude: boolean;
   baseLabel: string;
   visibleTags: PolarVisibleTag[];
 } {
-  switch (category) {
+  switch (metrics.category) {
     case 'building': {
       const buildingValue = trimTagValue(detail.tags.building);
       return {
@@ -368,7 +473,10 @@ function applyLevel3Filter(
       };
     case 'line': {
       const primaryTag = getPrimaryVisibleTag(detail.tags, ROAD_TAG_KEYS);
-      const shouldInclude = primaryTag !== null && widestSpan.angleWidthDegrees >= 5;
+      const shouldInclude =
+        primaryTag !== null &&
+        metrics.orientationDegrees !== undefined &&
+        (metrics.lineLengthMeters || 0) > 0;
       return {
         shouldInclude,
         baseLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'way',
@@ -377,7 +485,7 @@ function applyLevel3Filter(
     }
     case 'area': {
       const primaryTag = getPrimaryVisibleTag(detail.tags, AREA_TAG_KEYS);
-      const shouldInclude = primaryTag !== null && widestSpan.angleWidthDegrees >= 5;
+      const shouldInclude = primaryTag !== null && metrics.widestSpan.angleWidthDegrees >= 5;
       return {
         shouldInclude,
         baseLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'area',
@@ -556,4 +664,193 @@ function getPrimaryVisibleTag(tags: Record<string, string>, keys: readonly strin
   const [key, ...valueParts] = primaryLabel.split(':');
   const value = valueParts.join(':');
   return key && value ? { key, value } : null;
+}
+
+function dedupeConsecutiveCoordinates(coordinates: [number, number][] | undefined): [number, number][] {
+  const result: [number, number][] = [];
+
+  for (const coordinate of coordinates || []) {
+    const previous = result[result.length - 1];
+    if (previous && previous[0] === coordinate[0] && previous[1] === coordinate[1]) {
+      continue;
+    }
+    result.push(coordinate);
+  }
+
+  return result;
+}
+
+function selectRepresentativeLineCoordinates(
+  coordinates: [number, number][],
+  targetCount: number,
+): [number, number][] {
+  if (coordinates.length === 0) {
+    return [];
+  }
+
+  if (coordinates.length === 1) {
+    return Array.from({ length: targetCount }, () => coordinates[0]!);
+  }
+
+  const cumulativeDistances = buildCumulativeDistances(coordinates);
+  const totalLengthMeters = cumulativeDistances[cumulativeDistances.length - 1] || 0;
+  const selectedIndices: number[] = [];
+
+  // 这里优先“贴近原始顶点”而不是直接插值，
+  // 目标是让理想状态下的 4 个 linePoints 都直接来自线的原始顶点。
+  for (let slot = 0; slot < targetCount; slot += 1) {
+    const fraction = targetCount === 1 ? 0 : slot / (targetCount - 1);
+    const targetDistance = totalLengthMeters * fraction;
+    let bestIndex = 0;
+    let bestDistanceGap = Number.POSITIVE_INFINITY;
+
+    for (let index = 0; index < cumulativeDistances.length; index += 1) {
+      if (slot > 0 && index <= selectedIndices[slot - 1]!) {
+        continue;
+      }
+      if (slot < targetCount - 1 && cumulativeDistances.length - index < targetCount - slot) {
+        continue;
+      }
+
+      const gap = Math.abs(cumulativeDistances[index]! - targetDistance);
+      if (gap < bestDistanceGap) {
+        bestDistanceGap = gap;
+        bestIndex = index;
+      }
+    }
+
+    selectedIndices.push(bestIndex);
+  }
+
+  const selectedCoordinates = selectedIndices.map((index) => coordinates[index]!);
+  if (new Set(selectedCoordinates.map((coordinate) => coordinate.join(','))).size === selectedCoordinates.length) {
+    return selectedCoordinates;
+  }
+
+  // 如果顶点过少或重复导致无法稳定拿到 4 个不同顶点，
+  // 再退回到“按路径等距插值补点”。
+  return buildInterpolatedPathSamples(coordinates, targetCount);
+}
+
+function buildCumulativeDistances(coordinates: [number, number][]): number[] {
+  const cumulativeDistances: number[] = [0];
+
+  for (let index = 1; index < coordinates.length; index += 1) {
+    cumulativeDistances.push(
+      cumulativeDistances[index - 1]! + distanceBetweenCoordinates(coordinates[index - 1]!, coordinates[index]!),
+    );
+  }
+
+  return cumulativeDistances;
+}
+
+function buildInterpolatedPathSamples(
+  coordinates: [number, number][],
+  targetCount: number,
+): [number, number][] {
+  if (coordinates.length === 0) {
+    return [];
+  }
+
+  if (coordinates.length === 1) {
+    return Array.from({ length: targetCount }, () => coordinates[0]!);
+  }
+
+  const cumulativeDistances = buildCumulativeDistances(coordinates);
+  const totalLengthMeters = cumulativeDistances[cumulativeDistances.length - 1] || 0;
+
+  if (totalLengthMeters <= 0) {
+    return Array.from({ length: targetCount }, (_, index) => coordinates[Math.min(index, coordinates.length - 1)]!);
+  }
+
+  return Array.from({ length: targetCount }, (_, slot) => {
+    const fraction = targetCount === 1 ? 0 : slot / (targetCount - 1);
+    const targetDistance = totalLengthMeters * fraction;
+    return interpolateCoordinateAlongPath(coordinates, cumulativeDistances, targetDistance);
+  });
+}
+
+function interpolateCoordinateAlongPath(
+  coordinates: [number, number][],
+  cumulativeDistances: number[],
+  targetDistance: number,
+): [number, number] {
+  for (let index = 1; index < cumulativeDistances.length; index += 1) {
+    const segmentStartDistance = cumulativeDistances[index - 1]!;
+    const segmentEndDistance = cumulativeDistances[index]!;
+
+    if (targetDistance > segmentEndDistance) {
+      continue;
+    }
+
+    const startCoordinate = coordinates[index - 1]!;
+    const endCoordinate = coordinates[index]!;
+    const segmentLength = segmentEndDistance - segmentStartDistance;
+    if (segmentLength <= 0) {
+      return endCoordinate;
+    }
+
+    const ratio = (targetDistance - segmentStartDistance) / segmentLength;
+    return [
+      startCoordinate[0] + (endCoordinate[0] - startCoordinate[0]) * ratio,
+      startCoordinate[1] + (endCoordinate[1] - startCoordinate[1]) * ratio,
+    ];
+  }
+
+  return coordinates[coordinates.length - 1]!;
+}
+
+function computeLineOrientationDegrees(coordinates: [number, number][]): number | null {
+  if (coordinates.length < 2) {
+    return null;
+  }
+
+  const projected = coordinates.map(projectCoordinateToMeters);
+  const meanX = projected.reduce((sum, point) => sum + point.x, 0) / projected.length;
+  const meanY = projected.reduce((sum, point) => sum + point.y, 0) / projected.length;
+
+  let sxx = 0;
+  let syy = 0;
+  let sxy = 0;
+
+  for (const point of projected) {
+    const dx = point.x - meanX;
+    const dy = point.y - meanY;
+    sxx += dx * dx;
+    syy += dy * dy;
+    sxy += dx * dy;
+  }
+
+  if (sxx === 0 && syy === 0) {
+    return null;
+  }
+
+  // 这里用 PCA/总最小二乘的主轴方向，而不是普通 y=f(x) 回归。
+  // 原因是线可能接近竖直，若只做斜率回归会在接近无穷斜率时退化。
+  const angleRadians = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+  const dx = Math.cos(angleRadians);
+  const dy = Math.sin(angleRadians);
+  return normalizeDegrees((Math.atan2(dx, dy) * 180) / Math.PI);
+}
+
+function projectCoordinateToMeters(coordinate: [number, number]): { x: number; y: number } {
+  const [lon, lat] = coordinate;
+  const latRadians = (lat * Math.PI) / 180;
+  const metersPerDegreeLat = 111_320;
+  const metersPerDegreeLon = 111_320 * Math.cos(latRadians);
+
+  return {
+    x: lon * metersPerDegreeLon,
+    y: lat * metersPerDegreeLat,
+  };
+}
+
+function computePathLengthMeters(coordinates: [number, number][]): number {
+  let lengthMeters = 0;
+
+  for (let index = 1; index < coordinates.length; index += 1) {
+    lengthMeters += distanceBetweenCoordinates(coordinates[index - 1]!, coordinates[index]!);
+  }
+
+  return lengthMeters;
 }

@@ -119,8 +119,11 @@ function buildPolarSection(polarView: NormalizedPolarView | undefined): string {
     return '## 极坐标摘要：无';
   }
 
-  const buildingAndPoiBlocks = polarView.levels.map((level) => buildPolarLevelBlock(level.level, level.features, true));
-  const lineAndAreaBlocks = polarView.levels.map((level) => buildPolarLevelBlock(level.level, level.features, false));
+  const buildingAndPoiBlocks = polarView.levels.map((level) =>
+    buildPolarLevelBlock(level.level, level.features, ['building', 'poi']),
+  );
+  const lineBlocks = polarView.levels.map((level) => buildPolarLevelBlock(level.level, level.features, ['line']));
+  const areaBlocks = polarView.levels.map((level) => buildPolarLevelBlock(level.level, level.features, ['area']));
 
   return [
     '## 等级1到等级3（30米到1公里极坐标摘要）',
@@ -128,22 +131,24 @@ function buildPolarSection(polarView: NormalizedPolarView | undefined): string {
     '### 显著部分：建筑与POI',
     ...buildingAndPoiBlocks,
     '',
-    '### 补充部分：线类与区域',
-    ...lineAndAreaBlocks,
+    '### 补充部分：线类',
+    ...lineBlocks,
+    '',
+    '### 补充部分：区域',
+    ...areaBlocks,
   ].join('\n');
 }
 
 function buildPolarLevelBlock(
   level: 1 | 2 | 3,
   summaries: NormalizedPolarFeatureSummary[],
-  includeBuildingAndPoi: boolean,
+  includedCategories: NormalizedPolarFeatureSummary['category'][],
 ): string {
   const groupedEntries = new Map<string, NormalizedPolarFeatureSummary[]>();
   const levelDesc = { 1: '100m~30m', 2: '300m~100m', 3: '1km~300m' };
 
   for (const summary of summaries) {
-    // building/poi 与 line/area 分开展示，是为了让 prompt 先读到更显著的环境对象。
-    if (includeBuildingAndPoi ? !isBuildingOrPoiCategory(summary.category) : isBuildingOrPoiCategory(summary.category)) {
+    if (!includedCategories.includes(summary.category)) {
       continue;
     }
 
@@ -188,12 +193,16 @@ function buildPolarClusterSummaryLines(level: 1 | 2 | 3, entries: NormalizedPola
   const config = POLAR_LEVEL_PROMPT_CONFIG[level];
   const sortedEntries = [...entries].sort(
     (left, right) =>
-      right.widestSpan.angleWidthDegrees - left.widestSpan.angleWidthDegrees ||
+      getPromptRepresentativeScore(right) - getPromptRepresentativeScore(left) ||
       left.centerPoint.distanceMeters - right.centerPoint.distanceMeters ||
       left.osmId - right.osmId,
   );
   const representativeEntries = sortedEntries
-    .filter((entry) => entry.widestSpan.angleWidthDegrees >= config.representativeMinAngleDegrees)
+    .filter((entry) =>
+      entry.category === 'line'
+        ? (entry.lineLengthMeters || 0) > 0
+        : entry.widestSpan.angleWidthDegrees >= config.representativeMinAngleDegrees,
+    )
     .slice(0, config.representativeLimit);
   const anchors = representativeEntries.length > 0 ? representativeEntries : sortedEntries.slice(0, 1);
   // 同一群里不把全部要素都展开，避免中远距离 prompt 过长失控。
@@ -214,9 +223,26 @@ function buildPolarClusterSummaryLines(level: 1 | 2 | 3, entries: NormalizedPola
 
 function buildPolarFeatureLines(summary: NormalizedPolarFeatureSummary): string[] {
   const detailTags = summary.visibleTags.map((tag) => `${tag.key}: ${tag.value}`);
+  const baseLines = [
+    `* (id=${summary.featureId})`,
+  ];
+
+  if (summary.category === 'line' && summary.linePoints && summary.linePoints.length > 0) {
+    const pointText = summary.linePoints
+      .map((point, index) => `点${index + 1}${formatPolarSample(point)}`)
+      .join('，');
+    return [
+      ...baseLines,
+      `  * 中心点${formatPolarSample(summary.centerPoint)}`,
+      `  * 线顶点抽样：${pointText}`,
+      `  * 主走向${formatAngle(summary.orientationDegrees || 0)}`,
+      `  * 起终点开角：边界点1${formatPolarSample(summary.widestSpan.clockwiseEarlyPoint)}，边界点2${formatPolarSample(summary.widestSpan.clockwiseLatePoint)}，角宽${formatAngle(summary.widestSpan.angleWidthDegrees)}`,
+      ...detailTags.map((tag) => `  * ${tag}`),
+    ];
+  }
 
   return [
-    `* (id=${summary.featureId})`,
+    ...baseLines,
     `  * 最近点${formatPolarSample(summary.nearestPoint)}，最远点${formatPolarSample(summary.farthestPoint)}，中心点${formatPolarSample(summary.centerPoint)}`,
     `  * 边界点1${formatPolarSample(summary.widestSpan.clockwiseEarlyPoint)}，边界点2${formatPolarSample(summary.widestSpan.clockwiseLatePoint)}，视野角宽${formatAngle(summary.widestSpan.angleWidthDegrees)}`,
     ...detailTags.map((tag) => `  * ${tag}`),
@@ -274,8 +300,12 @@ function collectImportantTags(feature: DbFeatureDetail): string[] {
   });
 }
 
-function isBuildingOrPoiCategory(category: NormalizedPolarFeatureSummary['category']): boolean {
-  return category === 'building' || category === 'poi';
+function getPromptRepresentativeScore(summary: NormalizedPolarFeatureSummary): number {
+  if (summary.category === 'line') {
+    return summary.lineLengthMeters || 0;
+  }
+
+  return summary.widestSpan.angleWidthDegrees;
 }
 
 function formatPolarSample(sample: { distanceMeters: number; bearingDegrees: number }): string {
