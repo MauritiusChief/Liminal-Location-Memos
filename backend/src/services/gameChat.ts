@@ -52,6 +52,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   // 3. 装载场景并复用/生成描述
   // 4. 让模型决定是否调用 move_player
   // 5. 若移动则刷新场景和描述，并把 assistant(tool_call) + tool(tool_return) 带回第二轮生成最终自然语言回复
+  // TODO 确保移动后，要根据复用规则复用描述，而不是移动后一定生成新的描述，不管移动距离多么短
   const session = await getOrCreateSession(input.sessionId);
   let coverageSyncTriggered = await ensureCoverageForPosition(session.save.playerPosition);
   let sceneContext = await loadSceneContext(session.save.playerPosition);
@@ -171,8 +172,6 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   session.save.visibleSmallDescriptionIds = nearbySmallDescriptions.map((record) => record.id);
   updateLastSceneContextMeta(session, {
     diagnostics: sceneContext.diagnostics,
-    largeSceneSignature: sceneContext.largeSceneSignature,
-    smallSceneSignature: sceneContext.smallSceneSignature,
   });
   const nextHistory: GameMessage[] = [
     ...session.save.messageHistory,
@@ -209,8 +208,6 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     nearbySmallDescriptions,
     debugSceneMeta: {
       diagnostics: sceneContext.diagnostics,
-      largeSceneSignature: sceneContext.largeSceneSignature,
-      smallSceneSignature: sceneContext.smallSceneSignature,
       coverageSyncTriggered,
     },
   };

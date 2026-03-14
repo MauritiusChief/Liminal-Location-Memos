@@ -13,10 +13,13 @@ export async function ensureLargeDescription(
   sceneContext: SceneContext,
   session: LoadedGameSession,
 ): Promise<LargeDescriptionRecord> {
-  // 大描述优先复用；只有同 scene 的描述不存在时才调用 LLM 生成。
-  const existing = await findActiveLargeDescription(session, sceneContext.position, sceneContext.largeSceneSignature);
-  // TODO 为何没有找到可复用内容？
-  console.log('[DEBUG] ensureLargeDescription() - 找到可复用 large description 了吗？', existing !== null);
+  // 大描述优先复用；只有当前位置不在任何已有描述的有效半径内时才调用 LLM 生成。
+  const existing = await findActiveLargeDescription(session, sceneContext.position);
+  console.log('[DEBUG] ensureLargeDescription() - reuse result', {
+    reused: existing !== null,
+    descriptionId: existing?.id ?? null,
+    effectiveRadiusM: existing?.effectiveRadiusM ?? null,
+  });
 
   if (existing) {
     return existing;
@@ -45,7 +48,6 @@ export async function ensureLargeDescription(
 
   return insertLargeDescription(session, {
     position: sceneContext.position,
-    sourceSceneSignature: sceneContext.largeSceneSignature,
     descriptionText: generated.reply.trim(),
   });
 }
@@ -55,9 +57,12 @@ export async function ensureSmallDescription(
   session: LoadedGameSession,
 ): Promise<SmallDescriptionRecord> {
   // 小描述也是“先查再生”，只是生成时会额外参考周边小描述的远距可见细节。
-  const existing = await findReusableSmallDescription(session, sceneContext.position, sceneContext.smallSceneSignature);
-  // TODO 为何没有找到可复用内容？
-  console.log('[DEBUG] ensureSmallDescription() - 找到可复用 small description 了吗？', existing !== null);
+  const existing = await findReusableSmallDescription(session, sceneContext.position);
+  console.log('[DEBUG] ensureSmallDescription() - reuse result', {
+    reused: existing !== null,
+    descriptionId: existing?.id ?? null,
+    effectiveRadiusM: existing?.effectiveRadiusM ?? null,
+  });
 
   if (existing) {
     return existing;
@@ -69,7 +74,6 @@ export async function ensureSmallDescription(
   console.log('[DEBUG] ensureSmallDescription() - generateSmallDescription() return');
   return insertSmallDescription(session, {
     position: sceneContext.position,
-    sourceSceneSignature: sceneContext.smallSceneSignature,
     descriptionText: generated.descriptionText,
     farVisibleNotes: generated.farVisibleNotes,
   });
@@ -106,12 +110,12 @@ async function generateSmallDescription(
       '你会根据程序生成的确定性场景摘要，输出一段局部环境描述。',
       '同时你还需要输出一段“本地细节中200米外仍可见的细节的笔记”，供其他邻近描述复用。',
       '输出必须是 JSON 对象，格式为 {"descriptionText":"...","farVisibleNotes":"..."}。',
-      'descriptionText 只能包含仅可在本地可见的细节描述。',
-      'farVisibleNotes 只能包含 200 米外仍可见的轮廓、道路走向、显著建筑体量、地标等。',
-      '不要把近场微观细节、招牌、门牌、30米内观察才能知道的信息写进 farVisibleNotes。',
+      'descriptionText 指代的是站在原地，环视周围可以看到的近处与远处的细节。',
+      'farVisibleNotes 指代的是假如视角移动到了200米外，在目前场景摘要内所包含的内容中，有哪些是依然能被看到的。比方说可见的轮廓、显著建筑体量、地标等。',
+      '如果提供了“供参考的邻近描述细节”，那么 descriptionText 将不仅仅只有近场微观细节如招牌、门牌、30米内观察才能知道的信息等，还需要包含这些邻近描述的细节。',
+      '这些其实就是其他邻近描述中的 farVisibleNotes，是用来填充之前提到的“看到的近处与远处的细节”中的“远处的细节”的。',
       styleRule,
-      visibleNotes ? '此处提供临近的描述的远距细节作参考，这部分细节放入"descriptionText"，因为其代表“在本地观察到的别处的情况”，而非“能在别处观察到的本地情况”。' : '',
-      visibleNotes ? `可参考的邻近描述远距细节：\n${visibleNotes}` : '当前没有可参考的邻近描述远距细节。',
+      visibleNotes ? `供参考的邻近描述细节：\n${visibleNotes}` : '当前没有可参考的供参考的邻近描述细节。',
     ].join('\n'),
     sceneContext.smallSummary,
   );

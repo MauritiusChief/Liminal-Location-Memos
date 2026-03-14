@@ -174,19 +174,6 @@
 - `largeSummary`
 - `smallSummary`
 
-另外还会生成两个签名：
-
-- `largeSceneSignature`
-- `smallSceneSignature`
-
-签名生成函数：
-
-- `createSceneSignature()`
-
-作用：
-
-- 判断“当前 scene 是否和某条已存在描述对应的是同一场景”
-
 ## 6. 大描述和小描述如何复用或生成
 
 文件：
@@ -208,7 +195,7 @@
 
 流程：
 
-1. 用 `largeSceneSignature` 查询是否存在“同一 scene 且当前位置仍在有效半径内”的大描述
+1. 查询是否存在“当前位置仍在有效半径内”的大描述
 2. 如果存在，直接复用
 3. 如果不存在，就调用 LLM 基于 `largeSummary` 生成
 4. 把生成结果写入当前会话 JSON 文档中的 `largeDescriptions`
@@ -224,7 +211,7 @@
 
 流程：
 
-1. 用 `smallSceneSignature` 查询可复用的小描述
+1. 查询可复用的小描述
 2. 如果不存在，则先取当前位置 200m 内已有的小描述
 3. 调用 LLM 基于 `smallSummary` 生成新的小描述
 4. 同时要求模型返回：
@@ -236,6 +223,7 @@
 
 - `findNearbySmallDescriptions()` 不再查 SQL
 - 它会从当前会话的 description 索引中取 200m 内候选，再按距离返回
+- large / small description 的复用现在都只按距离和 `effectiveRadiusM` 判断
 
 ## 7. 为什么小描述要有 `farVisibleNotes`
 

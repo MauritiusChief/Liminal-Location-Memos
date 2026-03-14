@@ -129,9 +129,91 @@ function normalizeSaveDocument(input: Partial<GameSaveDocument>, sessionId: stri
     messageHistory: normalizeMessageHistory(input.messageHistory),
     activeLargeDescriptionId: typeof input.activeLargeDescriptionId === 'string' ? input.activeLargeDescriptionId : null,
     visibleSmallDescriptionIds: Array.isArray(input.visibleSmallDescriptionIds) ? input.visibleSmallDescriptionIds : [],
-    largeDescriptions: Array.isArray(input.largeDescriptions) ? input.largeDescriptions : [],
-    smallDescriptions: Array.isArray(input.smallDescriptions) ? input.smallDescriptions : [],
-    lastSceneContextMeta: input.lastSceneContextMeta || null,
+    largeDescriptions: normalizeLargeDescriptions(input.largeDescriptions),
+    smallDescriptions: normalizeSmallDescriptions(input.smallDescriptions),
+    lastSceneContextMeta: normalizeLastSceneContextMeta(input.lastSceneContextMeta),
+  };
+}
+
+function normalizeLargeDescriptions(input: unknown): GameSaveDocument['largeDescriptions'] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input.flatMap((item) => {
+    if (!item || typeof item !== 'object') {
+      return [];
+    }
+
+    const id = typeof item.id === 'string' ? item.id : null;
+    const center = normalizePosition('center' in item ? item.center as Partial<GamePosition> : undefined);
+    const sourceRadiusM = Number('sourceRadiusM' in item ? item.sourceRadiusM : NaN);
+    const effectiveRadiusM = Number('effectiveRadiusM' in item ? item.effectiveRadiusM : NaN);
+    const descriptionText = typeof item.descriptionText === 'string' ? item.descriptionText : null;
+    const createdAt = typeof item.createdAt === 'string' ? item.createdAt : null;
+    const updatedAt = typeof item.updatedAt === 'string' ? item.updatedAt : null;
+
+    if (!id || !descriptionText || !createdAt || !updatedAt || !Number.isFinite(sourceRadiusM) || !Number.isFinite(effectiveRadiusM)) {
+      return [];
+    }
+
+    return [{
+      id,
+      center,
+      sourceRadiusM,
+      effectiveRadiusM,
+      descriptionText,
+      createdAt,
+      updatedAt,
+    }];
+  });
+}
+
+function normalizeSmallDescriptions(input: unknown): GameSaveDocument['smallDescriptions'] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input.flatMap((item) => {
+    if (!item || typeof item !== 'object') {
+      return [];
+    }
+
+    const id = typeof item.id === 'string' ? item.id : null;
+    const center = normalizePosition('center' in item ? item.center as Partial<GamePosition> : undefined);
+    const sourceRadiusM = Number('sourceRadiusM' in item ? item.sourceRadiusM : NaN);
+    const effectiveRadiusM = Number('effectiveRadiusM' in item ? item.effectiveRadiusM : NaN);
+    const descriptionText = typeof item.descriptionText === 'string' ? item.descriptionText : null;
+    const farVisibleNotes = typeof item.farVisibleNotes === 'string' ? item.farVisibleNotes : null;
+    const createdAt = typeof item.createdAt === 'string' ? item.createdAt : null;
+    const updatedAt = typeof item.updatedAt === 'string' ? item.updatedAt : null;
+    const distanceMetersRaw = 'distanceMeters' in item ? Number(item.distanceMeters) : undefined;
+
+    if (!id || !descriptionText || !createdAt || !updatedAt || !Number.isFinite(sourceRadiusM) || !Number.isFinite(effectiveRadiusM)) {
+      return [];
+    }
+
+    return [{
+      id,
+      center,
+      sourceRadiusM,
+      effectiveRadiusM,
+      descriptionText,
+      farVisibleNotes,
+      createdAt,
+      updatedAt,
+      distanceMeters: Number.isFinite(distanceMetersRaw) ? distanceMetersRaw : undefined,
+    }];
+  });
+}
+
+function normalizeLastSceneContextMeta(input: unknown): LastSceneContextMeta | null {
+  if (!input || typeof input !== 'object' || !('diagnostics' in input)) {
+    return null;
+  }
+
+  return {
+    diagnostics: input.diagnostics as LastSceneContextMeta['diagnostics'],
   };
 }
 

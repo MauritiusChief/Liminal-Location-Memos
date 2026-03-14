@@ -64,8 +64,6 @@ export interface SceneContext {
   polarView?: NormalizedPolarView;
   largeSummary: string;
   smallSummary: string;
-  largeSceneSignature: string;
-  smallSceneSignature: string;
 }
 
 export interface LargeDescriptionRecord {
@@ -74,7 +72,6 @@ export interface LargeDescriptionRecord {
   center: GamePosition;
   sourceRadiusM: number;
   effectiveRadiusM: number;
-  sourceSceneSignature: string;
   descriptionText: string;
   createdAt: string;
   updatedAt: string;
@@ -86,7 +83,6 @@ export interface SmallDescriptionRecord {
   center: GamePosition;
   sourceRadiusM: number;
   effectiveRadiusM: number;
-  sourceSceneSignature: string;
   descriptionText: string;
   farVisibleNotes: string | null;
   createdAt: string;
@@ -96,8 +92,6 @@ export interface SmallDescriptionRecord {
 
 export interface LastSceneContextMeta {
   diagnostics: DbNormalizationDiagnostics;
-  largeSceneSignature: string;
-  smallSceneSignature: string;
 }
 
 export interface GameSaveDocument {
@@ -148,8 +142,6 @@ export interface GameChatResponse {
   nearbySmallDescriptions: SmallDescriptionRecord[];
   debugSceneMeta: {
     diagnostics: DbNormalizationDiagnostics;
-    largeSceneSignature: string;
-    smallSceneSignature: string;
     coverageSyncTriggered: boolean;
   } | null;
 }
@@ -164,7 +156,5 @@ export interface GameSessionSnapshotResponse {
   nearbySmallDescriptions: SmallDescriptionRecord[];
   debugSceneMeta: {
     diagnostics: DbNormalizationDiagnostics;
-    largeSceneSignature: string;
-    smallSceneSignature: string;
   } | null;
 }

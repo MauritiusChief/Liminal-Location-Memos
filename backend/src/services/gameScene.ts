@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { overpassJson } from 'overpass-ts';
 import type { DbFeatureDetail } from './dbSceneTypes.js';
 import { buildNormalizedMicroGrid } from './overpassGrid.js';
@@ -95,8 +94,6 @@ export async function loadSceneContext(position: GamePosition, radius = 1000): P
     polarView: largeScene.polarView,
     largeSummary: largeScene.summary,
     smallSummary: smallScene.summary,
-    largeSceneSignature: createSceneSignature(largeScene.summary),
-    smallSceneSignature: createSceneSignature(smallScene.summary),
   };
 }
 
@@ -140,10 +137,4 @@ async function loadProjectedScene(request: NormalizedOverpassRequest): Promise<{
       featureDetails: featureDetailIndex,
     }),
   };
-}
-
-// TODO 由于 summary 是数据库生成的，同一经纬度+同一范围一定生成相同的 summary，所以不一定需要 signature 来判断是否相同
-function createSceneSignature(summary: string): string {
-  // signature 只依赖确定性的程序摘要，用来判断“同一 scene 是否可以复用已有描述”。
-  return createHash('sha256').update(summary).digest('hex');
 }

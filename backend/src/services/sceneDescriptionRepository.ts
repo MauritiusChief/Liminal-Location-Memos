@@ -16,14 +16,19 @@ import type {
 export async function findActiveLargeDescription(
   session: LoadedGameSession,
   position: GamePosition,
-  sceneSignature: string,
 ): Promise<LargeDescriptionRecord | null> {
-  // 大描述的复用条件：
-  // 1. scene signature 相同
-  // 2. 当前点仍落在描述的有效半径内
+  // 大描述复用只看空间命中：
+  // 当前点落在已有描述的有效半径内，就复用最近的一条。
   const candidates = findNearbyLargeDescriptionCandidates(session.descriptionIndex, position, 1500);
-  const match = candidates.find(({ record, distanceMeters }) =>
-    record.sourceSceneSignature === sceneSignature && distanceMeters <= record.effectiveRadiusM);
+  const nearest = candidates[0] || null;
+  const match = candidates.find(({ record, distanceMeters }) => distanceMeters <= record.effectiveRadiusM);
+
+  console.log('[DEBUG] findActiveLargeDescription()', {
+    candidateCount: candidates.length,
+    nearestDistanceMeters: nearest ? Math.round(nearest.distanceMeters) : null,
+    nearestEffectiveRadiusM: nearest ? nearest.record.effectiveRadiusM : null,
+    reused: match !== undefined,
+  });
 
   return match ? match.record : null;
 }
@@ -31,12 +36,18 @@ export async function findActiveLargeDescription(
 export async function findReusableSmallDescription(
   session: LoadedGameSession,
   position: GamePosition,
-  sceneSignature: string,
 ): Promise<SmallDescriptionRecord | null> {
-  // 小描述也走同样的“同 scene + 在有效范围内”复用规则。
+  // 小描述也只看空间命中，优先复用最近且仍在有效半径内的记录。
   const candidates = findNearbySmallDescriptionCandidates(session.descriptionIndex, position, 500);
-  const match = candidates.find(({ record, distanceMeters }) =>
-    record.sourceSceneSignature === sceneSignature && distanceMeters <= record.effectiveRadiusM);
+  const nearest = candidates[0] || null;
+  const match = candidates.find(({ record, distanceMeters }) => distanceMeters <= record.effectiveRadiusM);
+
+  console.log('[DEBUG] findReusableSmallDescription()', {
+    candidateCount: candidates.length,
+    nearestDistanceMeters: nearest ? Math.round(nearest.distanceMeters) : null,
+    nearestEffectiveRadiusM: nearest ? nearest.record.effectiveRadiusM : null,
+    reused: match !== undefined,
+  });
 
   return match ? match.record : null;
 }
@@ -59,7 +70,6 @@ export async function insertLargeDescription(
   session: LoadedGameSession,
   input: {
     position: GamePosition;
-    sourceSceneSignature: string;
     descriptionText: string;
     sourceRadiusM?: number;
     effectiveRadiusM?: number;
@@ -74,7 +84,6 @@ export async function insertLargeDescription(
     },
     sourceRadiusM: input.sourceRadiusM || 1000,
     effectiveRadiusM: input.effectiveRadiusM || 300,
-    sourceSceneSignature: input.sourceSceneSignature,
     descriptionText: input.descriptionText,
     createdAt: now,
     updatedAt: now,
@@ -90,7 +99,6 @@ export async function insertSmallDescription(
   session: LoadedGameSession,
   input: {
     position: GamePosition;
-    sourceSceneSignature: string;
     descriptionText: string;
     farVisibleNotes: string | null;
     sourceRadiusM?: number;
@@ -106,7 +114,6 @@ export async function insertSmallDescription(
     },
     sourceRadiusM: input.sourceRadiusM || 200,
     effectiveRadiusM: input.effectiveRadiusM || 100,
-    sourceSceneSignature: input.sourceSceneSignature,
     descriptionText: input.descriptionText,
     farVisibleNotes: input.farVisibleNotes,
     createdAt: now,
