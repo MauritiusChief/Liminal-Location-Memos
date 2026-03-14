@@ -56,7 +56,6 @@ export function HomeChatPage() {
         <section>
           <div style={{ border: '1px solid', minHeight: '240px', padding: '8px' }}>
             {visibleMessages.length > 0 ? visibleMessages.map((entry, index) => {
-
               if (entry.role === 'tool' && entry.toolName === 'move_player') {
                 return (
                   <article
@@ -64,6 +63,17 @@ export function HomeChatPage() {
                     style={{ marginBottom: '12px', color: '#666', fontStyle: 'italic' }}
                   >
                     <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>你迈动了双腿</pre>
+                  </article>
+                );
+              }
+
+              if (entry.role === 'tool' && entry.toolName === 'look_far') {
+                return (
+                  <article
+                    key={`${entry.role}-${index}`}
+                    style={{ marginBottom: '12px', color: '#666', fontStyle: 'italic' }}
+                  >
+                    <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>你眺望了远处</pre>
                   </article>
                 );
               }

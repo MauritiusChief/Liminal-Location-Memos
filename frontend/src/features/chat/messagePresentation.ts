@@ -9,7 +9,9 @@ export function shouldDisplayGameMessage(message: GameMessage): boolean {
     return false;
   }
 
-  return message.role === 'user' || message.role === 'assistant' || (message.role === 'tool' && message.toolName === 'move_player');
+  return message.role === 'user'
+    || message.role === 'assistant'
+    || (message.role === 'tool' && (message.toolName === 'move_player' || message.toolName === 'look_far'));
 }
 
 export function parseMovePlayerToolMessage(message: GameMessage): MovePlayerToolResult | null {

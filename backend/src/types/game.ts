@@ -54,6 +54,10 @@ export interface MovePlayerToolResult {
   coverageSyncTriggered: boolean;
 }
 
+export interface LookFarToolResult {
+  mode: 'large_summary';
+}
+
 export interface SceneContext {
   // SceneContext 是一次“当前位置场景装载”的完整结果。
   // summary 不落库，而是每次从 scene data 现算后塞进这里。

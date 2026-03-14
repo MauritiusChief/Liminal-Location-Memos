@@ -251,6 +251,10 @@ export interface MovePlayerToolResult {
   coverageSyncTriggered: boolean;
 }
 
+export interface LookFarToolResult {
+  mode: 'large_summary';
+}
+
 export interface LargeDescriptionRecord {
   id: string;
   center: GamePosition;

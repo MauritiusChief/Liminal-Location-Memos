@@ -14,6 +14,7 @@ import type {
   GameChatResponse,
   GameMessage,
   GameChatRequest,
+  LookFarToolResult,
   LoadedGameSession,
   MovePlayerToolInput,
   MovePlayerToolResult,
@@ -43,6 +44,23 @@ const MOVE_PLAYER_TOOL: ToolDefinition = {
   },
 };
 
+const LOOK_FAR_TOOL: ToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'look_far',
+    description: '当用户要求眺望远处、观察较远目标，或打算前往远处前先确认情况时，调用此工具以切换到远眺信息视角。',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+};
+
+const GAME_CHAT_TOOLS: ToolDefinition[] = [MOVE_PLAYER_TOOL, LOOK_FAR_TOOL];
+
+type PromptSummaryMode = 'small' | 'large';
+
 export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' | 'message' | 'isOpeningPrompt'> & {
   message: string;
 }): Promise<GameChatResponse> {
@@ -50,14 +68,15 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   // 1. 找或建 session
   // 2. 确保当前位置有覆盖数据
   // 3. 装载场景并复用/生成描述
-  // 4. 让模型决定是否调用 move_player
-  // 5. 若移动则刷新场景和描述，并把 assistant(tool_call) + tool(tool_return) 带回第二轮生成最终自然语言回复
+  // 4. 让模型决定是否调用工具
+  // 5. 若触发工具，则由后端执行对应逻辑，并把 assistant(tool_call) + tool(tool_return) 带回后续轮次生成最终自然语言回复
   const session = await getOrCreateSession(input.sessionId);
   let coverageSyncTriggered = await ensureCoverageForPosition(session.save.playerPosition);
   let sceneContext = await loadSceneContext(session.save.playerPosition);
   let activeLargeDescription = await ensureLargeDescription(sceneContext, session);
   let activeSmallDescription = await ensureSmallDescription(sceneContext, session);
   let nearbySmallDescriptions = await mergeNearbySmallDescriptions(session, session.save.playerPosition, activeSmallDescription);
+  let promptSummaryMode: PromptSummaryMode = 'small';
   const userMessage: GameMessage = {
     role: 'user',
     content: input.message,
@@ -65,7 +84,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   };
   const initialSystemMessage: ChatRequestMessage = {
     role: 'system',
-    content: buildGameSystemPrompt(sceneContext, activeLargeDescription.descriptionText, nearbySmallDescriptions),
+    content: buildGameSystemPrompt(sceneContext, activeLargeDescription.descriptionText, nearbySmallDescriptions, promptSummaryMode),
   };
   const initialMessages: ChatRequestMessage[] = [
     initialSystemMessage,
@@ -80,93 +99,105 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   });
 
   console.log('[DEBUG] runGameChatTurn() - first runChatCompletionWithTools() call');
-  const modelResponse = await runChatCompletionWithTools({
+  let modelResponse = await runChatCompletionWithTools({
     messages: initialMessages,
-    tools: [MOVE_PLAYER_TOOL],
+    tools: GAME_CHAT_TOOLS,
   });
   console.log('[DEBUG] runGameChatTurn() - first runChatCompletionWithTools() return');
 
   let movementResult: MovePlayerToolResult | null = null;
-  // 这里先假设 modelResponse 为实际的文本回复，也就是 [sys, user, res] 结构。
-  // 因此便可以顺利组装成 [sys, user, assist(来自res), <slot for next 'user'>]
-  let assistantMessage = modelResponse.reply || activeLargeDescription.descriptionText;
   const messagesToAppend: GameMessage[] = [userMessage];
+  const currentTurnToolMessages: GameMessage[] = [];
 
-  if (modelResponse.toolCall?.name === 'move_player') {
-    // 工具调用只负责决定位移；真正的坐标计算、补洞和描述更新都由后端执行。
-    const toolInput = parseMovePlayerArguments(modelResponse.toolCall.argumentsText);
-    const assistantToolCallMessage = toStoredAssistantToolCallMessage(modelResponse.toolCall, modelResponse.assistantMessageForHistory);
-    const nextPosition = movePosition({
-      position: session.save.playerPosition,
-      bearingDegrees: toolInput.bearingDegrees,
-      distanceMeters: toolInput.distanceMeters,
-    });
+  while (modelResponse.toolCall) {
+    const assistantToolCallMessage = toStoredAssistantToolCallMessage(
+      modelResponse.toolCall,
+      modelResponse.assistantMessageForHistory,
+    );
+    currentTurnToolMessages.push(assistantToolCallMessage);
 
-    const moveCoverageSyncTriggered = await ensureCoverageForPosition(nextPosition);
-    coverageSyncTriggered = coverageSyncTriggered || moveCoverageSyncTriggered;
-    sceneContext = await loadSceneContext(nextPosition);
-    activeLargeDescription = await ensureLargeDescription(sceneContext, session);
-    activeSmallDescription = await ensureSmallDescription(sceneContext, session);
-    nearbySmallDescriptions = await mergeNearbySmallDescriptions(session, nextPosition, activeSmallDescription);
+    if (modelResponse.toolCall.name === 'move_player') {
+      // 工具调用只负责决定位移；真正的坐标计算、补洞和描述更新都由后端执行。
+      const toolInput = parseMovePlayerArguments(modelResponse.toolCall.argumentsText);
+      const nextPosition = movePosition({
+        position: session.save.playerPosition,
+        bearingDegrees: toolInput.bearingDegrees,
+        distanceMeters: toolInput.distanceMeters,
+      });
 
-    movementResult = {
-      previousPosition: session.save.playerPosition,
-      nextPosition,
-      bearingDegrees: toolInput.bearingDegrees,
-      distanceMeters: toolInput.distanceMeters,
-      reason: toolInput.reason || '根据用户输入执行移动。',
-      targetLabel: toolInput.targetLabel,
-      coverageSyncTriggered: moveCoverageSyncTriggered,
-    };
+      const moveCoverageSyncTriggered = await ensureCoverageForPosition(nextPosition);
+      coverageSyncTriggered = coverageSyncTriggered || moveCoverageSyncTriggered;
+      sceneContext = await loadSceneContext(nextPosition);
+      activeLargeDescription = await ensureLargeDescription(sceneContext, session);
+      activeSmallDescription = await ensureSmallDescription(sceneContext, session);
+      nearbySmallDescriptions = await mergeNearbySmallDescriptions(session, nextPosition, activeSmallDescription);
 
-    // TODO：针对移动之后的状况，编更合适的提示词
-    const toolReturnMessage: GameMessage = {
-      role: 'tool',
-      content: JSON.stringify(movementResult),
-      toolCallId: assistantToolCallMessage.toolCallId,
-      toolName: assistantToolCallMessage.toolName,
-    };
+      movementResult = {
+        previousPosition: session.save.playerPosition,
+        nextPosition,
+        bearingDegrees: toolInput.bearingDegrees,
+        distanceMeters: toolInput.distanceMeters,
+        reason: toolInput.reason || '根据用户输入执行移动。',
+        targetLabel: toolInput.targetLabel,
+        coverageSyncTriggered: moveCoverageSyncTriggered,
+      };
+      session.save.playerPosition = nextPosition;
 
-    const followUpMessages = [
+      currentTurnToolMessages.push({
+        role: 'tool',
+        content: JSON.stringify(movementResult),
+        toolCallId: assistantToolCallMessage.toolCallId,
+        toolName: assistantToolCallMessage.toolName,
+      });
+    } else if (modelResponse.toolCall.name === 'look_far') {
+      promptSummaryMode = 'large';
+      const lookFarResult: LookFarToolResult = {
+        mode: 'large_summary',
+      };
+
+      currentTurnToolMessages.push({
+        role: 'tool',
+        content: JSON.stringify(lookFarResult),
+        toolCallId: assistantToolCallMessage.toolCallId,
+        toolName: assistantToolCallMessage.toolName,
+      });
+    } else {
+      throw new Error(`Unsupported tool call: ${modelResponse.toolCall.name}`);
+    }
+
+    const followUpMessages: ChatRequestMessage[] = [
       {
         role: 'system',
-        content: buildGameSystemPrompt(sceneContext, activeLargeDescription.descriptionText, nearbySmallDescriptions),
+        content: buildGameSystemPrompt(
+          sceneContext,
+          activeLargeDescription.descriptionText,
+          nearbySmallDescriptions,
+          promptSummaryMode,
+        ),
       },
       ...buildHistoryMessages(session.save.messageHistory),
       { role: 'user', content: input.message },
-      ...buildHistoryMessages([assistantToolCallMessage, toolReturnMessage]),
-    ] as ChatRequestMessage[];
+      ...buildHistoryMessages(currentTurnToolMessages),
+    ];
+    const remainingTools = GAME_CHAT_TOOLS.filter((tool) => tool.function.name !== modelResponse.toolCall?.name);
 
     console.log('[DEBUG] runGameChatTurn() - toolCall runChatCompletionWithTools() call');
-    const followUpResponse = await runChatCompletionWithTools({
+    modelResponse = await runChatCompletionWithTools({
       messages: followUpMessages,
-      tools: [MOVE_PLAYER_TOOL],
+      tools: remainingTools,
     });
     console.log('[DEBUG] runGameChatTurn() - toolCall runChatCompletionWithTools() return');
+  }
 
-    if (followUpResponse.toolCall) {
-      throw new Error('Nested tool calls are not supported in a single turn.');
-    }
-
-    // 由于已确认 modelResponse 是一个工具调用请求，结构为 [sys, user, toolcall]
-    assistantMessage = followUpResponse.reply || activeLargeDescription.descriptionText;
-    messagesToAppend.push(
-      assistantToolCallMessage,
-      toolReturnMessage,
-      {
-        role: 'assistant',
-        content: assistantMessage,
-        reasoningContent: followUpResponse.assistantMessageForHistory.reasoningContent,
-      },
-    );
-    session.save.playerPosition = nextPosition;
-  } else {
-    messagesToAppend.push({
+  const assistantMessage = modelResponse.reply || activeLargeDescription.descriptionText;
+  messagesToAppend.push(
+    ...currentTurnToolMessages,
+    {
       role: 'assistant',
       content: assistantMessage,
       reasoningContent: modelResponse.assistantMessageForHistory.reasoningContent,
-    });
-  }
+    },
+  );
 
   session.save.activeLargeDescriptionId = activeLargeDescription.id;
   session.save.visibleSmallDescriptionIds = nearbySmallDescriptions.map((record) => record.id);
@@ -179,18 +210,18 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   ];
   session.save.messageHistory = nextHistory.slice(-12);
   await updateSession(session);
-  const finalMessages: ChatRequestMessage[] = movementResult
-    ? [
-        {
-          role: 'system',
-          content: buildGameSystemPrompt(sceneContext, activeLargeDescription.descriptionText, nearbySmallDescriptions),
-        },
-        ...buildHistoryMessages(session.save.messageHistory),
-      ]
-    : [
-        initialSystemMessage,
-        ...buildHistoryMessages(session.save.messageHistory),
-      ];
+  const finalMessages: ChatRequestMessage[] = [
+    {
+      role: 'system',
+      content: buildGameSystemPrompt(
+        sceneContext,
+        activeLargeDescription.descriptionText,
+        nearbySmallDescriptions,
+        promptSummaryMode,
+      ),
+    },
+    ...buildHistoryMessages(session.save.messageHistory),
+  ];
   await writeGameChatMessageSnapshot({
     direction: 'to-frontend',
     sessionId: session.save.sessionId,
@@ -270,6 +301,7 @@ function buildGameSystemPrompt(
   sceneContext: SceneContext,
   largeDescription: string,
   nearbySmallDescriptions: SmallDescriptionRecord[],
+  promptSummaryMode: PromptSummaryMode,
 ): string {
   // 这个 system prompt 不是直接给玩家看的文本，
   // 而是把“当前大描述 + 当前局部 summary + 周边小描述远距细节”重新组织成一轮会话上下文。
@@ -277,10 +309,14 @@ function buildGameSystemPrompt(
   const nearbyText = farVisibleNotes.length > 0
     ? farVisibleNotes.map((record) => `- 距离约${Math.round(record.distanceMeters || 0)}m：${record.farVisibleNotes}`).join('\n')
     : '无';
+  const activeSummary = promptSummaryMode === 'large' ? sceneContext.largeSummary : sceneContext.smallSummary;
+  const summaryLabel = promptSummaryMode === 'large'
+    ? '当前位置的程序生成的远眺摘要（1公里）：'
+    : '当前位置的程序生成的局部摘要（约300米）：';
 
   return [
     '你是一个文字探索游戏的会话助手。',
-    '如果用户要求移动，调用 move_player 工具；如果没有移动意图，则直接自然回复。',
+    '如果用户要求真实移动，调用 move_player 工具；如果用户要求观察远处、确认远方情况，或准备前往远处前先看一眼，则调用 look_far 工具；否则直接自然回复。',
     '即使用户要求移动了，也需要结合周遭环境信息分析能否成功到达，是否有阻碍移动的要素。如果有，可以将移动的目的地截停在障碍前。',
     styleRule,
     '不要在文本回复里暴露经纬度、网格、极坐标等内部实现。',
@@ -288,8 +324,8 @@ function buildGameSystemPrompt(
     '',
     `当前总体环境描述：${largeDescription}`,
     '',
-    '当前位置的程序生成的摘要：',
-    sceneContext.smallSummary,
+    summaryLabel,
+    activeSummary,
     '',
     '200米内其他地点的远距可见细节：',
     nearbyText,
