@@ -35,6 +35,7 @@ export async function ensureLargeDescription(
       '2. 100~300 米\n使用极坐标描述更远的建筑以及其他要素。',
       '3. 300 米~1 公里\n使用极坐标描述视野尽头的建筑以及其他要素。',
       styleRule,
+      '叙述视角：\n纯客观视角，禁止提及人称\n',
       '描述顺序：',
       '按距离由近到远组织描述',
       '* 首先描述 0–30 米范围内最明显的物体或空间结构',
@@ -43,6 +44,7 @@ export async function ensureLargeDescription(
       '* 最后简要提到远处（300 米–1 公里）的地标或环境轮廓',
     ].join('\n'),
     sceneContext.largeSummary,
+    { snapshotType: 'scene-large' },
   );
   console.log('[DEBUG] ensureLargeDescription() - generateReplyWithSystemPrompt() return');
 
@@ -115,9 +117,11 @@ async function generateSmallDescription(
       '如果提供了“供参考的邻近描述细节”，那么 descriptionText 将不仅仅只有近场微观细节如招牌、门牌、30米内观察才能知道的信息等，还需要包含这些邻近描述的细节。',
       '这些其实就是其他邻近描述中的 farVisibleNotes，是用来填充之前提到的“看到的近处与远处的细节”中的“远处的细节”的。',
       styleRule,
+      '叙述视角：\n纯客观视角，禁止提及人称\n',
       visibleNotes ? `供参考的邻近描述细节：\n${visibleNotes}` : '当前没有可参考的供参考的邻近描述细节。',
     ].join('\n'),
     sceneContext.smallSummary,
+    { snapshotType: 'scene-small' },
   );
 
   return parseDescriptionJson(generated.reply);

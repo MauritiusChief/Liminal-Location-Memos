@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { writeSceneDescriptionSnapshot, type SceneSnapshotType } from './gameChatDebugLog.js';
 
 interface ChatCompletionContentPart {
   type?: string;
@@ -89,7 +90,29 @@ export type ChatRequestMessage =
     }
   | { role: 'tool'; content: string; tool_call_id: string };
 
-export async function generateReplyWithSystemPrompt(systemPrompt: string, message: string): Promise<LlmDebugResponse> {
+export async function generateReplyWithSystemPrompt(
+  systemPrompt: string,
+  message: string,
+  options?: { snapshotType?: SceneSnapshotType },
+): Promise<LlmDebugResponse> {
+  const messages = buildSingleTurnMessages(systemPrompt, message);
+  const payload = await requestChatCompletion({ messages });
+  const responseMessage = payload?.choices?.[0]?.message;
+  const result = extractLlmDebugResponse(responseMessage);
+
+  if (options?.snapshotType) {
+    await writeSceneDescriptionSnapshot({
+      type: options.snapshotType,
+      messages,
+      content: result.reply,
+      reasoning: result.reasoning,
+    });
+  }
+
+  return result;
+}
+
+export function buildSingleTurnMessages(systemPrompt: string, message: string): ChatRequestMessage[] {
   const messages: ChatRequestMessage[] = [];
 
   if (systemPrompt.trim()) {
@@ -104,8 +127,7 @@ export async function generateReplyWithSystemPrompt(systemPrompt: string, messag
     content: message,
   });
 
-  const payload = await requestChatCompletion({ messages });
-  return extractLlmDebugResponse(payload?.choices?.[0]?.message);
+  return messages;
 }
 
 export async function runChatCompletionWithTools(input: {

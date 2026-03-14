@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import type { ChatRequestMessage } from './llm.js';
 
 const DEBUG_DIRECTORY = path.resolve(process.cwd(), 'data', 'game-chat-debug');
+export type SceneSnapshotType = 'scene-large' | 'scene-small';
 
 export async function writeGameChatMessageSnapshot(input: {
   direction: 'from-frontend' | 'to-frontend';
@@ -24,6 +25,32 @@ export async function writeGameChatMessageSnapshot(input: {
     sessionId: input.sessionId,
     message: input.message,
     messages: input.messages,
+  };
+
+  await writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+}
+
+export async function writeSceneDescriptionSnapshot(input: {
+  type: SceneSnapshotType;
+  messages: ChatRequestMessage[];
+  content: string;
+  reasoning: string | null;
+}): Promise<void> {
+  if (!config.gameChatDebugLogEnabled) {
+    return;
+  }
+
+  await mkdir(DEBUG_DIRECTORY, { recursive: true });
+  const timestamp = buildTimestampForFilename(new Date());
+  const filePath = path.join(DEBUG_DIRECTORY, `${timestamp}_${input.type}.json`);
+  const payload = {
+    timestamp,
+    type: input.type,
+    messages: input.messages,
+    response: {
+      content: input.content,
+      reasoning: input.reasoning,
+    },
   };
 
   await writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');

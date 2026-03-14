@@ -13,8 +13,8 @@ import type {
 } from '../types/game.js';
 
 const DEFAULT_START_POSITION: GamePosition = {
-  lat: 34.03051902687699,
-  lon: -84.06309056978101,
+  lat: 33.8356574838558,
+  lon: -84.34150239554577,
 };
 
 const SAVE_DIRECTORY = path.resolve(process.cwd(), 'data', 'game-saves');
