@@ -117,6 +117,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     currentTurnToolMessages.push(assistantToolCallMessage);
 
     if (modelResponse.toolCall.name === 'move_player') {
+      console.log('[DEBUG] runGameChatTurn() - toolCall - move_player');
       // 工具调用只负责决定位移；真正的坐标计算、补洞和描述更新都由后端执行。
       const toolInput = parseMovePlayerArguments(modelResponse.toolCall.argumentsText);
       const nextPosition = movePosition({
@@ -150,6 +151,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
         toolName: assistantToolCallMessage.toolName,
       });
     } else if (modelResponse.toolCall.name === 'look_far') {
+      console.log('[DEBUG] runGameChatTurn() - toolCall - look_far');
       promptSummaryMode = 'large';
       const lookFarResult: LookFarToolResult = {
         mode: 'large_summary',
@@ -208,6 +210,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     ...session.save.messageHistory,
     ...messagesToAppend,
   ];
+  // 仅保存最近12条历史对话。
   session.save.messageHistory = nextHistory.slice(-12);
   await updateSession(session);
   const finalMessages: ChatRequestMessage[] = [

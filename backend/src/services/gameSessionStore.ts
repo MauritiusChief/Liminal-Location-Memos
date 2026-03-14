@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildDescriptionIndex } from './gameDescriptionIndex.js';
+import { distanceBetweenCoordinates } from './overpassGeometry.js';
 import type {
   GamePosition,
   GameMessage,
@@ -55,7 +56,15 @@ export async function getSessionSnapshot(sessionId: string): Promise<GameSession
     : null;
   const nearbySmallDescriptions = session.save.visibleSmallDescriptionIds
     .map((id) => session.save.smallDescriptions.find((record) => record.id === id) || null)
-    .filter((record): record is NonNullable<typeof record> => record !== null);
+    .filter((record): record is NonNullable<typeof record> => record !== null)
+    .map((record) => ({
+      ...record,
+      distanceMeters: distanceBetweenCoordinates(
+        [session.save.playerPosition.lon, session.save.playerPosition.lat],
+        [record.center.lon, record.center.lat],
+      ),
+    }))
+    .sort((left, right) => left.distanceMeters - right.distanceMeters);
 
   // 若 sessionId 对应的 JSON 根本不存在，则 getOrCreateSession 会新建一个空存档。
   // 恢复接口不应该把“新建空存档”误认为成功恢复，因此这里要求至少已有历史或描述才算可恢复。
