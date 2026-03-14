@@ -34,8 +34,8 @@ type ParsedNormalizationForm =
 
 const initialState: NormalizationDebugState = {
   form: {
-    coordinates: '34.03051902687699, -84.06309056978101',
-    radius: '30',
+    coordinates: '39.99952202640245, -83.01270469750418',
+    radius: '200',
   },
   syncRequest: {
     status: 'idle',

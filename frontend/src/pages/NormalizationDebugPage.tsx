@@ -109,7 +109,7 @@ export function NormalizationDebugPage() {
           id="coordinates"
           value={form.coordinates}
           onChange={(event) => dispatch(setCoordinates(event.target.value))}
-          placeholder="34.030519, -84.063091"
+          placeholder="xx.xxxx, yy.yyyy"
         />
         <br />
         <label htmlFor="radius">Radius (meters)</label>
