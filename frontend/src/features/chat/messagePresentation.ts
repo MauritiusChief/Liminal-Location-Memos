@@ -18,22 +18,19 @@ export function parseMovePlayerToolMessage(message: GameMessage): MovePlayerTool
   }
 
   try {
-    const parsed = JSON.parse(message.content) as { movementResult?: unknown };
-    if (!parsed.movementResult || typeof parsed.movementResult !== 'object') {
-      return null;
-    }
+    const parsed = JSON.parse(message.content) as Partial<MovePlayerToolResult>;
+    // console.log("parsed content",parsed);
 
-    const movementResult = parsed.movementResult as Partial<MovePlayerToolResult>;
     if (
-      !movementResult.previousPosition
-      || !movementResult.nextPosition
-      || !Number.isFinite(movementResult.bearingDegrees)
-      || !Number.isFinite(movementResult.distanceMeters)
+      !parsed.previousPosition
+      || !parsed.nextPosition
+      || !Number.isFinite(parsed.bearingDegrees)
+      || !Number.isFinite(parsed.distanceMeters)
     ) {
       return null;
     }
 
-    return movementResult as MovePlayerToolResult;
+    return parsed as MovePlayerToolResult;
   } catch {
     return null;
   }
