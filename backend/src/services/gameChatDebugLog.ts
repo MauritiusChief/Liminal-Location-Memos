@@ -7,7 +7,7 @@ const DEBUG_DIRECTORY = path.resolve(process.cwd(), 'data', 'game-chat-debug');
 export type SceneSnapshotType = 'scene-large' | 'scene-small';
 
 export async function writeGameChatMessageSnapshot(input: {
-  direction: 'from-frontend' | 'to-frontend';
+  direction: 'from-llm' | 'to-llm';
   sessionId: string;
   message?: string;
   messages: ChatRequestMessage[];

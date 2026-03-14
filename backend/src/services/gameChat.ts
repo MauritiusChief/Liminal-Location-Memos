@@ -63,6 +63,7 @@ const GAME_CHAT_TOOLS: ToolDefinition[] = [MOVE_PLAYER_TOOL, LOOK_FAR_TOOL];
 
 const SYNTHETIC_SCENE_CONTEXT_TOOL_NAME = 'refresh_scene_context';
 const SYNTHETIC_SCENE_CONTEXT_TOOL_ARGUMENTS = '{}';
+const MAX_STORED_TURNS = 6;
 
 export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' | 'message' | 'isOpeningPrompt'> & {
   message: string;
@@ -97,7 +98,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     syntheticSceneRefreshStage: 'initial',
   });
   await writeGameChatMessageSnapshot({
-    direction: 'from-frontend',
+    direction: 'to-llm',
     sessionId: session.save.sessionId,
     message: input.message,
     messages: initialMessages,
@@ -187,10 +188,11 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
       injectSyntheticSceneRefresh: shouldInjectSyntheticSceneRefresh,
       syntheticSceneRefreshStage: `post_${modelResponse.toolCall.name}`,
     });
+    // TODO 这个机制是否允许连续调用同一个工具？
     const remainingTools = GAME_CHAT_TOOLS.filter((tool) => tool.function.name !== modelResponse.toolCall?.name);
 
     await writeGameChatMessageSnapshot({
-      direction: 'from-frontend',
+      direction: 'to-llm',
       sessionId: session.save.sessionId,
       message: input.message,
       messages: followUpMessages,
@@ -223,8 +225,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     ...session.save.messageHistory,
     ...messagesToAppend,
   ];
-  // 仅保存最近12条历史对话。
-  session.save.messageHistory = nextHistory.slice(-12);
+  session.save.messageHistory = trimMessageHistoryPreservingToolChains(nextHistory, MAX_STORED_TURNS);
   await updateSession(session);
   const finalMessages = buildModelMessages({
     history: session.save.messageHistory,
@@ -235,7 +236,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     injectSyntheticSceneRefresh: false,
   });
   await writeGameChatMessageSnapshot({
-    direction: 'to-frontend',
+    direction: 'from-llm',
     sessionId: session.save.sessionId,
     message: input.message,
     messages: finalMessages,
@@ -452,6 +453,82 @@ function buildSyntheticSceneContextMessages(input: {
       tool_call_id: toolCallId,
     },
   ];
+}
+
+function trimMessageHistoryPreservingToolChains(history: GameMessage[], maxTurns: number): GameMessage[] {
+  if (history.length === 0 || maxTurns <= 0) {
+    return [];
+  }
+
+  const turns = splitHistoryIntoTurns(history);
+  const trimmedTurns = turns.slice(-maxTurns);
+  return sanitizeStoredHistory(trimmedTurns.flat());
+}
+
+function splitHistoryIntoTurns(history: GameMessage[]): GameMessage[][] {
+  const turns: GameMessage[][] = [];
+  let currentTurn: GameMessage[] = [];
+
+  for (const message of history) {
+    if (message.role === 'user') {
+      if (currentTurn.length > 0) {
+        turns.push(currentTurn);
+      }
+      currentTurn = [message];
+      continue;
+    }
+
+    if (currentTurn.length === 0) {
+      continue;
+    }
+
+    currentTurn.push(message);
+  }
+
+  if (currentTurn.length > 0) {
+    turns.push(currentTurn);
+  }
+
+  return turns;
+}
+
+function sanitizeStoredHistory(history: GameMessage[]): GameMessage[] {
+  const sanitized: GameMessage[] = [];
+
+  for (const [index, message] of history.entries()) {
+    if (message.role === 'user') {
+      sanitized.push(message);
+      continue;
+    }
+
+    if (message.role === 'assistant' && message.isToolCallMessage) {
+      const nextMessage = history[index + 1];
+      if (nextMessage?.role !== 'tool' || nextMessage.toolCallId !== message.toolCallId) {
+        continue;
+      }
+
+      sanitized.push(message);
+      continue;
+    }
+
+    if (message.role === 'tool') {
+      const previousMessage = sanitized.at(-1);
+      if (
+        previousMessage?.role !== 'assistant'
+        || previousMessage.isToolCallMessage !== true
+        || previousMessage.toolCallId !== message.toolCallId
+      ) {
+        continue;
+      }
+
+      sanitized.push(message);
+      continue;
+    }
+
+    sanitized.push(message);
+  }
+
+  return sanitized;
 }
 
 function toStoredAssistantToolCallMessage(
