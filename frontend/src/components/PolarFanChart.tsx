@@ -2,6 +2,7 @@ import type { NormalizedPolarFeatureSummary, NormalizedPolarView } from '../api/
 
 interface PolarFanChartProps {
   polarView: NormalizedPolarView;
+  displayRadiusMeters: 1000 | 300 | 100;
   selectedLevel: 'all' | 1 | 2 | 3;
   selectedFeatureId: string | null;
   onFeatureHover: (feature: NormalizedPolarFeatureSummary | null) => void;
@@ -13,6 +14,7 @@ const CHART_PADDING = 36;
 const CHART_RADIUS = CHART_SIZE / 2 - CHART_PADDING;
 const CENTER = CHART_SIZE / 2;
 const REFERENCE_RINGS = [30, 100, 300, 1000];
+const POINT_FEATURE_HIT_RADIUS_PX = 2;
 const LEVEL_COLORS: Record<1 | 2 | 3, string> = {
   1: '#d1495b',
   2: '#edae49',
@@ -23,6 +25,7 @@ const LEVEL_COLORS: Record<1 | 2 | 3, string> = {
 // 直接手写几何会更透明，也更方便和后端的 bearing / angleWidth 规则一一对照。
 export function PolarFanChart({
   polarView,
+  displayRadiusMeters,
   selectedLevel,
   selectedFeatureId,
   onFeatureHover,
@@ -49,19 +52,19 @@ export function PolarFanChart({
     >
       <g>
         {/* 参考圈对应不同距离层级，帮助直观看出要素离查询点有多远。 */}
-        {REFERENCE_RINGS.map((distance) => (
+        {REFERENCE_RINGS.filter((distance) => distance <= displayRadiusMeters).map((distance) => (
           <g key={distance}>
             <circle
               cx={CENTER}
               cy={CENTER}
-              r={metersToRadiusPx(distance)}
+              r={metersToRadiusPx(distance, displayRadiusMeters)}
               fill="none"
               stroke="#d2d8df"
-              strokeDasharray={distance === 1000 ? undefined : '4 4'}
+              strokeDasharray={distance === displayRadiusMeters ? undefined : '4 4'}
             />
             <text
               x={CENTER + 6}
-              y={CENTER - metersToRadiusPx(distance) - 4}
+              y={CENTER - metersToRadiusPx(distance, displayRadiusMeters) - 4}
               fontSize="11"
               fill="#5b6570"
             >
@@ -76,7 +79,7 @@ export function PolarFanChart({
           { label: 'S', bearing: 180 },
           { label: 'W', bearing: 270 },
         ].map((axis) => {
-          const [x, y] = polarToCartesian(1000, axis.bearing);
+          const [x, y] = polarToCartesian(displayRadiusMeters, axis.bearing, displayRadiusMeters);
 
           return (
             <g key={axis.label}>
@@ -92,7 +95,10 @@ export function PolarFanChart({
       {visibleFeatures.map((feature) => {
         const isSelected = feature.featureId === selectedFeatureId;
         const fill = LEVEL_COLORS[feature.level];
-        const linePoints = feature.linePath?.map((point) => polarToCartesian(point.distanceMeters, point.bearingDegrees)) || [];
+        const linePoints =
+          feature.linePath?.map((point) =>
+            polarToCartesian(point.distanceMeters, point.bearingDegrees, displayRadiusMeters),
+          ) || [];
 
         if (feature.category === 'line' && linePoints.length >= 2) {
           const polylinePoints = linePoints.map(([x, y]) => `${x},${y}`).join(' ');
@@ -137,33 +143,60 @@ export function PolarFanChart({
           feature.farthestPoint.distanceMeters,
           feature.widestSpan.clockwiseEarlyPoint.bearingDegrees,
           feature.widestSpan.angleWidthDegrees,
+          displayRadiusMeters,
         );
         const [centerX, centerY] = polarToCartesian(
           feature.centerPoint.distanceMeters,
           feature.centerPoint.bearingDegrees,
+          displayRadiusMeters,
         );
+        const isDegenerateSector =
+          feature.widestSpan.angleWidthDegrees === 0 ||
+          path === '' ||
+          (feature.farthestPoint.distanceMeters === feature.nearestPoint.distanceMeters &&
+            feature.widestSpan.angleWidthDegrees < 0.5);
 
         return (
           <g key={feature.featureId}>
-            <path
-              d={path}
-              fill={fill}
-              fillOpacity={isSelected ? 0.48 : 0.24}
-              stroke={fill}
-              strokeOpacity={isSelected ? 0.95 : 0.58}
-              strokeWidth={isSelected ? 2.5 : 1.2}
-              onMouseEnter={() => onFeatureHover(feature)}
-              onClick={(event) => {
-                event.stopPropagation();
-                onFeatureSelect(feature);
-              }}
-              style={{ cursor: 'pointer' }}
-            >
-              <title>
-                {feature.displayLabel} ({Math.round(feature.centerPoint.distanceMeters)}m /{' '}
-                {Math.round(feature.centerPoint.bearingDegrees)}deg)
-              </title>
-            </path>
+            {isDegenerateSector ? (
+              <circle
+                cx={centerX}
+                cy={centerY}
+                r={POINT_FEATURE_HIT_RADIUS_PX}
+                fill="transparent"
+                onMouseEnter={() => onFeatureHover(feature)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onFeatureSelect(feature);
+                }}
+                style={{ cursor: 'pointer' }}
+              >
+                <title>
+                  {feature.displayLabel} ({Math.round(feature.centerPoint.distanceMeters)}m /{' '}
+                  {Math.round(feature.centerPoint.bearingDegrees)}deg)
+                </title>
+              </circle>
+            ) : (
+              <path
+                d={path}
+                fill={fill}
+                fillOpacity={isSelected ? 0.48 : 0.24}
+                stroke={fill}
+                strokeOpacity={isSelected ? 0.95 : 0.58}
+                strokeWidth={isSelected ? 2.5 : 1.2}
+                onMouseEnter={() => onFeatureHover(feature)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onFeatureSelect(feature);
+                }}
+                style={{ cursor: 'pointer' }}
+              >
+                <title>
+                  {feature.displayLabel} ({Math.round(feature.centerPoint.distanceMeters)}m /{' '}
+                  {Math.round(feature.centerPoint.bearingDegrees)}deg)
+                </title>
+              </path>
+            )}
             {/* line 的 centerPoint 仍用于摘要和分层，但不参与 SVG；
                 这里的中心点标记仅保留给扇区类要素。 */}
             <circle
@@ -183,8 +216,8 @@ export function PolarFanChart({
 }
 
 // 半径缩放保持线性即可，因为这里的目标是 debug 关系而不是做感知学优化。
-function metersToRadiusPx(distanceMeters: number): number {
-  return (Math.max(0, Math.min(1000, distanceMeters)) / 1000) * CHART_RADIUS;
+function metersToRadiusPx(distanceMeters: number, displayRadiusMeters: number): number {
+  return (Math.max(0, Math.min(displayRadiusMeters, distanceMeters)) / displayRadiusMeters) * CHART_RADIUS;
 }
 
 // 后端 bearing 以“正北=0，顺时针递增”为约定；
@@ -195,8 +228,12 @@ function bearingDegreesToSvgAngleRadians(bearingDegrees: number): number {
 
 // polarToCartesian 把“距离 + bearing”投影到画布坐标系。
 // 因为上面已经做过角度旋转，这里直接用普通 cos/sin 即可。
-function polarToCartesian(distanceMeters: number, bearingDegrees: number): [number, number] {
-  const radius = metersToRadiusPx(distanceMeters);
+function polarToCartesian(
+  distanceMeters: number,
+  bearingDegrees: number,
+  displayRadiusMeters: number,
+): [number, number] {
+  const radius = metersToRadiusPx(distanceMeters, displayRadiusMeters);
   const angle = bearingDegreesToSvgAngleRadians(bearingDegrees);
   return [CENTER + radius * Math.cos(angle), CENTER + radius * Math.sin(angle)];
 }
@@ -211,16 +248,17 @@ function describeAnnularSectorPath(
   outerDistanceMeters: number,
   startBearingDegrees: number,
   angleWidthDegrees: number,
+  displayRadiusMeters: number,
 ): string {
   const clampedInnerDistance = Math.max(0, Math.min(innerDistanceMeters, outerDistanceMeters));
-  const outerRadius = metersToRadiusPx(outerDistanceMeters);
-  const innerRadius = metersToRadiusPx(clampedInnerDistance);
+  const outerRadius = metersToRadiusPx(outerDistanceMeters, displayRadiusMeters);
+  const innerRadius = metersToRadiusPx(clampedInnerDistance, displayRadiusMeters);
   const normalizedAngleWidth = ((angleWidthDegrees % 360) + 360) % 360;
   const endBearingDegrees = startBearingDegrees + normalizedAngleWidth;
-  const startOuter = polarToCartesian(outerDistanceMeters, startBearingDegrees);
-  const endOuter = polarToCartesian(outerDistanceMeters, endBearingDegrees);
-  const startInner = polarToCartesian(clampedInnerDistance, startBearingDegrees);
-  const endInner = polarToCartesian(clampedInnerDistance, endBearingDegrees);
+  const startOuter = polarToCartesian(outerDistanceMeters, startBearingDegrees, displayRadiusMeters);
+  const endOuter = polarToCartesian(outerDistanceMeters, endBearingDegrees, displayRadiusMeters);
+  const startInner = polarToCartesian(clampedInnerDistance, startBearingDegrees, displayRadiusMeters);
+  const endInner = polarToCartesian(clampedInnerDistance, endBearingDegrees, displayRadiusMeters);
   const largeArcFlag = normalizedAngleWidth > 180 ? 1 : 0;
 
   if (outerRadius <= 0) {

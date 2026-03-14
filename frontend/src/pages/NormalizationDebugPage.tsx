@@ -17,12 +17,14 @@ import {
 } from '../features/normalizationDebug/normalizationDebugSlice';
 
 const DEFAULT_POLAR_RENDER_LIMIT = '100';
+const DEFAULT_POLAR_DISPLAY_RANGE = 1000;
 const DEFAULT_VISIBLE_POLAR_CATEGORIES: Record<PolarFeatureCategory, boolean> = {
   building: true,
   poi: true,
   line: true,
   area: true,
 };
+type PolarDisplayRange = 1000 | 300 | 100;
 
 export function NormalizationDebugPage() {
   const dispatch = useAppDispatch();
@@ -31,6 +33,7 @@ export function NormalizationDebugPage() {
   const [selectedPolarFeature, setSelectedPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
   const [hoveredPolarFeature, setHoveredPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
   const [selectedPolarLevel, setSelectedPolarLevel] = useState<'all' | 1 | 2 | 3>('all');
+  const [selectedPolarDisplayRange, setSelectedPolarDisplayRange] = useState<PolarDisplayRange>(DEFAULT_POLAR_DISPLAY_RANGE);
   const [visiblePolarCategories, setVisiblePolarCategories] = useState(DEFAULT_VISIBLE_POLAR_CATEGORIES);
   const [renderPolarSvgRequested, setRenderPolarSvgRequested] = useState(false);
   const [polarSvgRenderLimit, setPolarSvgRenderLimit] = useState(DEFAULT_POLAR_RENDER_LIMIT);
@@ -45,6 +48,7 @@ export function NormalizationDebugPage() {
     setSelectedPolarFeature(null);
     setHoveredPolarFeature(null);
     setSelectedPolarLevel('all');
+    setSelectedPolarDisplayRange(DEFAULT_POLAR_DISPLAY_RANGE);
     setVisiblePolarCategories(DEFAULT_VISIBLE_POLAR_CATEGORIES);
     setRenderPolarSvgRequested(false);
   }, [normalizedResult]);
@@ -64,27 +68,39 @@ export function NormalizationDebugPage() {
       selectedPolarLevel,
       polarRenderLimit,
       visiblePolarCategories,
+      selectedPolarDisplayRange,
     );
-  }, [normalizedResult, polarRenderLimit, selectedPolarLevel, visiblePolarCategories]);
+  }, [normalizedResult, polarRenderLimit, selectedPolarLevel, selectedPolarDisplayRange, visiblePolarCategories]);
 
   const totalVisiblePolarFeatures = useMemo(() => {
     if (!normalizedResult?.polarView) {
       return 0;
     }
 
-    return getVisiblePolarFeatureCount(
-      normalizedResult.polarView.levels,
-      selectedPolarLevel,
-      visiblePolarCategories,
-    );
-  }, [normalizedResult, selectedPolarLevel, visiblePolarCategories]);
+    return getVisiblePolarFeatureCount(normalizedResult.polarView, selectedPolarLevel, visiblePolarCategories, selectedPolarDisplayRange);
+  }, [normalizedResult, selectedPolarLevel, selectedPolarDisplayRange, visiblePolarCategories]);
 
   const renderedPolarFeatures = useMemo(() => {
     if (!chartPolarView) {
       return 0;
     }
 
-    return getVisiblePolarFeatureCount(chartPolarView.levels, 'all', DEFAULT_VISIBLE_POLAR_CATEGORIES);
+    return getVisiblePolarFeatureCount(chartPolarView, 'all', DEFAULT_VISIBLE_POLAR_CATEGORIES, selectedPolarDisplayRange);
+  }, [chartPolarView]);
+
+  useEffect(() => {
+    if (!chartPolarView) {
+      setSelectedPolarFeature(null);
+      setHoveredPolarFeature(null);
+      return;
+    }
+
+    const visibleFeatureIds = new Set(
+      chartPolarView.levels.flatMap((level) => level.features.map((feature) => feature.featureId)),
+    );
+
+    setSelectedPolarFeature((current) => (current && visibleFeatureIds.has(current.featureId) ? current : null));
+    setHoveredPolarFeature((current) => (current && visibleFeatureIds.has(current.featureId) ? current : null));
   }, [chartPolarView]);
 
   const featureSummaryText = normalizedResult ? JSON.stringify(normalizedResult.featureSummary, null, 2) : '';
@@ -166,9 +182,9 @@ export function NormalizationDebugPage() {
       <button type="button" onClick={() => void handleCopyText(featureSummaryText)} disabled={!featureSummaryText}>
         Copy Feature Summary
       </button>
-      <pre style={{ border: '1px solid', maxHeight: '600px', overflowY: 'auto' }}>
+      {/* <pre style={{ border: '1px solid', maxHeight: '600px', overflowY: 'auto' }}>
         {featureSummaryText || 'No feature summary yet.'}
-      </pre>
+      </pre> */}
 
       <h3>Micro Grid Debug</h3>
       {normalizedResult?.microGrid?.enabled ? (
@@ -244,6 +260,16 @@ export function NormalizationDebugPage() {
             ))}
           </div>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <label htmlFor="polarDisplayRange">Display range</label>
+            <select
+              id="polarDisplayRange"
+              value={String(selectedPolarDisplayRange)}
+              onChange={(event) => setSelectedPolarDisplayRange(Number(event.target.value) as PolarDisplayRange)}
+            >
+              <option value="1000">1000m</option>
+              <option value="300">300m</option>
+              <option value="100">100m</option>
+            </select>
             <label htmlFor="polarRenderLimit">SVG render limit</label>
             <input
               id="polarRenderLimit"
@@ -300,6 +326,7 @@ export function NormalizationDebugPage() {
             <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap' }}>
               <PolarFanChart
                 polarView={chartPolarView}
+                displayRadiusMeters={selectedPolarDisplayRange}
                 selectedLevel={selectedPolarLevel}
                 selectedFeatureId={selectedPolarFeature?.featureId || null}
                 onFeatureHover={setHoveredPolarFeature}
@@ -335,12 +362,12 @@ export function NormalizationDebugPage() {
       </button>
       <br />
       <br />
-      <textarea
+      {/* <textarea
         readOnly
         rows={20}
         cols={120}
         value={normalizedResult?.promptPreview?.userPrompt || 'No prompt preview yet.'}
-      />
+      /> */}
 
       {syncRequest.error ? (
         <section>
@@ -364,6 +391,7 @@ function filterPolarViewForChart(
   selectedLevel: 'all' | 1 | 2 | 3,
   limit: number,
   visibleCategories: Record<PolarFeatureCategory, boolean>,
+  displayRangeMeters: PolarDisplayRange,
 ): NormalizedPolarView {
   let remaining = limit;
 
@@ -377,7 +405,10 @@ function filterPolarViewForChart(
         };
       }
 
-      const filteredFeatures = level.features.filter((feature) => visibleCategories[feature.category]);
+      const filteredFeatures = level.features
+        .filter((feature) => visibleCategories[feature.category])
+        .map((feature) => clipPolarFeatureToDisplayRange(feature, displayRangeMeters))
+        .filter((feature): feature is NormalizedPolarFeatureSummary => feature !== null);
 
       if (remaining <= 0) {
         return {
@@ -398,17 +429,71 @@ function filterPolarViewForChart(
 }
 
 function getVisiblePolarFeatureCount(
-  levels: NormalizedPolarLevel[],
+  polarView: NormalizedPolarView,
   selectedLevel: 'all' | 1 | 2 | 3,
   visibleCategories: Record<PolarFeatureCategory, boolean>,
+  displayRangeMeters: PolarDisplayRange,
 ): number {
-  return levels.reduce((count, level) => {
+  return polarView.levels.reduce((count, level) => {
     if (selectedLevel !== 'all' && level.level !== selectedLevel) {
       return count;
     }
 
-    const filteredFeatures = level.features.filter((feature) => visibleCategories[feature.category]);
+    const filteredFeatures = level.features
+      .filter((feature) => visibleCategories[feature.category])
+      .map((feature) => clipPolarFeatureToDisplayRange(feature, displayRangeMeters))
+      .filter((feature): feature is NormalizedPolarFeatureSummary => feature !== null);
 
     return count + filteredFeatures.length;
   }, 0);
+}
+
+function clipPolarFeatureToDisplayRange(
+  feature: NormalizedPolarFeatureSummary,
+  displayRangeMeters: PolarDisplayRange,
+): NormalizedPolarFeatureSummary | null {
+  if (feature.nearestPoint.distanceMeters > displayRangeMeters) {
+    return null;
+  }
+
+  if (feature.category === 'line') {
+    const clippedLinePath = feature.linePath
+      ?.map((point) => ({
+        ...point,
+        distanceMeters: Math.min(point.distanceMeters, displayRangeMeters),
+      }))
+      .filter((point, index, points) => {
+        const previous = points[index - 1];
+        return !previous || previous.distanceMeters !== point.distanceMeters || previous.bearingDegrees !== point.bearingDegrees;
+      });
+
+    if (!clippedLinePath || clippedLinePath.length < 2) {
+      return null;
+    }
+
+    return {
+      ...feature,
+      farthestPoint: {
+        ...feature.farthestPoint,
+        distanceMeters: Math.min(feature.farthestPoint.distanceMeters, displayRangeMeters),
+      },
+      centerPoint: {
+        ...feature.centerPoint,
+        distanceMeters: Math.min(feature.centerPoint.distanceMeters, displayRangeMeters),
+      },
+      linePath: clippedLinePath,
+    };
+  }
+
+  return {
+    ...feature,
+    farthestPoint: {
+      ...feature.farthestPoint,
+      distanceMeters: Math.min(feature.farthestPoint.distanceMeters, displayRangeMeters),
+    },
+    centerPoint: {
+      ...feature.centerPoint,
+      distanceMeters: Math.min(feature.centerPoint.distanceMeters, displayRangeMeters),
+    },
+  };
 }
