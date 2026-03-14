@@ -54,9 +54,20 @@ export interface MovePlayerToolResult {
   coverageSyncTriggered: boolean;
 }
 
-export interface LookFarToolResult {
-  mode: 'large_summary';
+export type SceneContextSummaryMode = 'small' | 'large';
+
+export interface SceneContextSnapshotPayload {
+  type: 'scene_context_snapshot';
+  summaryMode: SceneContextSummaryMode;
+  largeDescription: string;
+  activeSummary: string;
+  nearbyFarVisibleDetails: Array<{
+    distanceMeters: number;
+    notes: string;
+  }>;
 }
+
+export type LookFarToolResult = SceneContextSnapshotPayload;
 
 export interface SceneContext {
   // SceneContext 是一次“当前位置场景装载”的完整结果。

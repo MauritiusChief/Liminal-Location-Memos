@@ -18,6 +18,8 @@ import type {
   LoadedGameSession,
   MovePlayerToolInput,
   MovePlayerToolResult,
+  SceneContextSnapshotPayload,
+  SceneContextSummaryMode,
   SceneContext,
   SmallDescriptionRecord,
 } from '../types/game.js';
@@ -59,7 +61,8 @@ const LOOK_FAR_TOOL: ToolDefinition = {
 
 const GAME_CHAT_TOOLS: ToolDefinition[] = [MOVE_PLAYER_TOOL, LOOK_FAR_TOOL];
 
-type PromptSummaryMode = 'small' | 'large';
+const SYNTHETIC_SCENE_CONTEXT_TOOL_NAME = 'refresh_scene_context';
+const SYNTHETIC_SCENE_CONTEXT_TOOL_ARGUMENTS = '{}';
 
 export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' | 'message' | 'isOpeningPrompt'> & {
   message: string;
@@ -76,21 +79,23 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   let activeLargeDescription = await ensureLargeDescription(sceneContext, session);
   let activeSmallDescription = await ensureSmallDescription(sceneContext, session);
   let nearbySmallDescriptions = await mergeNearbySmallDescriptions(session, session.save.playerPosition, activeSmallDescription);
-  let promptSummaryMode: PromptSummaryMode = 'small';
+  let promptSummaryMode: SceneContextSummaryMode = 'small';
   const userMessage: GameMessage = {
     role: 'user',
     content: input.message,
     isOpeningPrompt: input.isOpeningPrompt === true,
   };
-  const initialSystemMessage: ChatRequestMessage = {
-    role: 'system',
-    content: buildGameSystemPrompt(sceneContext, activeLargeDescription.descriptionText, nearbySmallDescriptions, promptSummaryMode),
-  };
-  const initialMessages: ChatRequestMessage[] = [
-    initialSystemMessage,
-    ...buildHistoryMessages(session.save.messageHistory),
-    { role: 'user', content: input.message },
-  ];
+  const initialMessages = buildModelMessages({
+    history: session.save.messageHistory,
+    userMessage: input.message,
+    currentTurnToolMessages: [],
+    sceneContext,
+    largeDescription: activeLargeDescription.descriptionText,
+    nearbySmallDescriptions,
+    promptSummaryMode,
+    injectSyntheticSceneRefresh: true,
+    syntheticSceneRefreshStage: 'initial',
+  });
   await writeGameChatMessageSnapshot({
     direction: 'from-frontend',
     sessionId: session.save.sessionId,
@@ -153,9 +158,12 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     } else if (modelResponse.toolCall.name === 'look_far') {
       console.log('[DEBUG] runGameChatTurn() - toolCall - look_far');
       promptSummaryMode = 'large';
-      const lookFarResult: LookFarToolResult = {
-        mode: 'large_summary',
-      };
+      const lookFarResult: LookFarToolResult = buildSceneContextSnapshotPayload({
+        sceneContext,
+        largeDescription: activeLargeDescription.descriptionText,
+        nearbySmallDescriptions,
+        summaryMode: promptSummaryMode,
+      });
 
       currentTurnToolMessages.push({
         role: 'tool',
@@ -167,21 +175,26 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
       throw new Error(`Unsupported tool call: ${modelResponse.toolCall.name}`);
     }
 
-    const followUpMessages: ChatRequestMessage[] = [
-      {
-        role: 'system',
-        content: buildGameSystemPrompt(
-          sceneContext,
-          activeLargeDescription.descriptionText,
-          nearbySmallDescriptions,
-          promptSummaryMode,
-        ),
-      },
-      ...buildHistoryMessages(session.save.messageHistory),
-      { role: 'user', content: input.message },
-      ...buildHistoryMessages(currentTurnToolMessages),
-    ];
+    const shouldInjectSyntheticSceneRefresh = modelResponse.toolCall.name !== 'look_far';
+    const followUpMessages = buildModelMessages({
+      history: session.save.messageHistory,
+      userMessage: input.message,
+      currentTurnToolMessages,
+      sceneContext,
+      largeDescription: activeLargeDescription.descriptionText,
+      nearbySmallDescriptions,
+      promptSummaryMode,
+      injectSyntheticSceneRefresh: shouldInjectSyntheticSceneRefresh,
+      syntheticSceneRefreshStage: `post_${modelResponse.toolCall.name}`,
+    });
     const remainingTools = GAME_CHAT_TOOLS.filter((tool) => tool.function.name !== modelResponse.toolCall?.name);
+
+    await writeGameChatMessageSnapshot({
+      direction: 'from-frontend',
+      sessionId: session.save.sessionId,
+      message: input.message,
+      messages: followUpMessages,
+    });
 
     console.log('[DEBUG] runGameChatTurn() - toolCall runChatCompletionWithTools() call');
     modelResponse = await runChatCompletionWithTools({
@@ -213,18 +226,14 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   // 仅保存最近12条历史对话。
   session.save.messageHistory = nextHistory.slice(-12);
   await updateSession(session);
-  const finalMessages: ChatRequestMessage[] = [
-    {
-      role: 'system',
-      content: buildGameSystemPrompt(
-        sceneContext,
-        activeLargeDescription.descriptionText,
-        nearbySmallDescriptions,
-        promptSummaryMode,
-      ),
-    },
-    ...buildHistoryMessages(session.save.messageHistory),
-  ];
+  const finalMessages = buildModelMessages({
+    history: session.save.messageHistory,
+    sceneContext,
+    largeDescription: activeLargeDescription.descriptionText,
+    nearbySmallDescriptions,
+    promptSummaryMode,
+    injectSyntheticSceneRefresh: false,
+  });
   await writeGameChatMessageSnapshot({
     direction: 'to-frontend',
     sessionId: session.save.sessionId,
@@ -300,23 +309,7 @@ function buildHistoryMessages(history: GameMessage[]): ChatRequestMessage[] {
  * @param nearbySmallDescriptions 用于组建上下文当中来自小描述的部分
  * @returns
  */
-function buildGameSystemPrompt(
-  sceneContext: SceneContext,
-  largeDescription: string,
-  nearbySmallDescriptions: SmallDescriptionRecord[],
-  promptSummaryMode: PromptSummaryMode,
-): string {
-  // 这个 system prompt 不是直接给玩家看的文本，
-  // 而是把“当前大描述 + 当前局部 summary + 周边小描述远距细节”重新组织成一轮会话上下文。
-  const farVisibleNotes = filterFarVisibleSmallDescriptions(nearbySmallDescriptions, sceneContext.position);
-  const nearbyText = farVisibleNotes.length > 0
-    ? farVisibleNotes.map((record) => `- 距离约${Math.round(record.distanceMeters || 0)}m：${record.farVisibleNotes}`).join('\n')
-    : '无';
-  const activeSummary = promptSummaryMode === 'large' ? sceneContext.largeSummary : sceneContext.smallSummary;
-  const summaryLabel = promptSummaryMode === 'large'
-    ? '当前位置的程序生成的远眺摘要（1公里）：'
-    : '当前位置的程序生成的局部摘要（约300米）：';
-
+function buildGameSystemPrompt(): string {
   return [
     '你是一个文字探索游戏的会话助手。',
     '如果用户要求真实移动，调用 move_player 工具；如果用户要求观察远处、确认远方情况，或准备前往远处前先看一眼，则调用 look_far 工具；否则直接自然回复。',
@@ -324,16 +317,51 @@ function buildGameSystemPrompt(
     styleRule,
     '叙述视角：\n第二人称“你”，以玩家为中心进行描述，使用类似“你所在的位置”“在你附近”“更远处”等空间表达。',
     '不要在文本回复里暴露经纬度、网格、极坐标等内部实现。',
-    '请优先保持空间连续性，并参考当前区域的总体环境描述和附近其他地点的远距可见细节。',
-    '',
-    `当前总体环境描述：${largeDescription}`,
-    '',
-    summaryLabel,
-    activeSummary,
-    '',
-    '200米内其他地点的远距可见细节：',
-    nearbyText,
+    '请优先保持空间连续性。',
+    '如果消息流中出现 type 为 scene_context_snapshot 的 tool 返回，请将其视为该时刻最新的环境快照，只对最新对话负责，不要倒推覆盖更早历史。',
   ].join('\n');
+}
+
+function buildModelMessages(input: {
+  history: GameMessage[];
+  sceneContext: SceneContext;
+  largeDescription: string;
+  nearbySmallDescriptions: SmallDescriptionRecord[];
+  promptSummaryMode: SceneContextSummaryMode;
+  userMessage?: string;
+  currentTurnToolMessages?: GameMessage[];
+  injectSyntheticSceneRefresh: boolean;
+  syntheticSceneRefreshStage?: string;
+}): ChatRequestMessage[] {
+  const messages: ChatRequestMessage[] = [
+    {
+      role: 'system',
+      content: buildGameSystemPrompt(),
+    },
+    ...buildHistoryMessages(input.history),
+  ];
+
+  if (input.userMessage) {
+    messages.push({ role: 'user', content: input.userMessage });
+  }
+
+  if (input.currentTurnToolMessages?.length) {
+    messages.push(...buildHistoryMessages(input.currentTurnToolMessages));
+  }
+
+  if (input.injectSyntheticSceneRefresh) {
+    messages.push(...buildSyntheticSceneContextMessages({
+      stage: input.syntheticSceneRefreshStage || 'runtime',
+      payload: buildSceneContextSnapshotPayload({
+        sceneContext: input.sceneContext,
+        largeDescription: input.largeDescription,
+        nearbySmallDescriptions: input.nearbySmallDescriptions,
+        summaryMode: input.promptSummaryMode,
+      }),
+    }));
+  }
+
+  return messages;
 }
 
 async function mergeNearbySmallDescriptions(
@@ -374,6 +402,56 @@ function parseMovePlayerArguments(argumentsText: string): MovePlayerToolInput {
     reason: typeof parsed.reason === 'string' ? parsed.reason : undefined,
     targetLabel: typeof parsed.targetLabel === 'string' ? parsed.targetLabel : undefined,
   };
+}
+
+function buildSceneContextSnapshotPayload(input: {
+  sceneContext: SceneContext;
+  largeDescription: string;
+  nearbySmallDescriptions: SmallDescriptionRecord[];
+  summaryMode: SceneContextSummaryMode;
+}): SceneContextSnapshotPayload {
+  const farVisibleNotes = filterFarVisibleSmallDescriptions(input.nearbySmallDescriptions, input.sceneContext.position);
+
+  return {
+    type: 'scene_context_snapshot',
+    summaryMode: input.summaryMode,
+    largeDescription: input.largeDescription,
+    activeSummary: input.summaryMode === 'large'
+      ? input.sceneContext.largeSummary
+      : input.sceneContext.smallSummary,
+    nearbyFarVisibleDetails: farVisibleNotes.map((record) => ({
+      distanceMeters: Math.round(record.distanceMeters || 0),
+      notes: record.farVisibleNotes || '',
+    })),
+  };
+}
+
+function buildSyntheticSceneContextMessages(input: {
+  stage: string;
+  payload: SceneContextSnapshotPayload;
+}): ChatRequestMessage[] {
+  const toolCallId = `synthetic_scene_context_${input.stage}`;
+
+  return [
+    {
+      role: 'assistant',
+      content: '',
+      reasoning_content: '',
+      tool_calls: [{
+        id: toolCallId,
+        type: 'function',
+        function: {
+          name: SYNTHETIC_SCENE_CONTEXT_TOOL_NAME,
+          arguments: SYNTHETIC_SCENE_CONTEXT_TOOL_ARGUMENTS,
+        },
+      }],
+    },
+    {
+      role: 'tool',
+      content: JSON.stringify(input.payload),
+      tool_call_id: toolCallId,
+    },
+  ];
 }
 
 function toStoredAssistantToolCallMessage(
