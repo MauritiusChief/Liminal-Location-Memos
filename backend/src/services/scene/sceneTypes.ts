@@ -1,39 +1,33 @@
-import type { ContainedPoi, RelationReference } from './overpassNormalization.js';
+import type { ContainedPoi, RelationReference } from '../overpassNormalization.js';
 
 export type DbFeatureCategory = 'building' | 'poi' | 'line' | 'area';
 
-// 这是 DB-native 调试链路里最基础的要素索引。
-// grid / polar / prompt 都只拿它需要的字段，不再依赖完整 GeoJSON feature。
+export interface ContainedPoiString {
+  tags: Record<string, string>;
+}
+
 /**
- * TODO 验证为什么同时有 GameSceneFeatureDetail 和这个 interface
+ * 描述 scene 中地物细节，grid / polar / prompt 只依赖这一组公共字段。
  */
-export interface DbFeatureDetail {
+export interface SceneFeatureDetail {
   featureId: string;
-  osmType: string;
   osmId: number;
   category: DbFeatureCategory;
   geometryType: string;
   tags: Record<string, string>;
+  containedPois?: ContainedPoiString[];
+}
+
+/**
+ * DB-native 调试链路用。
+ * 除了 prompt / grid / polar 的公共字段之外，还保留调试视图要展示的元数据。
+ */
+export interface DebugSceneFeatureDetail extends SceneFeatureDetail {
+  osmType: string;
   relations: RelationReference[];
   meta: Record<string, string | number>;
   tainted: boolean;
   containedPois?: ContainedPoi[];
-}
-
-export interface GameSceneContainedPoi {
-  tags: Record<string, string>;
-}
-
-/**
- * TODO 验证为什么同时有 DbFeatureDetail 和这个 interface
- */
-export interface GameSceneFeatureDetail {
-  featureId: string;
-  osmId: number;
-  category: DbFeatureCategory;
-  geometryType: string;
-  tags: Record<string, string>;
-  containedPois?: GameSceneContainedPoi[];
 }
 
 // Micro grid 在 SQL 里已经完成了“这个格子命中了谁”的空间判断；

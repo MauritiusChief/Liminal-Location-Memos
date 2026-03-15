@@ -1,9 +1,8 @@
 import type {
-  DbFeatureDetail,
+  SceneFeatureDetail,
   DbPolarFeatureRecord,
-  GameSceneFeatureDetail,
   GameScenePolarFeatureRecord,
-} from './dbSceneTypes.js';
+} from './scene/sceneTypes.js';
 import {
   AREA_PRIMARY_LABEL_KEYS,
   BUILDING_PRIMARY_LABEL_KEYS,
@@ -114,7 +113,7 @@ const DIRECTION_CLUSTER_THRESHOLD_DEGREES: Record<1 | 2 | 3, number> = {
 // 这里不再回看原始 GeoJSON，只消费已经投影好的点、路径和标签。
 export function buildNormalizedPolarView(input: {
   records: Array<DbPolarFeatureRecord | GameScenePolarFeatureRecord>;
-  featureDetails: ReadonlyMap<string, DbFeatureDetail | GameSceneFeatureDetail>;
+  featureDetails: ReadonlyMap<string, SceneFeatureDetail>;
   request: { lat: number; lon: number };
 }): NormalizedPolarView {
   const origin: [number, number] = [input.request.lon, input.request.lat];
@@ -149,7 +148,7 @@ export function buildNormalizedPolarView(input: {
 
 function buildPolarFeatureSummary(
   record: DbPolarFeatureRecord | GameScenePolarFeatureRecord,
-  detail: DbFeatureDetail | GameSceneFeatureDetail,
+  detail: SceneFeatureDetail,
   origin: [number, number],
 ): NormalizedPolarFeatureSummary | null {
   const metrics = buildPolarFeatureMetrics(record, origin);
@@ -361,7 +360,7 @@ function classifyPolarLevel(distanceMeters: number): 1 | 2 | 3 | null {
 }
 
 function applyPolarLevelFilter(
-  detail: DbFeatureDetail | GameSceneFeatureDetail,
+  detail: SceneFeatureDetail,
   level: 1 | 2 | 3,
   metrics: PolarFeatureMetrics,
 ): {
@@ -381,7 +380,7 @@ function applyPolarLevelFilter(
 }
 
 function applyLevel1Filter(
-  detail: DbFeatureDetail | GameSceneFeatureDetail,
+  detail: SceneFeatureDetail,
   metrics: PolarFeatureMetrics,
 ): {
   shouldInclude: boolean;
@@ -417,7 +416,7 @@ function applyLevel1Filter(
 }
 
 function applyLevel2Filter(
-  detail: DbFeatureDetail | GameSceneFeatureDetail,
+  detail: SceneFeatureDetail,
   metrics: PolarFeatureMetrics,
 ): {
   shouldInclude: boolean;
@@ -459,7 +458,7 @@ function applyLevel2Filter(
 }
 
 function applyLevel3Filter(
-  detail: DbFeatureDetail | GameSceneFeatureDetail,
+  detail: SceneFeatureDetail,
   metrics: PolarFeatureMetrics,
 ): {
   shouldInclude: boolean;

@@ -1,4 +1,4 @@
-import type { DbFeatureDetail, GameSceneFeatureDetail } from './dbSceneTypes.js';
+import type { SceneFeatureDetail } from './scene/sceneTypes.js';
 import type { NormalizedMicroGrid } from './overpassGrid.js';
 import type { NormalizedPolarFeatureSummary, NormalizedPolarView } from './overpassPolar.js';
 import {
@@ -73,7 +73,7 @@ export function buildNormalizationPrompt(input: {
   summaryMode?: PromptSummaryMode;
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
-  featureDetails: ReadonlyMap<string, DbFeatureDetail | GameSceneFeatureDetail>;
+  featureDetails: ReadonlyMap<string, SceneFeatureDetail>;
 }): string {
   const sections = [
     buildPromptIntro(input.request),
@@ -103,7 +103,7 @@ function buildPromptIntro(request: { lat: number; lon: number; radius: number })
 
 function buildGridSection(
   microGrid: NormalizedMicroGrid | undefined,
-  featureDetails: ReadonlyMap<string, DbFeatureDetail | GameSceneFeatureDetail>,
+  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
 ): string {
   if (!microGrid || !microGrid.enabled) {
     return '## 等级0（30米内微网格）：半径不足，未生成微网格。';
@@ -147,7 +147,7 @@ function buildGridSection(
 
 function buildPolarSection(
   polarView: NormalizedPolarView | undefined,
-  featureDetails: ReadonlyMap<string, DbFeatureDetail | GameSceneFeatureDetail>,
+  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
   summaryMode: PromptSummaryMode,
 ): string {
   if (!polarView) {
@@ -182,7 +182,7 @@ function buildPolarLevelBlock(
   level: 1 | 2 | 3,
   summaries: NormalizedPolarFeatureSummary[],
   includedCategories: NormalizedPolarFeatureSummary['category'][],
-  featureDetails: ReadonlyMap<string, DbFeatureDetail | GameSceneFeatureDetail>,
+  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
   summaryMode: PromptSummaryMode,
 ): string {
   if (summaryMode === 'concise') {
@@ -238,7 +238,7 @@ function buildConcisePolarLevelBlock(
   level: 1 | 2 | 3,
   summaries: NormalizedPolarFeatureSummary[],
   includedCategories: NormalizedPolarFeatureSummary['category'][],
-  featureDetails: ReadonlyMap<string, DbFeatureDetail | GameSceneFeatureDetail>,
+  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
 ): string {
   const groupedEntries = new Map<string, NormalizedPolarFeatureSummary[]>();
   const levelDesc = { 1: '100m~30m', 2: '300m~100m', 3: '1km~300m' };
@@ -257,7 +257,7 @@ function buildConcisePolarLevelBlock(
     .flatMap((entries) => {
       const detailEntries = entries
         .map((entry) => ({ entry, detail: featureDetails.get(entry.featureId) }))
-        .filter((candidate): candidate is { entry: NormalizedPolarFeatureSummary; detail: DbFeatureDetail } => Boolean(candidate.detail));
+        .filter((candidate): candidate is { entry: NormalizedPolarFeatureSummary; detail: SceneFeatureDetail } => Boolean(candidate.detail));
       if (detailEntries.length === 0) {
         return [];
       }
@@ -361,7 +361,7 @@ function buildPolarFeatureLines(summary: NormalizedPolarFeatureSummary): string[
   ];
 }
 
-function buildFeatureDetailEntry(feature: DbFeatureDetail | GameSceneFeatureDetail): string {
+function buildFeatureDetailEntry(feature: SceneFeatureDetail): string {
   const detailTags = collectImportantTags(feature);
   const lines = [`${getFeatureDisplayTitle(feature)} (id=${feature.featureId}):`];
 
@@ -374,7 +374,7 @@ function buildFeatureDetailEntry(feature: DbFeatureDetail | GameSceneFeatureDeta
   return lines.join('\n');
 }
 
-function getFeatureDisplayTitle(feature: DbFeatureDetail | GameSceneFeatureDetail): string {
+function getFeatureDisplayTitle(feature: SceneFeatureDetail): string {
   const name = trimTagValue(feature.tags.name);
   const brand = trimTagValue(feature.tags.brand);
 
@@ -396,7 +396,7 @@ function getFeatureDisplayTitle(feature: DbFeatureDetail | GameSceneFeatureDetai
   return feature.featureId;
 }
 
-function collectImportantTags(feature: DbFeatureDetail | GameSceneFeatureDetail): string[] {
+function collectImportantTags(feature: SceneFeatureDetail): string[] {
   // grid 细节区域的目标是“给人工检查和 prompt 补上下文”，
   // 因此只挑各类别最关键的少数标签。
   const keys =
@@ -436,7 +436,7 @@ function isDenseConciseGroup(level: 1 | 2 | 3, entries: NormalizedPolarFeatureSu
 function isSignificantConciseFeature(
   level: 1 | 2 | 3,
   summary: NormalizedPolarFeatureSummary,
-  detail: DbFeatureDetail | GameSceneFeatureDetail,
+  detail: SceneFeatureDetail,
 ): boolean {
   switch (summary.category) {
     case 'building':

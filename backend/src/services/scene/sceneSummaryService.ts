@@ -4,22 +4,20 @@ import { buildNormalizedPolarView } from '../overpassPolar.js';
 import { buildNormalizationPrompt, type PromptSummaryMode } from '../overpassPrompt.js';
 import {
   fetchFeatureDetailsFromDb,
-  fetchGameSceneFeatureDetailsFromDb,
+  fetchSceneFeatureDetailsFromDb,
   fetchGameScenePolarFeaturesFromDb,
   fetchMicroGridFromDb,
   fetchPolarFeaturesFromDb,
 } from '../osmRepository.js';
 import type {
-  DbFeatureDetail,
+  DebugSceneFeatureDetail,
   DbNormalizationDiagnostics,
-  GameSceneFeatureDetail,
-} from '../dbSceneTypes.js';
+  SceneFeatureDetail,
+} from './sceneTypes.js';
 
 export type SummaryPreviewMode = 'detailed_far_1000' | 'concise_far_1000' | 'concise_near_200';
 
-type SceneSummaryFeatureDetail = DbFeatureDetail | GameSceneFeatureDetail;
-
-export interface ProjectedScene<TFeatureDetail extends SceneSummaryFeatureDetail> {
+export interface ProjectedScene<TFeatureDetail extends SceneFeatureDetail> {
   request: NormalizedOverpassRequest;
   diagnostics: DbNormalizationDiagnostics;
   featureDetails: TFeatureDetail[];
@@ -33,12 +31,12 @@ export interface ProjectedScene<TFeatureDetail extends SceneSummaryFeatureDetail
  * @param featureDetails
  * @returns
  */
-function buildFeatureDetailIndex<TFeatureDetail extends SceneSummaryFeatureDetail>(featureDetails: TFeatureDetail[]): Map<string, TFeatureDetail> {
+function buildFeatureDetailIndex<TFeatureDetail extends SceneFeatureDetail>(featureDetails: TFeatureDetail[]): Map<string, TFeatureDetail> {
   return new Map(featureDetails.map((feature) => [feature.featureId, feature]));
 }
 
 function buildDbDiagnostics(input: {
-  featureDetails: SceneSummaryFeatureDetail[];
+  featureDetails: SceneFeatureDetail[];
   microGrid: ReturnType<typeof buildNormalizedMicroGrid>;
   polarView: ReturnType<typeof buildNormalizedPolarView>;
 }): DbNormalizationDiagnostics {
@@ -97,11 +95,11 @@ export function resolveSceneContextSummaryMode(summaryMode: 'concise_near' | 'co
 }
 
 /**
- * TODO 若 DbFeatureDetail 与 GameSceneFeatureDetail 合并则 loadDebugProjectedScene 与 loadDebugProjectedScene 合并
+ * TODO 若 DebugSceneFeatureDetail 与 SceneFeatureDetail 合并则 loadDebugProjectedScene 与 loadDebugProjectedScene 合并
  * @param request
  * @returns
  */
-export async function loadDebugProjectedScene(request: NormalizedOverpassRequest): Promise<ProjectedScene<DbFeatureDetail>> {
+export async function loadDebugProjectedScene(request: NormalizedOverpassRequest): Promise<ProjectedScene<DebugSceneFeatureDetail>> {
   const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
     fetchFeatureDetailsFromDb(request),
     fetchMicroGridFromDb(request),
@@ -134,13 +132,13 @@ export async function loadDebugProjectedScene(request: NormalizedOverpassRequest
 }
 
 /**
- * TODO 若 DbFeatureDetail 与 GameSceneFeatureDetail 合并则 loadDebugProjectedScene 与 loadDebugProjectedScene 合并
+ * TODO 若 DebugSceneFeatureDetail 与 SceneFeatureDetail 合并则 loadDebugProjectedScene 与 loadDebugProjectedScene 合并
  * @param request
  * @returns
  */
-export async function loadGameProjectedScene(request: NormalizedOverpassRequest): Promise<ProjectedScene<GameSceneFeatureDetail>> {
+export async function loadGameProjectedScene(request: NormalizedOverpassRequest): Promise<ProjectedScene<SceneFeatureDetail>> {
   const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-    fetchGameSceneFeatureDetailsFromDb(request),
+    fetchSceneFeatureDetailsFromDb(request),
     fetchMicroGridFromDb(request),
     fetchGameScenePolarFeaturesFromDb(request),
   ]);
@@ -170,8 +168,7 @@ export async function loadGameProjectedScene(request: NormalizedOverpassRequest)
   };
 }
 
-// TODO 可以直接在 buildDebugSummaryPreview 中呼叫 buildNormalizationPrompt
-export function buildSummaryFromProjectedScene<TFeatureDetail extends SceneSummaryFeatureDetail>(
+export function buildSummaryFromProjectedScene<TFeatureDetail extends SceneFeatureDetail>(
   scene: ProjectedScene<TFeatureDetail>,
   summaryMode: SummaryPreviewMode,
 ): string {

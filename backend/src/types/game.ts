@@ -1,4 +1,4 @@
-import type { DbNormalizationDiagnostics } from '../services/dbSceneTypes.js';
+import type { DbNormalizationDiagnostics } from '../services/scene/sceneTypes.js';
 import type { NormalizedMicroGrid } from '../services/overpassGrid.js';
 import type { NormalizedPolarView } from '../services/overpassPolar.js';
 import type { SummaryPreviewMode } from '../services/scene/sceneSummaryService.js';

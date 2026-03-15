@@ -8,13 +8,13 @@ import type {
   RelationReference,
 } from './overpassNormalization.js';
 import type {
-  DbFeatureDetail,
+  DebugSceneFeatureDetail,
   DbFeatureCategory,
-  GameSceneFeatureDetail,
+  SceneFeatureDetail,
   GameScenePolarFeatureRecord,
   DbMicroGridCellRecord,
   DbPolarFeatureRecord,
-} from './dbSceneTypes.js';
+} from './scene/sceneTypes.js';
 import { getStructuredTagColumns, matchFeatureCategory } from './osmFeatureConfig.js';
 import type { GamePosition } from '../types/game.js';
 
@@ -38,7 +38,7 @@ type GameSceneBuildingRow = {
   contained_pois: Array<{ tags: Record<string, string> }> | null;
 };
 
-type GameSceneFeatureDetailRow = {
+type SceneFeatureDetailRow = {
   feature_id: string;
   osm_id: number;
   category: DbFeatureCategory;
@@ -156,7 +156,7 @@ export async function syncNormalizedFeaturesToDb(
 
 // 这层把“后续文案与调试真正会消费的要素字段”统一取回。
 // 建筑单独走一条查询，是为了顺手把 containedPois 一并在 SQL 里算好。
-export async function fetchFeatureDetailsFromDb(request: NormalizedOverpassRequest): Promise<DbFeatureDetail[]> {
+export async function fetchFeatureDetailsFromDb(request: NormalizedOverpassRequest): Promise<DebugSceneFeatureDetail[]> {
   const [buildingRows, otherRows] = await Promise.all([
     fetchBuildingDetails(request),
     fetchNonBuildingDetails(request),
@@ -189,9 +189,9 @@ export async function fetchFeatureDetailsFromDb(request: NormalizedOverpassReque
   ];
 }
 
-export async function fetchGameSceneFeatureDetailsFromDb(
+export async function fetchSceneFeatureDetailsFromDb(
   request: NormalizedOverpassRequest,
-): Promise<GameSceneFeatureDetail[]> {
+): Promise<SceneFeatureDetail[]> {
   const [buildingRows, otherRows] = await Promise.all([
     fetchGameSceneBuildingDetails(request),
     fetchGameSceneNonBuildingDetails(request),
@@ -354,9 +354,9 @@ async function fetchNonBuildingDetails(request: NormalizedOverpassRequest): Prom
 
 async function fetchGameSceneNonBuildingDetails(
   request: NormalizedOverpassRequest,
-): Promise<GameSceneFeatureDetailRow[]> {
+): Promise<SceneFeatureDetailRow[]> {
   const sql = await fetchGameSceneNonBuildingDetailsSqlPromise;
-  const result = await query<GameSceneFeatureDetailRow>(
+  const result = await query<SceneFeatureDetailRow>(
     sql,
     [request.lon, request.lat, request.radius],
   );

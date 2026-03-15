@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
-import type { DbFeatureDetail } from '../services/dbSceneTypes.js';
+import type { DebugSceneFeatureDetail } from '../services/scene/sceneTypes.js';
 import { generateReplyWithSystemPrompt } from '../services/llm.js';
 import { buildNormalizedMicroGrid } from '../services/overpassGrid.js';
 import {
@@ -31,7 +31,7 @@ interface OverpassRequestBody {
 export const apiRouter = Router();
 
 function buildDbDiagnostics(input: {
-  featureDetails: DbFeatureDetail[];
+  featureDetails: DebugSceneFeatureDetail[];
   microGrid: ReturnType<typeof buildNormalizedMicroGrid>;
   polarView: ReturnType<typeof buildNormalizedPolarView>;
 }) {
@@ -55,18 +55,18 @@ function buildDbDiagnostics(input: {
   };
 }
 
-function buildDbFeatureDetailIndex(featureDetails: DbFeatureDetail[]): Map<string, DbFeatureDetail> {
+function buildDebugSceneFeatureDetailIndex(featureDetails: DebugSceneFeatureDetail[]): Map<string, DebugSceneFeatureDetail> {
   // 统一做成 featureId -> detail 索引，避免 grid/polar/prompt 各自重复扫描数组。
   return new Map(featureDetails.map((feature) => [feature.featureId, feature]));
 }
 
 function buildNormalizationDebugPayload(input: {
   normalizedRequest: NormalizedOverpassRequest;
-  featureDetails: DbFeatureDetail[];
+  featureDetails: DebugSceneFeatureDetail[];
   microGridRecords: Awaited<ReturnType<typeof fetchMicroGridFromDb>>;
   polarRecords: Awaited<ReturnType<typeof fetchPolarFeaturesFromDb>>;
 }) {
-  const featureDetailIndex = buildDbFeatureDetailIndex(input.featureDetails);
+  const featureDetailIndex = buildDebugSceneFeatureDetailIndex(input.featureDetails);
   // 这里是 DB-native 调试链路的汇合点：
   // repository 提供三份投影原料，service 层再分别拼出 grid / polar / prompt。
   const microGrid = buildNormalizedMicroGrid({

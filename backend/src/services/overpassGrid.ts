@@ -1,4 +1,4 @@
-import type { DbFeatureDetail, DbMicroGridCellRecord, GameSceneFeatureDetail } from './dbSceneTypes.js';
+import type { SceneFeatureDetail, DbMicroGridCellRecord } from './scene/sceneTypes.js';
 import {
   buildBuildingBaseLabel,
   getAreaDisplayLabel,
@@ -44,7 +44,7 @@ const GRID_COLS = 12 as const;
 export function buildNormalizedMicroGrid(input: {
   request: { lat: number; lon: number; radius: number };
   cells: DbMicroGridCellRecord[];
-  featureDetails: ReadonlyMap<string, DbFeatureDetail | GameSceneFeatureDetail>;
+  featureDetails: ReadonlyMap<string, SceneFeatureDetail>;
 }): NormalizedMicroGrid {
   const { request, cells: cellRecords, featureDetails } = input;
 
@@ -97,7 +97,7 @@ export function buildNormalizedMicroGrid(input: {
 
 function buildMicroGridCell(
   record: DbMicroGridCellRecord,
-  featureDetails: ReadonlyMap<string, DbFeatureDetail | GameSceneFeatureDetail>,
+  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
 ): NormalizedMicroGridCell {
   // 这一层只根据 feature id 回表拿标签，不再接触几何。
   const baseFeature = record.baseFeatureId ? featureDetails.get(record.baseFeatureId) || null : null;
