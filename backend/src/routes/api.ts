@@ -8,15 +8,11 @@ import {
   fetchFeatureDetailsFromDb,
   fetchMicroGridFromDb,
   fetchPolarFeaturesFromDb,
-  syncNormalizedFeaturesToDb,
 } from '../services/osmRepository.js';
+import { syncOverpassCoverage } from '../services/overpass/overpassSync.js';
 import { buildNormalizedPolarView } from '../services/overpassPolar.js';
 import { buildDefaultDebugSystemPrompt, buildNormalizationPrompt } from '../services/overpassPrompt.js';
-import {
-  buildNormalizedOverpassQuery,
-  convertOverpassToNormalizedFeatures,
-  type NormalizedOverpassRequest,
-} from '../services/overpassNormalization.js';
+import { type NormalizedOverpassRequest } from '../services/overpassNormalization.js';
 import { runGameChatTurn } from '../services/gameChat.js';
 import { getSessionSnapshot } from '../services/gameSessionStore.js';
 import type { GameChatRequest } from '../types/game.js';
@@ -262,7 +258,7 @@ apiRouter.get('/game/session/:sessionId', async (request, response) => {
   }
 });
 
-apiRouter.post('/overpass', async (request, response) => {
+apiRouter.post('/debug/overpass', async (request, response) => {
   const { query } = request.body as OverpassRequestBody;
 
   if (!query || !query.trim()) {
@@ -283,7 +279,7 @@ apiRouter.post('/overpass', async (request, response) => {
   }
 });
 
-apiRouter.post('/db/sync-overpass', async (request, response) => {
+apiRouter.post('/debug/db/sync-overpass', async (request, response) => {
   const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
 
   if ('error' in parsed) {
@@ -292,19 +288,14 @@ apiRouter.post('/db/sync-overpass', async (request, response) => {
   }
 
   const normalizedRequest = parsed.value;
-  const query = buildNormalizedOverpassQuery(normalizedRequest);
 
   try {
-    const raw = (await overpassJson(query, {
-      endpoint: 'https://overpass-api.de/api/interpreter',
-    })) as Parameters<typeof convertOverpassToNormalizedFeatures>[0];
-    const features = convertOverpassToNormalizedFeatures(raw);
-    const counts = await syncNormalizedFeaturesToDb(features, normalizedRequest);
+    const result = await syncOverpassCoverage(normalizedRequest);
 
     response.json({
-      query,
-      featureCount: features.length,
-      counts,
+      query: result.query,
+      featureCount: result.features.length,
+      counts: result.counts,
       coverageRecorded: true,
     });
   } catch (error) {
@@ -314,7 +305,7 @@ apiRouter.post('/db/sync-overpass', async (request, response) => {
   }
 });
 
-apiRouter.post('/db/normalized-load', async (request, response) => {
+apiRouter.post('/debug/db/normalized-load', async (request, response) => {
   const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
 
   if ('error' in parsed) {

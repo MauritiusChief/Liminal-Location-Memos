@@ -1,11 +1,6 @@
-import { overpassJson } from 'overpass-ts';
 import type { GameSceneFeatureDetail } from './dbSceneTypes.js';
 import { buildNormalizedMicroGrid } from './overpassGrid.js';
-import {
-  buildNormalizedOverpassQuery,
-  convertOverpassToNormalizedFeatures,
-  type NormalizedOverpassRequest,
-} from './overpassNormalization.js';
+import { type NormalizedOverpassRequest } from './overpassNormalization.js';
 import { buildNormalizedPolarView } from './overpassPolar.js';
 import { buildNormalizationPrompt } from './overpassPrompt.js';
 import {
@@ -13,8 +8,8 @@ import {
   fetchGameScenePolarFeaturesFromDb,
   fetchMicroGridFromDb,
   findNearestCoverageDistanceMeters,
-  syncNormalizedFeaturesToDb,
 } from './osmRepository.js';
+import { syncOverpassCoverage } from './overpass/overpassSync.js';
 import type { GamePosition, SceneContext } from '../types/game.js';
 
 function buildFeatureDetailIndex(featureDetails: GameSceneFeatureDetail[]): Map<string, GameSceneFeatureDetail> {
@@ -57,16 +52,7 @@ export async function ensureCoverageForPosition(
     return false;
   }
 
-  const query = buildNormalizedOverpassQuery({
-    lat: position.lat,
-    lon: position.lon,
-    radius: syncRadius,
-  });
-  const raw = (await overpassJson(query, {
-    endpoint: 'https://overpass-api.de/api/interpreter',
-  })) as Parameters<typeof convertOverpassToNormalizedFeatures>[0];
-  const features = convertOverpassToNormalizedFeatures(raw);
-  await syncNormalizedFeaturesToDb(features, {
+  await syncOverpassCoverage({
     lat: position.lat,
     lon: position.lon,
     radius: syncRadius,

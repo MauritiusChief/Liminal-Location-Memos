@@ -21,7 +21,7 @@
 2. `ensureCoverageForPosition()`
    - 在 `backend/src/services/gameScene.ts`
    - 先检查当前位置到最近 `osm_sync_coverage` 的距离
-   - 若 300m 内已有 coverage，则直接复用
+   - 若 300m 内已有 coverage，则直接从数据库请求数据，以复用现存数据
    - 否则发起一次半径 `1000m` 的 Overpass 同步并写回数据库
 3. `loadSceneContext()`
    - 在 `backend/src/services/gameScene.ts`

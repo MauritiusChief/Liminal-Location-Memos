@@ -80,7 +80,7 @@ function parseNormalizationForm(form: NormalizationFormState): ParsedNormalizati
   } as const;
 }
 
-// 这个 thunk 负责“先从用户输入拿到表单值，再请求 /api/db/sync-overpass”。
+// 这个 thunk 负责“先从用户输入拿到表单值，再请求 /api/debug/db/sync-overpass”。
 // 它成功后只更新 syncRequest，不会碰 dbLoadRequest，这样用户可以分别观察两步结果。
 export const syncScene = createAsyncThunk<SceneSyncResponse, NormalizationFormState, { rejectValue: string }>(
   'normalizationDebug/syncScene',

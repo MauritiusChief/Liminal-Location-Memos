@@ -3,17 +3,17 @@
 ## Overview
 当前项目的环境摘要主链路已经统一为数据库链路：
 
-- `POST /api/db/sync-overpass`
-- `POST /api/db/normalized-load`
+- `POST /api/debug/db/sync-overpass`
+- `POST /api/debug/db/normalized-load`
 
 `/debug/normalization` 会先触发 sync，再按需从数据库读取并生成调试结果。
 
 ## Step 1: Sync Overpass Into Database
-`/debug/normalization` 页面先调用 `backend/src/routes/api.ts` 的 `/api/db/sync-overpass`。
+`/debug/normalization` 页面先调用 `backend/src/routes/api.ts` 的 `/api/debug/db/sync-overpass`。
 
 处理顺序如下：
 
-1. `buildNormalizedOverpassQuery()`
+1. `buildJsonSkelOverpassQuery()`
    - 生成与旧链路相同的 Overpass QL
 2. `overpassJson()`
    - 请求 Overpass API
@@ -33,7 +33,7 @@
 - 后续调试和空间计算尽量改为从数据库读取
 
 ## Step 2: Load Normalized Result From Database
-`/debug/normalization` 页面再调用 `backend/src/routes/api.ts` 的 `/api/db/normalized-load`。
+`/debug/normalization` 页面再调用 `backend/src/routes/api.ts` 的 `/api/debug/db/normalized-load`。
 
 处理顺序如下：
 
