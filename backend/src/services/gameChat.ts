@@ -420,25 +420,12 @@ async function buildSceneContextSnapshotPayload(input: {
     type: 'scene_context_snapshot',
     summaryMode: input.summaryMode,
     largeDescription: input.largeDescription,
-    activeSummary: await resolveSceneContextSummary(input.sceneContext, input.summaryMode),
+    activeSummary: await input.sceneContext.getSummary(resolveSceneContextSummaryMode(input.summaryMode)),
     nearbyFarVisibleDetails: farVisibleNotes.map((record) => ({
       distanceMeters: Math.round(record.distanceMeters || 0),
       notes: record.farVisibleNotes || '',
     })),
   };
-}
-
-/**
- * TODO 改成 object
- * @param sceneContext
- * @param summaryMode
- * @returns
- */
-async function resolveSceneContextSummary(
-  sceneContext: SceneContext,
-  summaryMode: SceneContextSummaryMode,
-): Promise<string> {
-  return sceneContext.getSummary(resolveSceneContextSummaryMode(summaryMode));
 }
 
 function buildSyntheticSceneContextMessages(input: {

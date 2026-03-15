@@ -13,7 +13,27 @@ import type {
   SceneFeatureDetail,
 } from './sceneTypes.js';
 
-export type SummaryPreviewMode = 'detailed_far_1000' | 'concise_far_1000' | 'concise_near_200';
+export const SUMMARY_PREVIEW_MODE_CONFIG = {
+  detailed_far_1000: { radius: 1000, promptSummaryMode: 'detailed' },
+  concise_far_1000: { radius: 1000, promptSummaryMode: 'concise' },
+  concise_near_200: { radius: 200, promptSummaryMode: 'concise' },
+} as const satisfies Record<string, { radius: number; promptSummaryMode: PromptSummaryMode }>;
+
+export type SummaryPreviewMode = keyof typeof SUMMARY_PREVIEW_MODE_CONFIG;
+
+export const SUMMARY_PREVIEW_MODE_VALUES = Object.keys(SUMMARY_PREVIEW_MODE_CONFIG) as SummaryPreviewMode[];
+export const SUMMARY_PREVIEW_MODE_VALUE_LIST = SUMMARY_PREVIEW_MODE_VALUES.join(', ');
+
+export const SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE = {
+  concise_near: 'concise_near_200',
+  concise_far: 'concise_far_1000',
+  detailed_far: 'detailed_far_1000',
+} as const satisfies Record<string, SummaryPreviewMode>;
+
+export type SceneContextSummaryMode = keyof typeof SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE;
+
+export const DEFAULT_LARGE_DESCRIPTION_SUMMARY_MODE: SummaryPreviewMode = 'concise_far_1000';
+export const DEFAULT_SMALL_DESCRIPTION_SUMMARY_MODE: SummaryPreviewMode = 'concise_near_200';
 
 export interface ProjectedScene<TFeatureDetail extends SceneFeatureDetail> {
   request: NormalizedOverpassRequest;
@@ -56,40 +76,15 @@ function buildDbDiagnostics(input: {
   };
 }
 
-
 /**
- * TODO 改成一个 object
- * @param summaryMode
- * @returns
+ * scene context 的业务模式需要先映射到 prompt/DB 层使用的预览模式。
  */
-function toPromptBuildConfig(summaryMode: SummaryPreviewMode): {
-  radius: number;
-  promptSummaryMode: PromptSummaryMode;
-} {
-  switch (summaryMode) {
-    case 'detailed_far_1000':
-      return { radius: 1000, promptSummaryMode: 'detailed' };
-    case 'concise_far_1000':
-      return { radius: 1000, promptSummaryMode: 'concise' };
-    case 'concise_near_200':
-      return { radius: 200, promptSummaryMode: 'concise' };
-  }
+export function resolveSceneContextSummaryMode(summaryMode: SceneContextSummaryMode): SummaryPreviewMode {
+  return SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE[summaryMode];
 }
 
-/**
- * TODO 改成一个 object
- * @param summaryMode
- * @returns
- */
-export function resolveSceneContextSummaryMode(summaryMode: 'concise_near' | 'concise_far' | 'detailed_far'): SummaryPreviewMode {
-  switch (summaryMode) {
-    case 'concise_near':
-      return 'concise_near_200';
-    case 'concise_far':
-      return 'concise_far_1000';
-    case 'detailed_far':
-      return 'detailed_far_1000';
-  }
+export function isSummaryPreviewMode(value: unknown): value is SummaryPreviewMode {
+  return typeof value === 'string' && Object.hasOwn(SUMMARY_PREVIEW_MODE_CONFIG, value);
 }
 
 export async function loadProjectedScene(
@@ -131,7 +126,7 @@ export function buildSummaryFromProjectedScene<TFeatureDetail extends SceneFeatu
   scene: ProjectedScene<TFeatureDetail>,
   summaryMode: SummaryPreviewMode,
 ): string {
-  const config = toPromptBuildConfig(summaryMode);
+  const config = SUMMARY_PREVIEW_MODE_CONFIG[summaryMode];
 
   return buildNormalizationPrompt({
     request: scene.request,
@@ -151,7 +146,7 @@ export async function buildDebugSummaryPreview(
   position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>,
   summaryMode: SummaryPreviewMode,
 ): Promise<string> {
-  const config = toPromptBuildConfig(summaryMode);
+  const config = SUMMARY_PREVIEW_MODE_CONFIG[summaryMode];
   const scene = await loadProjectedScene({
     lat: position.lat,
     lon: position.lon,

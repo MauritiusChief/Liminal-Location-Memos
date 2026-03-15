@@ -15,7 +15,11 @@ import { buildDefaultDebugSystemPrompt } from '../services/overpassPrompt.js';
 import { type NormalizedOverpassRequest } from '../services/overpassNormalization.js';
 import { runGameChatTurn } from '../services/gameChat.js';
 import { getSessionSnapshot } from '../services/gameSessionStore.js';
-import { buildDebugSummaryPreview, type SummaryPreviewMode } from '../services/scene/sceneSummaryService.js';
+import {
+  buildDebugSummaryPreview,
+  isSummaryPreviewMode,
+  SUMMARY_PREVIEW_MODE_VALUE_LIST,
+} from '../services/scene/sceneSummaryService.js';
 import type { GameChatRequest } from '../types/game.js';
 import type { NormalizedOverpassRequestBody, SummaryPreviewRequestBody } from '../types/overpass.js';
 
@@ -141,15 +145,11 @@ function parsePosition(body: Pick<NormalizedOverpassRequestBody, 'lat' | 'lon'>)
 }
 
 function parseSummaryPreviewMode(value: unknown) {
-  if (
-    value === 'detailed_far_1000'
-    || value === 'concise_far_1000'
-    || value === 'concise_near_200'
-  ) {
+  if (isSummaryPreviewMode(value)) {
     return { value } as const;
   }
 
-  return { error: 'summaryMode must be one of detailed_far_1000, concise_far_1000, concise_near_200.' } as const;
+  return { error: `summaryMode must be one of ${SUMMARY_PREVIEW_MODE_VALUE_LIST}.` } as const;
 }
 
 apiRouter.get('/health', async (_request, response) => {
@@ -325,7 +325,7 @@ apiRouter.post('/debug/db/summary-preview', async (request, response) => {
   }
 
   try {
-    const summaryText = await buildDebugSummaryPreview(parsedRequest.value, parsedSummaryMode.value as SummaryPreviewMode);
+    const summaryText = await buildDebugSummaryPreview(parsedRequest.value, parsedSummaryMode.value);
     response.json({
       summaryMode: parsedSummaryMode.value,
       summaryText,
