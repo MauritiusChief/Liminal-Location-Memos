@@ -1,15 +1,26 @@
 import type { DbFeatureDetail } from './dbSceneTypes.js';
 import type { NormalizedMicroGrid } from './overpassGrid.js';
 import type { NormalizedPolarFeatureSummary, NormalizedPolarView } from './overpassPolar.js';
-import { AREA_TAG_KEYS, POI_TAG_KEYS, ROAD_TAG_KEYS, trimTagValue } from './overpassLabels.js';
+import {
+  AREA_PRIMARY_LABEL_KEYS,
+  BUILDING_PRIMARY_LABEL_KEYS,
+  LINE_PRIMARY_LABEL_KEYS,
+  POI_PRIMARY_LABEL_KEYS,
+  POI_STRUCTURED_TAG_KEYS,
+} from './osmFeatureConfig.js';
+import { trimTagValue } from './overpassLabels.js';
+
+export type PromptSummaryMode = 'detailed' | 'concise';
 
 export interface PromptPreview {
-  userPrompt: string;
+  detailedUserPrompt1000: string;
+  conciseUserPrompt1000: string;
+  conciseUserPrompt200: string;
 }
 
-const BUILDING_AND_POI_TAG_KEYS = ['name', 'brand', ...POI_TAG_KEYS, 'building'] as const;
-const LINE_DETAIL_TAG_KEYS = ['name', ...ROAD_TAG_KEYS] as const;
-const AREA_DETAIL_TAG_KEYS = ['name', ...AREA_TAG_KEYS] as const;
+const BUILDING_AND_POI_TAG_KEYS = ['name', 'brand', ...POI_STRUCTURED_TAG_KEYS, ...BUILDING_PRIMARY_LABEL_KEYS] as const;
+const LINE_DETAIL_TAG_KEYS = ['name', ...LINE_PRIMARY_LABEL_KEYS] as const;
+const AREA_DETAIL_TAG_KEYS = ['name', ...AREA_PRIMARY_LABEL_KEYS] as const;
 const POLAR_LEVEL_PROMPT_CONFIG: Record<
   1 | 2 | 3,
   {
@@ -34,12 +45,33 @@ const POLAR_LEVEL_PROMPT_CONFIG: Record<
     omissionSummaryMinGroupSize: 0,
   },
 };
+// 建筑的视角阈值
+const CONCISE_BUILDING_MIN_ANGLE_BY_LEVEL: Record<1 | 2 | 3, number> = { 1: 15, 2: 15, 3: 15 };
+// 区域的视角阈值
+const CONCISE_AREA_MIN_ANGLE_BY_LEVEL: Record<1 | 2 | 3, number> = { 1: 20, 2: 20, 3: 20 };
+// 线类的视角阈值
+const CONCISE_LINE_MIN_ANGLE_BY_LEVEL: Record<1 | 2 | 3, number> = { 1: 25, 2: 25, 3: 25 };
+
+// 密集团簇的数量阈值，按类别与等级分层。
+const CONCISE_DENSE_MEMBER_COUNT_BY_CATEGORY_AND_LEVEL: Record<
+  NormalizedPolarFeatureSummary['category'],
+  Record<1 | 2 | 3, number>
+> = {
+  building: { 1: 4, 2: 8, 3: 12 },
+  poi: { 1: 5, 2: 50, 3: 200 },
+  area: { 1: 6, 2: 12, 3: 24 },
+  line: { 1: 12, 2: 30, 3: 60 },
+};
+const CONCISE_SIGNIFICANT_POI_TAGS = new Set(['man_made:antenna', 'man_made:tower']);
+const SIGNIFICANT_BUILDING_MIN_HEIGHT_METERS = 35;
+const SIGNIFICANT_BUILDING_MIN_LEVELS = 10;
 
 // prompt 层只消费“已经投影好的场景结构”：
 // request + microGrid + polarView + 少量 feature detail。
 // 它不再回看完整 GeoJSON，也不负责任何空间计算。
 export function buildNormalizationPrompt(input: {
   request: { lat: number; lon: number; radius: number };
+  summaryMode?: PromptSummaryMode;
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
   featureDetails: Map<string, DbFeatureDetail>;
@@ -47,7 +79,7 @@ export function buildNormalizationPrompt(input: {
   const sections = [
     buildPromptIntro(input.request),
     buildGridSection(input.microGrid, input.featureDetails),
-    buildPolarSection(input.polarView),
+    buildPolarSection(input.polarView, input.featureDetails, input.summaryMode || 'detailed'),
   ];
 
   return sections.join('\n\n');
@@ -114,13 +146,24 @@ function buildGridSection(
   ].join('\n');
 }
 
-function buildPolarSection(polarView: NormalizedPolarView | undefined): string {
+function buildPolarSection(
+  polarView: NormalizedPolarView | undefined,
+  featureDetails: Map<string, DbFeatureDetail>,
+  summaryMode: PromptSummaryMode,
+): string {
   if (!polarView) {
     return '## 极坐标摘要：无';
   }
 
-  const buildingAndPoiBlocks = polarView.levels.map((level) => buildPolarLevelBlock(level.level, level.features, true));
-  const lineAndAreaBlocks = polarView.levels.map((level) => buildPolarLevelBlock(level.level, level.features, false));
+  const buildingAndPoiBlocks = polarView.levels.map((level) =>
+    buildPolarLevelBlock(level.level, level.features, ['building', 'poi'], featureDetails, summaryMode),
+  );
+  const lineBlocks = polarView.levels.map((level) =>
+    buildPolarLevelBlock(level.level, level.features, ['line'], featureDetails, summaryMode),
+  );
+  const areaBlocks = polarView.levels.map((level) =>
+    buildPolarLevelBlock(level.level, level.features, ['area'], featureDetails, summaryMode),
+  );
 
   return [
     '## 等级1到等级3（30米到1公里极坐标摘要）',
@@ -128,22 +171,30 @@ function buildPolarSection(polarView: NormalizedPolarView | undefined): string {
     '### 显著部分：建筑与POI',
     ...buildingAndPoiBlocks,
     '',
-    '### 补充部分：线类与区域',
-    ...lineAndAreaBlocks,
+    '### 补充部分：线类',
+    ...lineBlocks,
+    '',
+    '### 补充部分：区域',
+    ...areaBlocks,
   ].join('\n');
 }
 
 function buildPolarLevelBlock(
   level: 1 | 2 | 3,
   summaries: NormalizedPolarFeatureSummary[],
-  includeBuildingAndPoi: boolean,
+  includedCategories: NormalizedPolarFeatureSummary['category'][],
+  featureDetails: Map<string, DbFeatureDetail>,
+  summaryMode: PromptSummaryMode,
 ): string {
+  if (summaryMode === 'concise') {
+    return buildConcisePolarLevelBlock(level, summaries, includedCategories, featureDetails);
+  }
+
   const groupedEntries = new Map<string, NormalizedPolarFeatureSummary[]>();
   const levelDesc = { 1: '100m~30m', 2: '300m~100m', 3: '1km~300m' };
 
   for (const summary of summaries) {
-    // building/poi 与 line/area 分开展示，是为了让 prompt 先读到更显著的环境对象。
-    if (includeBuildingAndPoi ? !isBuildingOrPoiCategory(summary.category) : isBuildingOrPoiCategory(summary.category)) {
+    if (!includedCategories.includes(summary.category)) {
       continue;
     }
 
@@ -180,26 +231,97 @@ function buildPolarGroupBlock(
 
   return {
     title: entries[0]!.clusterLabel,
-    lines: buildPolarClusterSummaryLines(level, entries),
+    lines: buildPolarClusterSummaryLines(level, entries, 'detailed'),
   };
 }
 
-function buildPolarClusterSummaryLines(level: 1 | 2 | 3, entries: NormalizedPolarFeatureSummary[]): string[] {
+function buildConcisePolarLevelBlock(
+  level: 1 | 2 | 3,
+  summaries: NormalizedPolarFeatureSummary[],
+  includedCategories: NormalizedPolarFeatureSummary['category'][],
+  featureDetails: Map<string, DbFeatureDetail>,
+): string {
+  const groupedEntries = new Map<string, NormalizedPolarFeatureSummary[]>();
+  const levelDesc = { 1: '100m~30m', 2: '300m~100m', 3: '1km~300m' };
+
+  for (const summary of summaries) {
+    if (!includedCategories.includes(summary.category)) {
+      continue;
+    }
+
+    const existingGroup = groupedEntries.get(summary.directionCluster.clusterId) || [];
+    existingGroup.push(summary);
+    groupedEntries.set(summary.directionCluster.clusterId, existingGroup);
+  }
+
+  const selectedBlocks = Array.from(groupedEntries.values())
+    .flatMap((entries) => {
+      const detailEntries = entries
+        .map((entry) => ({ entry, detail: featureDetails.get(entry.featureId) }))
+        .filter((candidate): candidate is { entry: NormalizedPolarFeatureSummary; detail: DbFeatureDetail } => Boolean(candidate.detail));
+      if (detailEntries.length === 0) {
+        return [];
+      }
+
+      if (isDenseConciseGroup(level, entries)) {
+        return [{
+          sortDistanceMeters: Math.min(...entries.map((entry) => entry.centerPoint.distanceMeters)),
+          text: [
+            `${entries[0]!.clusterLabel}:`,
+            '',
+            ...buildPolarClusterSummaryLines(level, entries, 'concise'),
+            '',
+          ].join('\n'),
+        }];
+      }
+
+      return detailEntries
+        .filter(({ entry, detail }) => isSignificantConciseFeature(level, entry, detail))
+        .map(({ entry }) => ({
+          sortDistanceMeters: entry.centerPoint.distanceMeters,
+          text: [
+            `${entry.baseLabel}:`,
+            '',
+            ...buildPolarFeatureLines(entry),
+            '',
+          ].join('\n'),
+        }));
+    })
+    .sort((left, right) => left.sortDistanceMeters - right.sortDistanceMeters);
+
+  if (selectedBlocks.length === 0) {
+    return `#### 等级${level}(${levelDesc[level]})：\n信息不足，未生成极坐标摘要\n`;
+  }
+
+  return [`#### 等级${level}(${levelDesc[level]})：`, ...selectedBlocks.map((block) => block.text)].join('\n');
+}
+
+function buildPolarClusterSummaryLines(
+  level: 1 | 2 | 3,
+  entries: NormalizedPolarFeatureSummary[],
+  summaryMode: PromptSummaryMode,
+): string[] {
   const config = POLAR_LEVEL_PROMPT_CONFIG[level];
   const sortedEntries = [...entries].sort(
     (left, right) =>
-      right.widestSpan.angleWidthDegrees - left.widestSpan.angleWidthDegrees ||
+      getPromptRepresentativeScore(right, summaryMode) - getPromptRepresentativeScore(left, summaryMode) ||
       left.centerPoint.distanceMeters - right.centerPoint.distanceMeters ||
       left.osmId - right.osmId,
   );
   const representativeEntries = sortedEntries
-    .filter((entry) => entry.widestSpan.angleWidthDegrees >= config.representativeMinAngleDegrees)
+    .filter((entry) =>
+      summaryMode === 'detailed' && entry.category === 'line'
+        ? (entry.lineLengthMeters || 0) > 0
+        : entry.widestSpan.angleWidthDegrees >= config.representativeMinAngleDegrees,
+    )
     .slice(0, config.representativeLimit);
   const anchors = representativeEntries.length > 0 ? representativeEntries : sortedEntries.slice(0, 1);
   // 同一群里不把全部要素都展开，避免中远距离 prompt 过长失控。
   const omittedCount = Math.max(0, entries.length - anchors.length);
   const directionCluster = entries[0]!.directionCluster;
-  const shouldShowOmissionSummary = omittedCount > 0 && entries.length > config.omissionSummaryMinGroupSize;
+  const shouldShowOmissionSummary = summaryMode === 'concise'
+    ? omittedCount > 0
+    : omittedCount > 0 && entries.length > config.omissionSummaryMinGroupSize;
   const hint = shouldShowOmissionSummary
     ? `，共${entries.length}个要素，展示${anchors.length}个代表要素，其余${omittedCount}个仅保留数量`
     : '';
@@ -214,9 +336,26 @@ function buildPolarClusterSummaryLines(level: 1 | 2 | 3, entries: NormalizedPola
 
 function buildPolarFeatureLines(summary: NormalizedPolarFeatureSummary): string[] {
   const detailTags = summary.visibleTags.map((tag) => `${tag.key}: ${tag.value}`);
+  const baseLines = [
+    `* (id=${summary.featureId})`,
+  ];
+
+  if (summary.category === 'line' && summary.linePoints && summary.linePoints.length > 0) {
+    const pointText = summary.linePoints
+      .map((point, index) => `点${index + 1}${formatPolarSample(point)}`)
+      .join('，');
+    return [
+      ...baseLines,
+      `  * 中心点${formatPolarSample(summary.centerPoint)}`,
+      `  * 线顶点抽样：${pointText}`,
+      `  * 主走向${formatAngle(summary.orientationDegrees || 0)}`,
+      `  * 起终点开角：边界点1${formatPolarSample(summary.widestSpan.clockwiseEarlyPoint)}，边界点2${formatPolarSample(summary.widestSpan.clockwiseLatePoint)}，角宽${formatAngle(summary.widestSpan.angleWidthDegrees)}`,
+      ...detailTags.map((tag) => `  * ${tag}`),
+    ];
+  }
 
   return [
-    `* (id=${summary.featureId})`,
+    ...baseLines,
     `  * 最近点${formatPolarSample(summary.nearestPoint)}，最远点${formatPolarSample(summary.farthestPoint)}，中心点${formatPolarSample(summary.centerPoint)}`,
     `  * 边界点1${formatPolarSample(summary.widestSpan.clockwiseEarlyPoint)}，边界点2${formatPolarSample(summary.widestSpan.clockwiseLatePoint)}，视野角宽${formatAngle(summary.widestSpan.angleWidthDegrees)}`,
     ...detailTags.map((tag) => `  * ${tag}`),
@@ -248,7 +387,7 @@ function getFeatureDisplayTitle(feature: DbFeatureDetail): string {
     return brand;
   }
 
-  for (const key of [...POI_TAG_KEYS, ...ROAD_TAG_KEYS, ...AREA_TAG_KEYS, 'building'] as const) {
+  for (const key of [...POI_PRIMARY_LABEL_KEYS, ...LINE_PRIMARY_LABEL_KEYS, ...AREA_PRIMARY_LABEL_KEYS, ...BUILDING_PRIMARY_LABEL_KEYS] as const) {
     const value = trimTagValue(feature.tags[key]);
     if (value) {
       return `${key}:${value}`;
@@ -274,8 +413,92 @@ function collectImportantTags(feature: DbFeatureDetail): string[] {
   });
 }
 
-function isBuildingOrPoiCategory(category: NormalizedPolarFeatureSummary['category']): boolean {
-  return category === 'building' || category === 'poi';
+function getPromptRepresentativeScore(summary: NormalizedPolarFeatureSummary, summaryMode: PromptSummaryMode): number {
+  if (summaryMode === 'concise') {
+    return summary.widestSpan.angleWidthDegrees;
+  }
+
+  if (summary.category === 'line') {
+    return summary.lineLengthMeters || 0;
+  }
+
+  return summary.widestSpan.angleWidthDegrees;
+}
+
+function isDenseConciseGroup(level: 1 | 2 | 3, entries: NormalizedPolarFeatureSummary[]): boolean {
+  const first = entries[0];
+  if (!first) {
+    return false;
+  }
+
+  return first.directionCluster.memberCount >= CONCISE_DENSE_MEMBER_COUNT_BY_CATEGORY_AND_LEVEL[first.category][level];
+}
+
+function isSignificantConciseFeature(
+  level: 1 | 2 | 3,
+  summary: NormalizedPolarFeatureSummary,
+  detail: DbFeatureDetail,
+): boolean {
+  switch (summary.category) {
+    case 'building':
+      return summary.widestSpan.angleWidthDegrees >= CONCISE_BUILDING_MIN_ANGLE_BY_LEVEL[level] || isTallBuilding(detail.tags);
+    case 'poi':
+      return isSignificantPoi(detail.tags);
+    case 'line':
+      return summary.widestSpan.angleWidthDegrees >= CONCISE_LINE_MIN_ANGLE_BY_LEVEL[level];
+    case 'area':
+      return summary.widestSpan.angleWidthDegrees >= CONCISE_AREA_MIN_ANGLE_BY_LEVEL[level];
+  }
+}
+
+function isSignificantPoi(tags: Record<string, string>): boolean {
+  for (const key of POI_PRIMARY_LABEL_KEYS) {
+    const value = trimTagValue(tags[key]);
+    if (value && CONCISE_SIGNIFICANT_POI_TAGS.has(`${key}:${value}`)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isTallBuilding(tags: Record<string, string>): boolean {
+  const heightMeters = parseHeightMeters(tags.height);
+  if (heightMeters !== null && heightMeters >= SIGNIFICANT_BUILDING_MIN_HEIGHT_METERS) {
+    return true;
+  }
+
+  const levelValues = [parseIntegerTag(tags['building:levels']), parseIntegerTag(tags.level)];
+  return levelValues.some((value) => value !== null && value >= SIGNIFICANT_BUILDING_MIN_LEVELS);
+}
+
+function parseHeightMeters(value: string | undefined): number | null {
+  const trimmed = trimTagValue(value);
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = trimmed.toLowerCase().replace(/,/g, '');
+  const parsed = Number.parseFloat(normalized);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  if (normalized.includes('ft') || normalized.includes('feet')) {
+    return parsed * 0.3048;
+  }
+
+  return parsed;
+}
+
+function parseIntegerTag(value: string | undefined): number | null {
+  const trimmed = trimTagValue(value);
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function formatPolarSample(sample: { distanceMeters: number; bearingDegrees: number }): string {

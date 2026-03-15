@@ -1,4 +1,3 @@
-import type { Geometry, Point, Polygon, MultiPolygon } from 'geojson';
 import type { PoolClient } from 'pg';
 import { query, withTransaction } from '../db/client.js';
 import { loadServiceSql } from '../db/sqlLoader.js';
@@ -14,7 +13,7 @@ import type {
   DbMicroGridCellRecord,
   DbPolarFeatureRecord,
 } from './dbSceneTypes.js';
-import { AREA_TAG_KEYS, POI_TAG_KEYS, ROAD_TAG_KEYS } from './overpassLabels.js';
+import { getStructuredTagColumns, matchFeatureCategory } from './osmFeatureConfig.js';
 import type { GamePosition } from '../types/game.js';
 
 type BuildingRow = {
@@ -60,12 +59,14 @@ type PolarFeatureRow = {
   geometry_type: string;
   sample_coordinates: Array<[number, number]> | null;
   center_coordinate: [number, number] | null;
+  line_path_coordinates: Array<[number, number]> | null;
+  line_vertex_coordinates: Array<[number, number]> | null;
 };
 
-const BUILDING_TAG_COLUMNS = ['name', 'building', 'height', 'level', 'building:levels'] as const;
-const POI_TAG_COLUMNS = ['name', 'brand', ...POI_TAG_KEYS] as const;
-const ROAD_TAG_COLUMNS = ['name', ...ROAD_TAG_KEYS] as const;
-const AREA_TAG_COLUMNS = ['name', ...AREA_TAG_KEYS] as const;
+const BUILDING_TAG_COLUMNS = getStructuredTagColumns('building');
+const POI_TAG_COLUMNS = getStructuredTagColumns('poi');
+const ROAD_TAG_COLUMNS = getStructuredTagColumns('line');
+const AREA_TAG_COLUMNS = getStructuredTagColumns('area');
 const fetchMicroGridFromDbSqlPromise = loadServiceSql('osmRepository/fetchMicroGridFromDb.sql');
 const fetchPolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fetchPolarFeaturesFromDb.sql');
 const fetchBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchBuildingDetails.sql');
@@ -86,27 +87,26 @@ export async function syncNormalizedFeaturesToDb(
     let areas = 0;
 
     for (const feature of features) {
-      if (isDbBuildingFeature(feature)) {
-        await upsertBuildingFeature(client, feature);
-        buildings += 1;
-        continue;
-      }
-
-      if (isDbPoiFeature(feature)) {
-        await upsertPoiFeature(client, feature);
-        pois += 1;
-        continue;
-      }
-
-      if (isDbLineFeature(feature)) {
-        await upsertLineFeature(client, feature);
-        lines += 1;
-        continue;
-      }
-
-      if (isDbAreaFeature(feature)) {
-        await upsertAreaFeature(client, feature);
-        areas += 1;
+      const category = matchFeatureCategory(feature);
+      switch (category) {
+        case 'building':
+          await upsertBuildingFeature(client, feature);
+          buildings += 1;
+          break;
+        case 'poi':
+          await upsertPoiFeature(client, feature);
+          pois += 1;
+          break;
+        case 'line':
+          await upsertLineFeature(client, feature);
+          lines += 1;
+          break;
+        case 'area':
+          await upsertAreaFeature(client, feature);
+          areas += 1;
+          break;
+        default:
+          break;
       }
     }
 
@@ -207,6 +207,12 @@ export async function fetchPolarFeaturesFromDb(request: NormalizedOverpassReques
     centerCoordinate: row.center_coordinate
       ? [Number(row.center_coordinate[0]), Number(row.center_coordinate[1])]
       : null,
+    linePathCoordinates: row.line_path_coordinates
+      ? row.line_path_coordinates.map((pair) => [Number(pair[0]), Number(pair[1])])
+      : undefined,
+    lineVertexCoordinates: row.line_vertex_coordinates
+      ? row.line_vertex_coordinates.map((pair) => [Number(pair[0]), Number(pair[1])])
+      : undefined,
   }));
 }
 
@@ -258,6 +264,7 @@ async function upsertBuildingFeature(client: PoolClient, feature: NormalizedFeat
       JSON.stringify(feature.geometry),
       tags.name || null,
       tags.building || null,
+      tags.man_made || null,
       tags.height || null,
       tags.level || null,
       tags['building:levels'] || null,
@@ -290,6 +297,8 @@ async function upsertPoiFeature(client: PoolClient, feature: NormalizedFeature):
       tags.leisure || null,
       tags.craft || null,
       tags.healthcare || null,
+      tags.natural || null,
+      tags.man_made || null,
       JSON.stringify(tagsExtra),
       JSON.stringify(feature.properties.relations),
       JSON.stringify(feature.properties.meta),
@@ -313,6 +322,7 @@ async function upsertLineFeature(client: PoolClient, feature: NormalizedFeature)
       tags.highway || null,
       tags.railway || null,
       tags.waterway || null,
+      tags.man_made || null,
       JSON.stringify(tagsExtra),
       JSON.stringify(feature.properties.relations),
       JSON.stringify(feature.properties.meta),
@@ -343,35 +353,6 @@ async function upsertAreaFeature(client: PoolClient, feature: NormalizedFeature)
       feature.properties.tainted,
     ],
   );
-}
-
-function isDbBuildingFeature(feature: NormalizedFeature): boolean {
-  return isPolygonGeometry(feature.geometry) && typeof feature.properties.tags.building === 'string';
-}
-
-function isDbPoiFeature(feature: NormalizedFeature): boolean {
-  // 点要素只保留明确可视为 POI 的功能点。
-  return isPointGeometry(feature.geometry) && POI_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
-}
-
-function isDbLineFeature(feature: NormalizedFeature): boolean {
-  return isLineGeometry(feature.geometry) && ROAD_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
-}
-
-function isDbAreaFeature(feature: NormalizedFeature): boolean {
-  return isPolygonGeometry(feature.geometry) && AREA_TAG_KEYS.some((key) => typeof feature.properties.tags[key] === 'string');
-}
-
-function isPointGeometry(geometry: Geometry): geometry is Point {
-  return geometry.type === 'Point';
-}
-
-function isLineGeometry(geometry: Geometry): boolean {
-  return geometry.type === 'LineString' || geometry.type === 'MultiLineString';
-}
-
-function isPolygonGeometry(geometry: Geometry): geometry is Polygon | MultiPolygon {
-  return geometry.type === 'Polygon' || geometry.type === 'MultiPolygon';
 }
 
 function omitKeys<T extends string>(source: Record<string, string>, keys: readonly T[]): Record<string, string> {

@@ -92,8 +92,9 @@ export async function loadSceneContext(position: GamePosition, radius = 1000): P
     diagnostics: largeScene.diagnostics,
     microGrid: largeScene.microGrid,
     polarView: largeScene.polarView,
-    largeSummary: largeScene.summary,
-    smallSummary: smallScene.summary,
+    detailedSummary1000: largeScene.detailedSummary,
+    conciseSummary1000: largeScene.conciseSummary,
+    conciseSummary200: smallScene.conciseSummary,
   };
 }
 
@@ -101,7 +102,8 @@ async function loadProjectedScene(request: NormalizedOverpassRequest): Promise<{
   diagnostics: SceneContext['diagnostics'];
   microGrid: SceneContext['microGrid'];
   polarView: SceneContext['polarView'];
-  summary: string;
+  detailedSummary: string;
+  conciseSummary: string;
 }> {
   // 这里不重新实现空间投影逻辑，而是直接复用现有 DB-native debug 链路：
   // 取 DB 要素 -> 组装 microGrid/polar -> 生成 prompt summary。
@@ -130,8 +132,16 @@ async function loadProjectedScene(request: NormalizedOverpassRequest): Promise<{
     }),
     microGrid,
     polarView,
-    summary: buildNormalizationPrompt({
+    detailedSummary: buildNormalizationPrompt({
       request,
+      summaryMode: 'detailed',
+      microGrid,
+      polarView,
+      featureDetails: featureDetailIndex,
+    }),
+    conciseSummary: buildNormalizationPrompt({
+      request,
+      summaryMode: 'concise',
       microGrid,
       polarView,
       featureDetails: featureDetailIndex,

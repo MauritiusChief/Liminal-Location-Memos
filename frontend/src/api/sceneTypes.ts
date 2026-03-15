@@ -1,5 +1,7 @@
 export interface PromptPreview {
-  userPrompt: string;
+  detailedUserPrompt1000: string;
+  conciseUserPrompt1000: string;
+  conciseUserPrompt200: string;
 }
 
 export interface RelationReference {
@@ -88,6 +90,13 @@ export interface NormalizedPolarFeatureSummary {
   farthestPoint: PolarCoordinateSample;
   centerPoint: PolarCoordinateSample;
   widestSpan: PolarAngularSpan;
+  // 线类会额外暴露 4 个代表顶点；
+  // 它们与 centerPoint 分离，供回归和 debug 展示使用。
+  linePoints?: PolarCoordinateSample[];
+  // 线类的 SVG 走完整可见路径，而不是把 centerPoint 混进路径里。
+  linePath?: PolarCoordinateSample[];
+  orientationDegrees?: number;
+  lineLengthMeters?: number;
 }
 
 export interface NormalizedPolarLevel {

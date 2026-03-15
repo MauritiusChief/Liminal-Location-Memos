@@ -39,6 +39,12 @@ export interface DbPolarFeatureRecord {
   geometryType: string;
   sampleCoordinates: [number, number][];
   centerCoordinate: [number, number] | null;
+  // line 会额外带一条“按可见顺序排列”的路径，
+  // 供前端 SVG 直接画折线，不再把线硬压成扇区。
+  linePathCoordinates?: [number, number][];
+  // line 顶点序列和 centerPoint 分离：
+  // 后续 4 点抽样与回归都只从这组顶点里挑。
+  lineVertexCoordinates?: [number, number][];
 }
 
 // diagnostics 也改成围绕 DB-native 投影结果，而不是 GeoJSON 统计。

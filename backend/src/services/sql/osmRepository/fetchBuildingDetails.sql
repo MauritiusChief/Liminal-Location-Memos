@@ -42,6 +42,8 @@ assigned_pois AS (
     p.leisure,
     p.craft,
     p.healthcare,
+    p."natural",
+    p.man_made,
     p.tags_extra,
     p.relations,
     p.meta,
@@ -63,6 +65,7 @@ SELECT
     jsonb_build_object(
       'name', b.name,
       'building', b.building,
+      'man_made', b.man_made,
       'height', b.height,
       'level', b.level,
       'building:levels', b.building_levels
@@ -86,7 +89,9 @@ SELECT
             'tourism', ap.tourism,
             'leisure', ap.leisure,
             'craft', ap.craft,
-            'healthcare', ap.healthcare
+            'healthcare', ap.healthcare,
+            'natural', ap."natural",
+            'man_made', ap.man_made
           ) || ap.tags_extra
         ),
         'relations', ap.relations,
@@ -109,6 +114,7 @@ GROUP BY
   b.geom,
   b.name,
   b.building,
+  b.man_made,
   b.height,
   b.level,
   b.building_levels,
