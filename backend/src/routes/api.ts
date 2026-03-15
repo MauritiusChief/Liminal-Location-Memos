@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
-import type { DebugSceneFeatureDetail } from '../services/scene/sceneTypes.js';
+import type { SceneFeatureDetail } from '../services/scene/sceneTypes.js';
 import { generateReplyWithSystemPrompt } from '../services/llm.js';
 import { buildNormalizedMicroGrid } from '../services/overpassGrid.js';
 import {
-  fetchFeatureDetailsFromDb,
   fetchMicroGridFromDb,
-  fetchPolarFeaturesFromDb,
+  fetchSceneFeatureDetailsFromDb,
+  fetchScenePolarFeaturesFromDb,
 } from '../services/osmRepository.js';
 import { syncOverpassCoverage } from '../services/overpass/overpassSync.js';
 import { buildNormalizedPolarView } from '../services/overpassPolar.js';
@@ -31,7 +31,7 @@ interface OverpassRequestBody {
 export const apiRouter = Router();
 
 function buildDbDiagnostics(input: {
-  featureDetails: DebugSceneFeatureDetail[];
+  featureDetails: SceneFeatureDetail[];
   microGrid: ReturnType<typeof buildNormalizedMicroGrid>;
   polarView: ReturnType<typeof buildNormalizedPolarView>;
 }) {
@@ -55,16 +55,16 @@ function buildDbDiagnostics(input: {
   };
 }
 
-function buildDebugSceneFeatureDetailIndex(featureDetails: DebugSceneFeatureDetail[]): Map<string, DebugSceneFeatureDetail> {
+function buildDebugSceneFeatureDetailIndex(featureDetails: SceneFeatureDetail[]): Map<string, SceneFeatureDetail> {
   // 统一做成 featureId -> detail 索引，避免 grid/polar/prompt 各自重复扫描数组。
   return new Map(featureDetails.map((feature) => [feature.featureId, feature]));
 }
 
 function buildNormalizationDebugPayload(input: {
   normalizedRequest: NormalizedOverpassRequest;
-  featureDetails: DebugSceneFeatureDetail[];
+  featureDetails: SceneFeatureDetail[];
   microGridRecords: Awaited<ReturnType<typeof fetchMicroGridFromDb>>;
-  polarRecords: Awaited<ReturnType<typeof fetchPolarFeaturesFromDb>>;
+  polarRecords: Awaited<ReturnType<typeof fetchScenePolarFeaturesFromDb>>;
 }) {
   const featureDetailIndex = buildDebugSceneFeatureDetailIndex(input.featureDetails);
   // 这里是 DB-native 调试链路的汇合点：
@@ -288,9 +288,9 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
 
   try {
     const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-      fetchFeatureDetailsFromDb(normalizedRequest),
+      fetchSceneFeatureDetailsFromDb(normalizedRequest, 'debug'),
       fetchMicroGridFromDb(normalizedRequest),
-      fetchPolarFeaturesFromDb(normalizedRequest),
+      fetchScenePolarFeaturesFromDb(normalizedRequest, 'debug'),
     ]);
     const debugPayload = buildNormalizationDebugPayload({
       normalizedRequest,

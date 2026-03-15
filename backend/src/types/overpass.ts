@@ -1,7 +1,7 @@
 import type {
   DbFeatureCategory,
-  DebugSceneFeatureDetail,
   DbNormalizationDiagnostics,
+  SceneFeatureDetail,
 } from '../services/scene/sceneTypes.js';
 import type { NormalizedMicroGrid, NormalizedMicroGridCell } from '../services/overpassGrid.js';
 import type { SummaryPreviewMode } from '../services/scene/sceneSummaryService.js';
@@ -46,7 +46,7 @@ export interface NormalizedOverpassResponseBody {
 export interface DbDebugLoadResponseBody {
   query: string;
   diagnostics: DbNormalizationDiagnostics;
-  featureSummary: DebugSceneFeatureDetail[];
+  featureSummary: SceneFeatureDetail[];
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
 }
@@ -65,7 +65,6 @@ export interface SummaryPreviewResponseBody {
 export type {
   ContainedPoi,
   DbFeatureCategory,
-  DebugSceneFeatureDetail,
   DbNormalizationDiagnostics,
   NormalizedFeatureProperties,
   NormalizedMicroGrid,
@@ -79,4 +78,5 @@ export type {
   PolarCoordinateSample,
   PolarDirectionCluster,
   RelationReference,
+  SceneFeatureDetail,
 };

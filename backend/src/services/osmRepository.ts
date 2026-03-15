@@ -8,7 +8,6 @@ import type {
   RelationReference,
 } from './overpassNormalization.js';
 import type {
-  DebugSceneFeatureDetail,
   DbFeatureCategory,
   SceneFeatureDetail,
   PolarFeatureRecord,
@@ -27,22 +26,6 @@ type BuildingRow = {
   meta: Record<string, string | number>;
   tainted: boolean;
   contained_pois: ContainedPoi[] | null;
-};
-
-type GameSceneBuildingRow = {
-  feature_id: string;
-  osm_id: number;
-  geometry_type: string;
-  tags: Record<string, string>;
-  contained_pois: Array<{ tags: Record<string, string> }> | null;
-};
-
-type SceneFeatureDetailRow = {
-  feature_id: string;
-  osm_id: number;
-  category: DbFeatureCategory;
-  geometry_type: string;
-  tags: Record<string, string>;
 };
 
 type FeatureDetailRow = {
@@ -80,32 +63,20 @@ type PolarFeatureRow = {
   line_vertex_coordinates: Array<[number, number]> | null;
 };
 
-type GameScenePolarFeatureRow = {
-  feature_id: string;
-  osm_id: number;
-  category: DbFeatureCategory;
-  geometry_type: string;
-  sample_coordinates: Array<[number, number]> | null;
-  center_coordinate: [number, number] | null;
-  line_path_coordinates: Array<[number, number]> | null;
-  line_vertex_coordinates: Array<[number, number]> | null;
-};
-
 const BUILDING_TAG_COLUMNS = getStructuredTagColumns('building');
 const POI_TAG_COLUMNS = getStructuredTagColumns('poi');
 const ROAD_TAG_COLUMNS = getStructuredTagColumns('line');
 const AREA_TAG_COLUMNS = getStructuredTagColumns('area');
 const fetchMicroGridFromDbSqlPromise = loadServiceSql('osmRepository/fetchMicroGridFromDb.sql');
-const fetchPolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fetchPolarFeaturesFromDb.sql');
-const fetchBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchBuildingDetails.sql');
-const fetchNonBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchNonBuildingDetails.sql');
-const fetchGameScenePolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fetchGameScenePolarFeaturesFromDb.sql');
-const fetchGameSceneBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchGameSceneBuildingDetails.sql');
-const fetchGameSceneNonBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchGameSceneNonBuildingDetails.sql');
+const fetchScenePolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fetchScenePolarFeaturesFromDb.sql');
+const fetchSceneBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneBuildingDetails.sql');
+const fetchSceneNonBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneNonBuildingDetails.sql');
 const upsertBuildingFeatureSqlPromise = loadServiceSql('osmRepository/upsertBuildingFeature.sql');
 const upsertPoiFeatureSqlPromise = loadServiceSql('osmRepository/upsertPoiFeature.sql');
 const upsertLineFeatureSqlPromise = loadServiceSql('osmRepository/upsertLineFeature.sql');
 const upsertAreaFeatureSqlPromise = loadServiceSql('osmRepository/upsertAreaFeature.sql');
+
+export type SceneDataProfile = 'debug' | 'game';
 
 export async function syncNormalizedFeaturesToDb(
   features: NormalizedFeature[],
@@ -153,9 +124,17 @@ export async function syncNormalizedFeaturesToDb(
   });
 }
 
-// 这层把“后续文案与调试真正会消费的要素字段”统一取回。
-// 建筑单独走一条查询，是为了顺手把 containedPois 一并在 SQL 里算好。
-export async function fetchFeatureDetailsFromDb(request: NormalizedOverpassRequest): Promise<DebugSceneFeatureDetail[]> {
+/**
+ * 这个函数把“后续文案与调试真正会消费的要素字段”统一取回。
+ * 建筑单独走一条查询，是为了顺手把 containedPois 一并在 SQL 里算好。
+ * @param request
+ * @param _profile 暂时没用，未来可区分 debug 模式和常规模式的 SQL
+ * @returns
+ */
+export async function fetchSceneFeatureDetailsFromDb(
+  request: NormalizedOverpassRequest,
+  _profile: SceneDataProfile = 'debug',
+): Promise<SceneFeatureDetail[]> {
   const [buildingRows, otherRows] = await Promise.all([
     fetchBuildingDetails(request),
     fetchNonBuildingDetails(request),
@@ -171,7 +150,7 @@ export async function fetchFeatureDetailsFromDb(request: NormalizedOverpassReque
       tags: row.tags || {},
       relations: row.relations || [],
       meta: row.meta || {},
-      tainted: row.tainted,
+      tainted: row.tainted ?? false,
       containedPois: row.contained_pois && row.contained_pois.length > 0 ? row.contained_pois : undefined,
     })),
     ...otherRows.map((row) => ({
@@ -183,42 +162,19 @@ export async function fetchFeatureDetailsFromDb(request: NormalizedOverpassReque
       tags: row.tags || {},
       relations: row.relations || [],
       meta: row.meta || {},
-      tainted: row.tainted,
+      tainted: row.tainted ?? false,
     })),
   ];
 }
 
-export async function fetchSceneFeatureDetailsFromDb(
-  request: NormalizedOverpassRequest,
-): Promise<SceneFeatureDetail[]> {
-  const [buildingRows, otherRows] = await Promise.all([
-    fetchGameSceneBuildingDetails(request),
-    fetchGameSceneNonBuildingDetails(request),
-  ]);
-
-  return [
-    ...buildingRows.map((row) => ({
-      featureId: row.feature_id,
-      osmId: row.osm_id,
-      category: 'building' as const,
-      geometryType: row.geometry_type,
-      tags: row.tags || {},
-      containedPois: row.contained_pois && row.contained_pois.length > 0 ? row.contained_pois : undefined,
-    })),
-    ...otherRows.map((row) => ({
-      featureId: row.feature_id,
-      osmId: row.osm_id,
-      category: row.category,
-      geometryType: row.geometry_type,
-      tags: row.tags || {},
-    })),
-  ];
-}
-
-// grid 的空间命中全部下沉到 PostGIS：
-// 1. 生成 12x12 固定网格
-// 2. 用 cell center 判定 building/area 基底
-// 3. 用 cell bbox 收集 poi / road 叠加层
+/**
+ * grid 的空间命中全部下沉到 PostGIS：
+ * 1. 生成 12x12 固定网格
+ * 2. 用 cell center 判定 building/area 基底
+ * 3. 用 cell bbox 收集 poi / road 叠加层
+ * @param request
+ * @returns
+ */
 export async function fetchMicroGridFromDb(request: NormalizedOverpassRequest): Promise<DbMicroGridCellRecord[]> {
   if (request.radius <= 50) {
     return [];
@@ -241,15 +197,23 @@ export async function fetchMicroGridFromDb(request: NormalizedOverpassRequest): 
   }));
 }
 
-// polar 的 DB 查询只做“取候选 + 裁剪几何 + 导出坐标样本”。
-// bearing、群聚、视野角宽这类叙述性压缩继续保留在 TS，便于调参和阅读。
-export async function fetchPolarFeaturesFromDb(request: NormalizedOverpassRequest): Promise<PolarFeatureRecord[]> {
+/**
+ * polar 的 DB 查询只做“取候选 + 裁剪几何 + 导出坐标样本”。
+ * bearing、群聚、视野角宽这类叙述性压缩继续保留在 TS，便于调参和阅读。
+ * @param request
+ * @param _profile 暂时没用，未来可区分 debug 模式和常规模式的 SQL
+ * @returns
+ */
+export async function fetchScenePolarFeaturesFromDb(
+  request: NormalizedOverpassRequest,
+  _profile: SceneDataProfile = 'debug',
+): Promise<PolarFeatureRecord[]> {
   const radiusMeters = Math.min(request.radius, 1000);
   if (radiusMeters <= 30) {
     return [];
   }
 
-  const sql = await fetchPolarFeaturesFromDbSqlPromise;
+  const sql = await fetchScenePolarFeaturesFromDbSqlPromise;
   const result = await query<PolarFeatureRow>(
     sql,
     [request.lon, request.lat, radiusMeters],
@@ -257,39 +221,7 @@ export async function fetchPolarFeaturesFromDb(request: NormalizedOverpassReques
 
   return result.rows.map((row) => ({
     featureId: row.feature_id,
-    osmType: row.osm_type,
-    osmId: row.osm_id,
-    category: row.category,
-    geometryType: row.geometry_type,
-    sampleCoordinates: (row.sample_coordinates || []).map((pair) => [Number(pair[0]), Number(pair[1])]),
-    centerCoordinate: row.center_coordinate
-      ? [Number(row.center_coordinate[0]), Number(row.center_coordinate[1])]
-      : null,
-    linePathCoordinates: row.line_path_coordinates
-      ? row.line_path_coordinates.map((pair) => [Number(pair[0]), Number(pair[1])])
-      : undefined,
-    lineVertexCoordinates: row.line_vertex_coordinates
-      ? row.line_vertex_coordinates.map((pair) => [Number(pair[0]), Number(pair[1])])
-      : undefined,
-  }));
-}
-
-export async function fetchGameScenePolarFeaturesFromDb(
-  request: NormalizedOverpassRequest,
-): Promise<PolarFeatureRecord[]> {
-  const radiusMeters = Math.min(request.radius, 1000);
-  if (radiusMeters <= 30) {
-    return [];
-  }
-
-  const sql = await fetchGameScenePolarFeaturesFromDbSqlPromise;
-  const result = await query<GameScenePolarFeatureRow>(
-    sql,
-    [request.lon, request.lat, radiusMeters],
-  );
-
-  return result.rows.map((row) => ({
-    featureId: row.feature_id,
+    osmType: row.osm_type || undefined,
     osmId: row.osm_id,
     category: row.category,
     geometryType: row.geometry_type,
@@ -319,9 +251,14 @@ export async function findNearestCoverageDistanceMeters(position: GamePosition):
   return value === null || value === undefined ? null : Number(value);
 }
 
-// 这里取的是“建筑详情 + 建筑内 POI”，供标签、grid 补充细节、prompt 共用。
+/**
+ * 这里取的是“建筑详情 + 建筑内 POI”，供标签、grid 补充细节、prompt 共用。
+ * 注：为了兼容 debug 模式，SQL 所取的信息是超量的。
+ * @param request
+ * @returns
+ */
 async function fetchBuildingDetails(request: NormalizedOverpassRequest): Promise<BuildingRow[]> {
-  const sql = await fetchBuildingDetailsSqlPromise;
+  const sql = await fetchSceneBuildingDetailsSqlPromise;
   const result = await query<BuildingRow>(
     sql,
     [request.lon, request.lat, request.radius],
@@ -330,32 +267,15 @@ async function fetchBuildingDetails(request: NormalizedOverpassRequest): Promise
   return result.rows;
 }
 
-async function fetchGameSceneBuildingDetails(request: NormalizedOverpassRequest): Promise<GameSceneBuildingRow[]> {
-  const sql = await fetchGameSceneBuildingDetailsSqlPromise;
-  const result = await query<GameSceneBuildingRow>(
-    sql,
-    [request.lon, request.lat, request.radius],
-  );
-
-  return result.rows;
-}
-
-// 非 building 的详情直接从调试视图取，避免在 TS 里重复拼 tags。
+/**
+ *  非 building 的详情直接从调试视图取，避免在 TS 里重复拼 tags。
+ * 注：为了兼容 debug 模式，SQL 所取的信息是超量的。
+ * @param request
+ * @returns
+ */
 async function fetchNonBuildingDetails(request: NormalizedOverpassRequest): Promise<FeatureDetailRow[]> {
-  const sql = await fetchNonBuildingDetailsSqlPromise;
+  const sql = await fetchSceneNonBuildingDetailsSqlPromise;
   const result = await query<FeatureDetailRow>(
-    sql,
-    [request.lon, request.lat, request.radius],
-  );
-
-  return result.rows;
-}
-
-async function fetchGameSceneNonBuildingDetails(
-  request: NormalizedOverpassRequest,
-): Promise<SceneFeatureDetailRow[]> {
-  const sql = await fetchGameSceneNonBuildingDetailsSqlPromise;
-  const result = await query<SceneFeatureDetailRow>(
     sql,
     [request.lon, request.lat, request.radius],
   );

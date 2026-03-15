@@ -15,19 +15,11 @@ export interface SceneFeatureDetail {
   category: DbFeatureCategory;
   geometryType: string;
   tags: Record<string, string>;
-  containedPois?: ContainedPoiString[];
-}
-
-/**
- * DB-native 调试链路用。
- * 除了 prompt / grid / polar 的公共字段之外，还保留调试视图要展示的元数据。
- */
-export interface DebugSceneFeatureDetail extends SceneFeatureDetail {
-  osmType: string;
-  relations: RelationReference[];
-  meta: Record<string, string | number>;
-  tainted: boolean;
-  containedPois?: ContainedPoi[];
+  osmType?: string;
+  relations?: RelationReference[];
+  meta?: Record<string, string | number>;
+  tainted?: boolean;
+  containedPois?: ContainedPoiString[] | ContainedPoi[];
 }
 
 // Micro grid 在 SQL 里已经完成了“这个格子命中了谁”的空间判断；

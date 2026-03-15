@@ -3,14 +3,12 @@ import { type NormalizedOverpassRequest } from '../overpassNormalization.js';
 import { buildNormalizedPolarView } from '../overpassPolar.js';
 import { buildNormalizationPrompt, type PromptSummaryMode } from '../overpassPrompt.js';
 import {
-  fetchFeatureDetailsFromDb,
   fetchSceneFeatureDetailsFromDb,
-  fetchGameScenePolarFeaturesFromDb,
   fetchMicroGridFromDb,
-  fetchPolarFeaturesFromDb,
+  fetchScenePolarFeaturesFromDb,
+  type SceneDataProfile,
 } from '../osmRepository.js';
 import type {
-  DebugSceneFeatureDetail,
   DbNormalizationDiagnostics,
   SceneFeatureDetail,
 } from './sceneTypes.js';
@@ -94,53 +92,14 @@ export function resolveSceneContextSummaryMode(summaryMode: 'concise_near' | 'co
   }
 }
 
-/**
- * TODO 若 DebugSceneFeatureDetail 与 SceneFeatureDetail 合并则 loadDebugProjectedScene 与 loadDebugProjectedScene 合并
- * @param request
- * @returns
- */
-export async function loadDebugProjectedScene(request: NormalizedOverpassRequest): Promise<ProjectedScene<DebugSceneFeatureDetail>> {
+export async function loadProjectedScene(
+  request: NormalizedOverpassRequest,
+  profile: SceneDataProfile,
+): Promise<ProjectedScene<SceneFeatureDetail>> {
   const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-    fetchFeatureDetailsFromDb(request),
+    fetchSceneFeatureDetailsFromDb(request, profile),
     fetchMicroGridFromDb(request),
-    fetchPolarFeaturesFromDb(request),
-  ]);
-  const featureDetailIndex = buildFeatureDetailIndex(featureDetails);
-  const microGrid = buildNormalizedMicroGrid({
-    request,
-    cells: microGridRecords,
-    featureDetails: featureDetailIndex,
-  });
-  const polarView = buildNormalizedPolarView({
-    records: polarRecords,
-    featureDetails: featureDetailIndex,
-    request,
-  });
-
-  return {
-    request,
-    diagnostics: buildDbDiagnostics({
-      featureDetails,
-      microGrid,
-      polarView,
-    }),
-    featureDetails,
-    featureDetailIndex,
-    microGrid,
-    polarView,
-  };
-}
-
-/**
- * TODO 若 DebugSceneFeatureDetail 与 SceneFeatureDetail 合并则 loadDebugProjectedScene 与 loadDebugProjectedScene 合并
- * @param request
- * @returns
- */
-export async function loadGameProjectedScene(request: NormalizedOverpassRequest): Promise<ProjectedScene<SceneFeatureDetail>> {
-  const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-    fetchSceneFeatureDetailsFromDb(request),
-    fetchMicroGridFromDb(request),
-    fetchGameScenePolarFeaturesFromDb(request),
+    fetchScenePolarFeaturesFromDb(request, profile),
   ]);
   const featureDetailIndex = buildFeatureDetailIndex(featureDetails);
   const microGrid = buildNormalizedMicroGrid({
@@ -194,11 +153,11 @@ export async function buildDebugSummaryPreview(
   summaryMode: SummaryPreviewMode,
 ): Promise<string> {
   const config = toPromptBuildConfig(summaryMode);
-  const scene = await loadDebugProjectedScene({
+  const scene = await loadProjectedScene({
     lat: position.lat,
     lon: position.lon,
     radius: config.radius,
-  });
+  }, 'debug');
 
   return buildSummaryFromProjectedScene(scene, summaryMode);
 }
