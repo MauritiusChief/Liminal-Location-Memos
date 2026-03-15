@@ -163,7 +163,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
       });
     } else if (modelResponse.toolCall.name === 'look_far') {
       console.log('[DEBUG] runGameChatTurn() - toolCall - look_far');
-      promptSummaryMode = 'detailed_far';
+      promptSummaryMode = 'concise_far';
       const lookFarResult: LookFarToolResult = buildSceneContextSnapshotPayload({
         sceneContext,
         largeDescription: activeLargeDescription.descriptionText,
