@@ -6,30 +6,25 @@ export type PromptSummaryMode = 'detailed' | 'concise';
 /**
  * representativeLimit: 每个 feature cluster 最多展示 feature 数量的上限；
  * representativeMinAngleDegrees: feature cluster 中的一个被展示的 feature 应当满足的视野角的底线；
- * omissionSummaryMinGroupSize: 为避免 feature cluster 每个 feature 都不满足视野角底线导致这个 cluster 直接消失而设置的 feature 展示数量下限；
  */
 const POLAR_LEVEL_PROMPT_CONFIG: Record<
   1 | 2 | 3,
   {
     representativeLimit: number;
     representativeMinAngleDegrees: number;
-    omissionSummaryMinGroupSize: number;
   }
 > = {
   1: {
     representativeLimit: 3,
     representativeMinAngleDegrees: 0,
-    omissionSummaryMinGroupSize: 3,
   },
   2: {
     representativeLimit: 3,
     representativeMinAngleDegrees: 3,
-    omissionSummaryMinGroupSize: 3,
   },
   3: {
     representativeLimit: 4,
     representativeMinAngleDegrees: 5,
-    omissionSummaryMinGroupSize: 0,
   },
 };
 
@@ -248,30 +243,22 @@ function buildPolarClusterSummaryLines(
   const config = POLAR_LEVEL_PROMPT_CONFIG[level];
   const sortedEntries = [...entries].sort(
     (left, right) =>
-      getPromptRepresentativeScore(right, summaryMode) - getPromptRepresentativeScore(left, summaryMode) ||
+      left.widestSpan.angleWidthDegrees - right.widestSpan.angleWidthDegrees ||
       left.centerPoint.distanceMeters - right.centerPoint.distanceMeters ||
       left.osmId - right.osmId,
   );
   const representativeEntries = sortedEntries
-    .filter((entry) =>
-      summaryMode === 'detailed' && entry.category === 'line'
-        ? (entry.lineLengthMeters || 0) > 0
-        : entry.widestSpan.angleWidthDegrees >= config.representativeMinAngleDegrees,
-    )
+    .filter((entry) => entry.widestSpan.angleWidthDegrees >= config.representativeMinAngleDegrees)
     .slice(0, config.representativeLimit);
-  // TODO: 搞清楚这一块如何使用 POLAR_LEVEL_PROMPT_CONFIG 的
-  const anchors = representativeEntries.length > 0 ? representativeEntries : sortedEntries.slice(0, 1);
-  const omittedCount = Math.max(0, entries.length - anchors.length);
+  const omittedCount = Math.max(0, entries.length - representativeEntries.length);
   const directionCluster = entries[0]!.directionCluster;
-  const shouldShowOmissionSummary = summaryMode === 'concise'
-    ? omittedCount > 0
-    : omittedCount > 0 && entries.length > config.omissionSummaryMinGroupSize;
+  const shouldShowOmissionSummary = omittedCount > 0;
   const hint = shouldShowOmissionSummary
-    ? `，共${entries.length}个要素，展示${anchors.length}个代表要素，其余${omittedCount}个仅保留数量`
+    ? `，共${entries.length}个要素，展示${representativeEntries.length}个代表要素，其余${omittedCount}个仅保留数量`
     : '';
   const lines = [`* 群中心方位${formatAngle(directionCluster.centerBearingDegrees)}${hint}`];
 
-  for (const anchor of anchors) {
+  for (const anchor of representativeEntries) {
     lines.push(...buildPolarFeatureLines(anchor));
   }
 
@@ -304,18 +291,6 @@ function buildPolarFeatureLines(summary: NormalizedPolarFeatureSummary): string[
     `  * 边界点1${formatPolarSample(summary.widestSpan.clockwiseEarlyPoint)}，边界点2${formatPolarSample(summary.widestSpan.clockwiseLatePoint)}，视野角宽${formatAngle(summary.widestSpan.angleWidthDegrees)}`,
     ...detailTags.map((tag) => `  * ${tag}`),
   ];
-}
-
-function getPromptRepresentativeScore(summary: NormalizedPolarFeatureSummary, summaryMode: PromptSummaryMode): number {
-  if (summaryMode === 'concise') {
-    return summary.widestSpan.angleWidthDegrees;
-  }
-
-  if (summary.category === 'line') {
-    return summary.lineLengthMeters || 0;
-  }
-
-  return summary.widestSpan.angleWidthDegrees;
 }
 
 function isDenseConciseGroup(level: 1 | 2 | 3, entries: NormalizedPolarFeatureSummary[]): boolean {
