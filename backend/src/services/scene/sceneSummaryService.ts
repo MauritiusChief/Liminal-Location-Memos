@@ -138,7 +138,6 @@ export function buildSummaryFromProjectedScene<TFeatureDetail extends SceneFeatu
     summaryMode: config.promptSummaryMode,
     microGrid: scene.microGrid,
     polarView: scene.polarView,
-    featureDetails: scene.featureDetailIndex,
   });
 }
 

@@ -58,6 +58,11 @@ export interface NormalizedPolarFeatureSummary {
   directionCluster: PolarDirectionCluster;
   displayLabel: string;
   visibleTags: PolarVisibleTag[];
+  promptSignals: {
+    isTallBuilding: boolean;
+    isSignificantPoi: boolean;
+    isSignificantForConcise: boolean;
+  };
   level: 1 | 2 | 3;
   nearestPoint: PolarCoordinateSample;
   farthestPoint: PolarCoordinateSample;
@@ -97,6 +102,12 @@ interface PolarFeatureMetrics {
 }
 
 const MAX_POLAR_RADIUS_METERS = 1000 as const;
+const CONCISE_BUILDING_MIN_ANGLE_BY_LEVEL: Record<1 | 2 | 3, number> = { 1: 15, 2: 15, 3: 15 };
+const CONCISE_AREA_MIN_ANGLE_BY_LEVEL: Record<1 | 2 | 3, number> = { 1: 20, 2: 20, 3: 20 };
+const CONCISE_LINE_MIN_ANGLE_BY_LEVEL: Record<1 | 2 | 3, number> = { 1: 25, 2: 25, 3: 25 };
+const CONCISE_SIGNIFICANT_POI_TAGS = new Set(['man_made:antenna', 'man_made:tower']);
+const SIGNIFICANT_BUILDING_MIN_HEIGHT_METERS = 35;
+const SIGNIFICANT_BUILDING_MIN_LEVELS = 10;
 const POLAR_LEVELS: Array<{ level: 1 | 2 | 3; minExclusive: number; maxInclusive: number }> = [
   { level: 1, minExclusive: 30, maxInclusive: 100 },
   { level: 2, minExclusive: 100, maxInclusive: 300 },
@@ -180,6 +191,7 @@ function buildPolarFeatureSummary(
     directionCluster: buildSingletonDirectionCluster(record.featureId, metrics.centerPoint.bearingDegrees),
     displayLabel: filteredPresentation.baseLabel,
     visibleTags: filteredPresentation.visibleTags,
+    promptSignals: buildPromptSignals(detail, level, metrics),
     level,
     nearestPoint: metrics.nearestPoint,
     farthestPoint: metrics.farthestPoint,
@@ -189,6 +201,34 @@ function buildPolarFeatureSummary(
     linePath: metrics.linePath,
     orientationDegrees: metrics.orientationDegrees,
     lineLengthMeters: metrics.lineLengthMeters,
+  };
+}
+
+function buildPromptSignals(
+  detail: SceneFeatureDetail,
+  level: 1 | 2 | 3,
+  metrics: PolarFeatureMetrics,
+): NormalizedPolarFeatureSummary['promptSignals'] {
+  const isTallBuilding = detail.category === 'building' ? isTallBuildingTagSet(detail.tags) : false;
+  const isSignificantPoi = detail.category === 'poi' ? isSignificantPoiTagSet(detail.tags) : false;
+
+  const isSignificantForConcise = (() => {
+    switch (detail.category) {
+      case 'building':
+        return metrics.widestSpan.angleWidthDegrees >= CONCISE_BUILDING_MIN_ANGLE_BY_LEVEL[level] || isTallBuilding;
+      case 'poi':
+        return isSignificantPoi;
+      case 'line':
+        return metrics.widestSpan.angleWidthDegrees >= CONCISE_LINE_MIN_ANGLE_BY_LEVEL[level];
+      case 'area':
+        return metrics.widestSpan.angleWidthDegrees >= CONCISE_AREA_MIN_ANGLE_BY_LEVEL[level];
+    }
+  })();
+
+  return {
+    isTallBuilding,
+    isSignificantPoi,
+    isSignificantForConcise,
   };
 }
 
@@ -860,4 +900,54 @@ function computePathLengthMeters(coordinates: [number, number][]): number {
   }
 
   return lengthMeters;
+}
+
+function isSignificantPoiTagSet(tags: Record<string, string>): boolean {
+  for (const key of POI_PRIMARY_LABEL_KEYS) {
+    const value = trimTagValue(tags[key]);
+    if (value && CONCISE_SIGNIFICANT_POI_TAGS.has(`${key}:${value}`)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isTallBuildingTagSet(tags: Record<string, string>): boolean {
+  const heightMeters = parseHeightMeters(tags.height);
+  if (heightMeters !== null && heightMeters >= SIGNIFICANT_BUILDING_MIN_HEIGHT_METERS) {
+    return true;
+  }
+
+  const levelValues = [parseIntegerTag(tags['building:levels']), parseIntegerTag(tags.level)];
+  return levelValues.some((value) => value !== null && value >= SIGNIFICANT_BUILDING_MIN_LEVELS);
+}
+
+function parseHeightMeters(value: string | undefined): number | null {
+  const trimmed = trimTagValue(value);
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = trimmed.toLowerCase().replace(/,/g, '');
+  const parsed = Number.parseFloat(normalized);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  if (normalized.includes('ft') || normalized.includes('feet')) {
+    return parsed * 0.3048;
+  }
+
+  return parsed;
+}
+
+function parseIntegerTag(value: string | undefined): number | null {
+  const trimmed = trimTagValue(value);
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }

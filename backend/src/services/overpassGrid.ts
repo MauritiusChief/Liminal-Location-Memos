@@ -1,10 +1,18 @@
 import type { SceneFeatureDetail, DbMicroGridCellRecord } from './scene/sceneTypes.js';
 import {
+  AREA_PRIMARY_LABEL_KEYS,
+  BUILDING_PRIMARY_LABEL_KEYS,
+  LINE_PRIMARY_LABEL_KEYS,
+  POI_PRIMARY_LABEL_KEYS,
+  POI_STRUCTURED_TAG_KEYS,
+} from './osmFeatureConfig.js';
+import {
   buildBuildingBaseLabel,
   getAreaDisplayLabel,
   getPoiDisplayLabel,
   getRoadDisplayLabel,
 } from './overpassLabels.js';
+import { trimTagValue } from './overpassLabels.js';
 
 export type MicroGridCellKind = 'building' | 'area' | 'empty';
 
@@ -32,6 +40,7 @@ export interface NormalizedMicroGrid {
   rows: 12;
   cols: 12;
   cells: NormalizedMicroGridCell[][];
+  detailEntries: string[];
 }
 
 const GRID_EXTENT_METERS = 60 as const;
@@ -58,6 +67,7 @@ export function buildNormalizedMicroGrid(input: {
       rows: GRID_ROWS,
       cols: GRID_COLS,
       cells: [],
+      detailEntries: [],
     };
   }
 
@@ -92,8 +102,13 @@ export function buildNormalizedMicroGrid(input: {
     rows: GRID_ROWS,
     cols: GRID_COLS,
     cells,
+    detailEntries: buildGridDetailEntries(cells, featureDetails),
   };
 }
+
+const BUILDING_AND_POI_TAG_KEYS = ['name', 'brand', ...POI_STRUCTURED_TAG_KEYS, ...BUILDING_PRIMARY_LABEL_KEYS] as const;
+const LINE_DETAIL_TAG_KEYS = ['name', ...LINE_PRIMARY_LABEL_KEYS] as const;
+const AREA_DETAIL_TAG_KEYS = ['name', ...AREA_PRIMARY_LABEL_KEYS] as const;
 
 function buildMicroGridCell(
   record: DbMicroGridCellRecord,
@@ -161,4 +176,77 @@ function buildCellLabel(
   }
 
   return segments.filter(Boolean).join(' | ');
+}
+
+function buildGridDetailEntries(
+  cells: NormalizedMicroGridCell[][],
+  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
+): string[] {
+  const featureIds = Array.from(
+    new Set(
+      cells.flatMap((row) =>
+        row.flatMap((cell) => {
+          if (cell.baseKind === 'empty' && cell.poiLabels.length === 0 && cell.roadLabels.length === 0) {
+            return [];
+          }
+
+          return cell.sourceFeatureIds;
+        }),
+      ),
+    ),
+  );
+
+  return featureIds.flatMap((featureId) => {
+    const feature = featureDetails.get(featureId);
+    return feature ? [buildFeatureDetailEntry(feature)] : [];
+  });
+}
+
+function buildFeatureDetailEntry(feature: SceneFeatureDetail): string {
+  const detailTags = collectImportantTags(feature);
+  const lines = [`${getFeatureDisplayTitle(feature)} (id=${feature.featureId}):`];
+
+  if (detailTags.length > 0) {
+    lines.push(...detailTags.map((tag) => `* ${tag}`));
+  } else {
+    lines.push('* 无可展示细节');
+  }
+
+  return lines.join('\n');
+}
+
+function getFeatureDisplayTitle(feature: SceneFeatureDetail): string {
+  const name = trimTagValue(feature.tags.name);
+  const brand = trimTagValue(feature.tags.brand);
+
+  if (name) {
+    return name;
+  }
+
+  if (brand) {
+    return brand;
+  }
+
+  for (const key of [...POI_PRIMARY_LABEL_KEYS, ...LINE_PRIMARY_LABEL_KEYS, ...AREA_PRIMARY_LABEL_KEYS, ...BUILDING_PRIMARY_LABEL_KEYS] as const) {
+    const value = trimTagValue(feature.tags[key]);
+    if (value) {
+      return `${key}:${value}`;
+    }
+  }
+
+  return feature.featureId;
+}
+
+function collectImportantTags(feature: SceneFeatureDetail): string[] {
+  const keys =
+    feature.category === 'building' || feature.category === 'poi'
+      ? BUILDING_AND_POI_TAG_KEYS
+      : feature.category === 'line'
+        ? LINE_DETAIL_TAG_KEYS
+        : AREA_DETAIL_TAG_KEYS;
+
+  return keys.flatMap((key) => {
+    const value = trimTagValue(feature.tags[key]);
+    return value ? [`${key}: ${value}`] : [];
+  });
 }

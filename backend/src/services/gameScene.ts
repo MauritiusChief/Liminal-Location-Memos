@@ -4,7 +4,7 @@ import {
 import { syncOverpassCoverage } from './overpass/overpassSync.js';
 import {
   buildSummaryFromProjectedScene,
-  loadGameProjectedScene,
+  loadProjectedScene,
   type SummaryPreviewMode,
 } from './scene/sceneSummaryService.js';
 import type { GamePosition, SceneContext } from '../types/game.js';
@@ -36,7 +36,7 @@ export async function ensureCoverageForPosition(
  * @returns
  */
 export async function loadSceneContext(position: GamePosition, radius = 1000): Promise<SceneContext> {
-  const largeScene = await loadGameProjectedScene({ lat: position.lat, lon: position.lon, radius });
+  const largeScene = await loadProjectedScene({ lat: position.lat, lon: position.lon, radius }, 'game');
   // TODO 不要使用 closure 特性，这会造成理解难度的提升
   const summaryCache = new Map<SummaryPreviewMode, Promise<string>>();
 
@@ -57,7 +57,7 @@ export async function loadSceneContext(position: GamePosition, radius = 1000): P
           return buildSummaryFromProjectedScene(largeScene, summaryMode);
         }
 
-        const smallScene = await loadGameProjectedScene({ lat: position.lat, lon: position.lon, radius: 200 });
+        const smallScene = await loadProjectedScene({ lat: position.lat, lon: position.lon, radius: 200 }, 'game');
         return buildSummaryFromProjectedScene(smallScene, summaryMode);
       })();
       summaryCache.set(summaryMode, nextSummaryPromise);
