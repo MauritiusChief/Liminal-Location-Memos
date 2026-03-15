@@ -11,9 +11,8 @@ import type {
   DebugSceneFeatureDetail,
   DbFeatureCategory,
   SceneFeatureDetail,
-  GameScenePolarFeatureRecord,
+  PolarFeatureRecord,
   DbMicroGridCellRecord,
-  DbPolarFeatureRecord,
 } from './scene/sceneTypes.js';
 import { getStructuredTagColumns, matchFeatureCategory } from './osmFeatureConfig.js';
 import type { GamePosition } from '../types/game.js';
@@ -244,7 +243,7 @@ export async function fetchMicroGridFromDb(request: NormalizedOverpassRequest): 
 
 // polar 的 DB 查询只做“取候选 + 裁剪几何 + 导出坐标样本”。
 // bearing、群聚、视野角宽这类叙述性压缩继续保留在 TS，便于调参和阅读。
-export async function fetchPolarFeaturesFromDb(request: NormalizedOverpassRequest): Promise<DbPolarFeatureRecord[]> {
+export async function fetchPolarFeaturesFromDb(request: NormalizedOverpassRequest): Promise<PolarFeatureRecord[]> {
   const radiusMeters = Math.min(request.radius, 1000);
   if (radiusMeters <= 30) {
     return [];
@@ -277,7 +276,7 @@ export async function fetchPolarFeaturesFromDb(request: NormalizedOverpassReques
 
 export async function fetchGameScenePolarFeaturesFromDb(
   request: NormalizedOverpassRequest,
-): Promise<GameScenePolarFeatureRecord[]> {
+): Promise<PolarFeatureRecord[]> {
   const radiusMeters = Math.min(request.radius, 1000);
   if (radiusMeters <= 30) {
     return [];

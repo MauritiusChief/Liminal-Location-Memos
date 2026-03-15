@@ -1,7 +1,6 @@
 import type {
   SceneFeatureDetail,
-  DbPolarFeatureRecord,
-  GameScenePolarFeatureRecord,
+  PolarFeatureRecord,
 } from './scene/sceneTypes.js';
 import {
   AREA_PRIMARY_LABEL_KEYS,
@@ -112,7 +111,7 @@ const DIRECTION_CLUSTER_THRESHOLD_DEGREES: Record<1 | 2 | 3, number> = {
 // polar 层的职责是“把 DB 导出的空间样本压缩成叙述友好的极坐标摘要”。
 // 这里不再回看原始 GeoJSON，只消费已经投影好的点、路径和标签。
 export function buildNormalizedPolarView(input: {
-  records: Array<DbPolarFeatureRecord | GameScenePolarFeatureRecord>;
+  records: PolarFeatureRecord[];
   featureDetails: ReadonlyMap<string, SceneFeatureDetail>;
   request: { lat: number; lon: number };
 }): NormalizedPolarView {
@@ -147,7 +146,7 @@ export function buildNormalizedPolarView(input: {
 }
 
 function buildPolarFeatureSummary(
-  record: DbPolarFeatureRecord | GameScenePolarFeatureRecord,
+  record: PolarFeatureRecord,
   detail: SceneFeatureDetail,
   origin: [number, number],
 ): NormalizedPolarFeatureSummary | null {
@@ -172,7 +171,7 @@ function buildPolarFeatureSummary(
 
   return {
     featureId: record.featureId,
-    osmType: 'osmType' in record ? record.osmType : undefined,
+    osmType: record.osmType,
     osmId: record.osmId,
     geometryType: record.geometryType,
     category: record.category,
@@ -194,7 +193,7 @@ function buildPolarFeatureSummary(
 }
 
 function buildPolarFeatureMetrics(
-  record: DbPolarFeatureRecord | GameScenePolarFeatureRecord,
+  record: PolarFeatureRecord,
   origin: [number, number],
 ): PolarFeatureMetrics | null {
   if (record.category === 'line') {
@@ -224,7 +223,7 @@ function buildPolarFeatureMetrics(
 }
 
 function buildLineFeatureMetrics(
-  record: DbPolarFeatureRecord | GameScenePolarFeatureRecord,
+  record: PolarFeatureRecord,
   origin: [number, number],
 ): PolarFeatureMetrics | null {
   const linePathCoordinates = dedupeConsecutiveCoordinates(record.linePathCoordinates || record.sampleCoordinates);
