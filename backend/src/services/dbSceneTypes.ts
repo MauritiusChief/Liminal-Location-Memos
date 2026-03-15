@@ -17,6 +17,19 @@ export interface DbFeatureDetail {
   containedPois?: ContainedPoi[];
 }
 
+export interface GameSceneContainedPoi {
+  tags: Record<string, string>;
+}
+
+export interface GameSceneFeatureDetail {
+  featureId: string;
+  osmId: number;
+  category: DbFeatureCategory;
+  geometryType: string;
+  tags: Record<string, string>;
+  containedPois?: GameSceneContainedPoi[];
+}
+
 // Micro grid 在 SQL 里已经完成了“这个格子命中了谁”的空间判断；
 // TS 这里只负责把记录格式化成最终展示结构。
 export interface DbMicroGridCellRecord {
@@ -44,6 +57,17 @@ export interface DbPolarFeatureRecord {
   linePathCoordinates?: [number, number][];
   // line 顶点序列和 centerPoint 分离：
   // 后续 4 点抽样与回归都只从这组顶点里挑。
+  lineVertexCoordinates?: [number, number][];
+}
+
+export interface GameScenePolarFeatureRecord {
+  featureId: string;
+  osmId: number;
+  category: DbFeatureCategory;
+  geometryType: string;
+  sampleCoordinates: [number, number][];
+  centerCoordinate: [number, number] | null;
+  linePathCoordinates?: [number, number][];
   lineVertexCoordinates?: [number, number][];
 }
 

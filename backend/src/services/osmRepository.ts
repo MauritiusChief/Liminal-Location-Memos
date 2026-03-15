@@ -10,6 +10,8 @@ import type {
 import type {
   DbFeatureDetail,
   DbFeatureCategory,
+  GameSceneFeatureDetail,
+  GameScenePolarFeatureRecord,
   DbMicroGridCellRecord,
   DbPolarFeatureRecord,
 } from './dbSceneTypes.js';
@@ -26,6 +28,22 @@ type BuildingRow = {
   meta: Record<string, string | number>;
   tainted: boolean;
   contained_pois: ContainedPoi[] | null;
+};
+
+type GameSceneBuildingRow = {
+  feature_id: string;
+  osm_id: number;
+  geometry_type: string;
+  tags: Record<string, string>;
+  contained_pois: Array<{ tags: Record<string, string> }> | null;
+};
+
+type GameSceneFeatureDetailRow = {
+  feature_id: string;
+  osm_id: number;
+  category: DbFeatureCategory;
+  geometry_type: string;
+  tags: Record<string, string>;
 };
 
 type FeatureDetailRow = {
@@ -63,6 +81,17 @@ type PolarFeatureRow = {
   line_vertex_coordinates: Array<[number, number]> | null;
 };
 
+type GameScenePolarFeatureRow = {
+  feature_id: string;
+  osm_id: number;
+  category: DbFeatureCategory;
+  geometry_type: string;
+  sample_coordinates: Array<[number, number]> | null;
+  center_coordinate: [number, number] | null;
+  line_path_coordinates: Array<[number, number]> | null;
+  line_vertex_coordinates: Array<[number, number]> | null;
+};
+
 const BUILDING_TAG_COLUMNS = getStructuredTagColumns('building');
 const POI_TAG_COLUMNS = getStructuredTagColumns('poi');
 const ROAD_TAG_COLUMNS = getStructuredTagColumns('line');
@@ -71,6 +100,9 @@ const fetchMicroGridFromDbSqlPromise = loadServiceSql('osmRepository/fetchMicroG
 const fetchPolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fetchPolarFeaturesFromDb.sql');
 const fetchBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchBuildingDetails.sql');
 const fetchNonBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchNonBuildingDetails.sql');
+const fetchGameScenePolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fetchGameScenePolarFeaturesFromDb.sql');
+const fetchGameSceneBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchGameSceneBuildingDetails.sql');
+const fetchGameSceneNonBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchGameSceneNonBuildingDetails.sql');
 const upsertBuildingFeatureSqlPromise = loadServiceSql('osmRepository/upsertBuildingFeature.sql');
 const upsertPoiFeatureSqlPromise = loadServiceSql('osmRepository/upsertPoiFeature.sql');
 const upsertLineFeatureSqlPromise = loadServiceSql('osmRepository/upsertLineFeature.sql');
@@ -157,6 +189,33 @@ export async function fetchFeatureDetailsFromDb(request: NormalizedOverpassReque
   ];
 }
 
+export async function fetchGameSceneFeatureDetailsFromDb(
+  request: NormalizedOverpassRequest,
+): Promise<GameSceneFeatureDetail[]> {
+  const [buildingRows, otherRows] = await Promise.all([
+    fetchGameSceneBuildingDetails(request),
+    fetchGameSceneNonBuildingDetails(request),
+  ]);
+
+  return [
+    ...buildingRows.map((row) => ({
+      featureId: row.feature_id,
+      osmId: row.osm_id,
+      category: 'building' as const,
+      geometryType: row.geometry_type,
+      tags: row.tags || {},
+      containedPois: row.contained_pois && row.contained_pois.length > 0 ? row.contained_pois : undefined,
+    })),
+    ...otherRows.map((row) => ({
+      featureId: row.feature_id,
+      osmId: row.osm_id,
+      category: row.category,
+      geometryType: row.geometry_type,
+      tags: row.tags || {},
+    })),
+  ];
+}
+
 // grid 的空间命中全部下沉到 PostGIS：
 // 1. 生成 12x12 固定网格
 // 2. 用 cell center 判定 building/area 基底
@@ -216,6 +275,38 @@ export async function fetchPolarFeaturesFromDb(request: NormalizedOverpassReques
   }));
 }
 
+export async function fetchGameScenePolarFeaturesFromDb(
+  request: NormalizedOverpassRequest,
+): Promise<GameScenePolarFeatureRecord[]> {
+  const radiusMeters = Math.min(request.radius, 1000);
+  if (radiusMeters <= 30) {
+    return [];
+  }
+
+  const sql = await fetchGameScenePolarFeaturesFromDbSqlPromise;
+  const result = await query<GameScenePolarFeatureRow>(
+    sql,
+    [request.lon, request.lat, radiusMeters],
+  );
+
+  return result.rows.map((row) => ({
+    featureId: row.feature_id,
+    osmId: row.osm_id,
+    category: row.category,
+    geometryType: row.geometry_type,
+    sampleCoordinates: (row.sample_coordinates || []).map((pair) => [Number(pair[0]), Number(pair[1])]),
+    centerCoordinate: row.center_coordinate
+      ? [Number(row.center_coordinate[0]), Number(row.center_coordinate[1])]
+      : null,
+    linePathCoordinates: row.line_path_coordinates
+      ? row.line_path_coordinates.map((pair) => [Number(pair[0]), Number(pair[1])])
+      : undefined,
+    lineVertexCoordinates: row.line_vertex_coordinates
+      ? row.line_vertex_coordinates.map((pair) => [Number(pair[0]), Number(pair[1])])
+      : undefined,
+  }));
+}
+
 export async function findNearestCoverageDistanceMeters(position: GamePosition): Promise<number | null> {
   const result = await query<{ distance_meters: number | null }>(
     `
@@ -240,10 +331,32 @@ async function fetchBuildingDetails(request: NormalizedOverpassRequest): Promise
   return result.rows;
 }
 
+async function fetchGameSceneBuildingDetails(request: NormalizedOverpassRequest): Promise<GameSceneBuildingRow[]> {
+  const sql = await fetchGameSceneBuildingDetailsSqlPromise;
+  const result = await query<GameSceneBuildingRow>(
+    sql,
+    [request.lon, request.lat, request.radius],
+  );
+
+  return result.rows;
+}
+
 // 非 building 的详情直接从调试视图取，避免在 TS 里重复拼 tags。
 async function fetchNonBuildingDetails(request: NormalizedOverpassRequest): Promise<FeatureDetailRow[]> {
   const sql = await fetchNonBuildingDetailsSqlPromise;
   const result = await query<FeatureDetailRow>(
+    sql,
+    [request.lon, request.lat, request.radius],
+  );
+
+  return result.rows;
+}
+
+async function fetchGameSceneNonBuildingDetails(
+  request: NormalizedOverpassRequest,
+): Promise<GameSceneFeatureDetailRow[]> {
+  const sql = await fetchGameSceneNonBuildingDetailsSqlPromise;
+  const result = await query<GameSceneFeatureDetailRow>(
     sql,
     [request.lon, request.lat, request.radius],
   );
