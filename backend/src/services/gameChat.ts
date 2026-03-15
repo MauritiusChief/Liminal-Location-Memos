@@ -17,7 +17,7 @@ import {
 import { writeGameChatMessageSnapshot } from './gameChatDebugLog.js';
 import { findNearbySmallDescriptions } from './sceneDescriptionRepository.js';
 import { ensureLargeDescription, ensureSmallDescription, filterFarVisibleSmallDescriptions } from './sceneDescriptionService.js';
-import { buildSceneSummaryForGamePosition, resolveSceneContextSummaryMode } from './scene/sceneSummaryService.js';
+import { buildProjectedSceneSummary, SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE } from './scene/sceneSummaryService.js';
 import type {
   GameChatResponse,
   GameMessage,
@@ -418,9 +418,10 @@ async function buildSceneContextSnapshotPayload(input: {
     type: 'scene_context_snapshot',
     summaryMode: input.summaryMode,
     largeDescription: input.largeDescription,
-    activeSummary: await buildSceneSummaryForGamePosition(
+    activeSummary: await buildProjectedSceneSummary(
       input.sceneContext.position,
-      resolveSceneContextSummaryMode(input.summaryMode),
+      SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE[input.summaryMode],
+      'game',
     ),
     nearbyFarVisibleDetails: farVisibleNotes.map((record) => ({
       distanceMeters: Math.round(record.distanceMeters || 0),

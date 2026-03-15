@@ -76,13 +76,6 @@ function buildDbDiagnostics(input: {
   };
 }
 
-/**
- * scene context 的业务模式需要先映射到 prompt/DB 层使用的预览模式。
- */
-export function resolveSceneContextSummaryMode(summaryMode: SceneContextSummaryMode): SummaryPreviewMode {
-  return SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE[summaryMode];
-}
-
 export function isSummaryPreviewMode(value: unknown): value is SummaryPreviewMode {
   return typeof value === 'string' && Object.hasOwn(SUMMARY_PREVIEW_MODE_CONFIG, value);
 }
@@ -122,11 +115,24 @@ export async function loadProjectedScene(
   };
 }
 
-export function buildSummaryFromProjectedScene<TFeatureDetail extends SceneFeatureDetail>(
-  scene: ProjectedScene<TFeatureDetail>,
+/**
+ * 通过经纬度参数和其他参数，返回完整的提示词
+ * @param position
+ * @param summaryMode
+ * @param profile 暂时没用，未来会决定 SQL 的查询精细度
+ * @returns
+ */
+export async function buildProjectedSceneSummary(
+  position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>,
   summaryMode: SummaryPreviewMode,
-): string {
+  profile: SceneDataProfile,
+): Promise<string> {
   const config = SUMMARY_PREVIEW_MODE_CONFIG[summaryMode];
+  const scene = await loadProjectedScene({
+    lat: position.lat,
+    lon: position.lon,
+    radius: config.radius,
+  }, profile);
 
   return buildNormalizationPrompt({
     request: scene.request,
@@ -134,38 +140,4 @@ export function buildSummaryFromProjectedScene<TFeatureDetail extends SceneFeatu
     microGrid: scene.microGrid,
     polarView: scene.polarView,
   });
-}
-
-export async function buildSceneSummaryForGamePosition(
-  position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>,
-  summaryMode: SummaryPreviewMode,
-): Promise<string> {
-  const config = SUMMARY_PREVIEW_MODE_CONFIG[summaryMode];
-  const scene = await loadProjectedScene({
-    lat: position.lat,
-    lon: position.lon,
-    radius: config.radius,
-  }, 'game');
-
-  return buildSummaryFromProjectedScene(scene, summaryMode);
-}
-
-/**
- * 注：单纯用来 debug `buildNormalizationPrompt` 函数用
- * @param position
- * @param summaryMode
- * @returns
- */
-export async function buildDebugSummaryPreview(
-  position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>,
-  summaryMode: SummaryPreviewMode,
-): Promise<string> {
-  const config = SUMMARY_PREVIEW_MODE_CONFIG[summaryMode];
-  const scene = await loadProjectedScene({
-    lat: position.lat,
-    lon: position.lon,
-    radius: config.radius,
-  }, 'debug');
-
-  return buildSummaryFromProjectedScene(scene, summaryMode);
 }

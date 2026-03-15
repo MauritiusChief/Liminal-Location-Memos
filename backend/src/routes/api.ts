@@ -16,7 +16,7 @@ import { type NormalizedOverpassRequest } from '../services/overpassNormalizatio
 import { runGameChatTurn } from '../services/gameChat.js';
 import { getSessionSnapshot } from '../services/gameSessionStore.js';
 import {
-  buildDebugSummaryPreview,
+  buildProjectedSceneSummary,
   isSummaryPreviewMode,
   SUMMARY_PREVIEW_MODE_VALUE_LIST,
 } from '../services/scene/sceneSummaryService.js';
@@ -325,7 +325,7 @@ apiRouter.post('/debug/db/summary-preview', async (request, response) => {
   }
 
   try {
-    const summaryText = await buildDebugSummaryPreview(parsedRequest.value, parsedSummaryMode.value);
+    const summaryText = await buildProjectedSceneSummary(parsedRequest.value, parsedSummaryMode.value, 'debug');
     response.json({
       summaryMode: parsedSummaryMode.value,
       summaryText,

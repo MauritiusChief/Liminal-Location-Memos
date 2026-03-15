@@ -1,6 +1,6 @@
 import { generateReplyWithSystemPrompt } from './llm.js';
 import {
-  buildSceneSummaryForGamePosition,
+  buildProjectedSceneSummary,
   DEFAULT_LARGE_DESCRIPTION_SUMMARY_MODE,
   DEFAULT_SMALL_DESCRIPTION_SUMMARY_MODE,
 } from './scene/sceneSummaryService.js';
@@ -31,9 +31,10 @@ export async function ensureLargeDescription(
   }
 
   console.log('[DEBUG] ensureLargeDescription() - generateReplyWithSystemPrompt() call');
-  const conciseFarSummary = await buildSceneSummaryForGamePosition(
+  const conciseFarSummary = await buildProjectedSceneSummary(
     sceneContext.position,
     DEFAULT_LARGE_DESCRIPTION_SUMMARY_MODE,
+    'game',
   );
   const generated = await generateReplyWithSystemPrompt(
     [
@@ -115,9 +116,10 @@ async function generateSmallDescription(
   const visibleNotes = nearbySmallDescriptions
     .flatMap((record) => (record.farVisibleNotes ? [`- ${record.farVisibleNotes}`] : []))
     .join('\n');
-  const conciseNearSummary = await buildSceneSummaryForGamePosition(
+  const conciseNearSummary = await buildProjectedSceneSummary(
     sceneContext.position,
     DEFAULT_SMALL_DESCRIPTION_SUMMARY_MODE,
+    'game',
   );
   const generated = await generateReplyWithSystemPrompt(
     [
