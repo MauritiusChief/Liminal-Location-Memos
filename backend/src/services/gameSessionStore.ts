@@ -4,6 +4,9 @@ import path from 'node:path';
 import { buildDescriptionIndex } from './gameDescriptionIndex.js';
 import { distanceBetweenCoordinates } from './overpassGeometry.js';
 import type {
+  GameClientLargeDescription,
+  GameClientMessage,
+  GameClientSmallDescription,
   GamePosition,
   GameMessage,
   GameSaveDocument,
@@ -79,11 +82,10 @@ export async function getSessionSnapshot(sessionId: string): Promise<GameSession
   return {
     sessionId: session.save.sessionId,
     hasStarted: true,
-    messages: session.save.messageHistory,
+    messages: toClientMessages(session.save.messageHistory),
     playerPosition: session.save.playerPosition,
-    activeLargeDescription,
-    nearbySmallDescriptions,
-    debugSceneMeta: session.save.lastSceneContextMeta,
+    activeLargeDescription: toClientLargeDescription(activeLargeDescription),
+    nearbySmallDescriptions: toClientSmallDescriptions(nearbySmallDescriptions),
   };
 }
 
@@ -92,6 +94,89 @@ export function updateLastSceneContextMeta(
   meta: LastSceneContextMeta,
 ): void {
   session.save.lastSceneContextMeta = meta;
+}
+
+export function toClientMessages(history: GameMessage[]): GameClientMessage[] {
+  const messages: GameClientMessage[] = [];
+
+  for (const message of history) {
+    if (message.role === 'user') {
+      if (message.isOpeningPrompt) {
+        continue;
+      }
+
+      messages.push({
+        role: 'user',
+        content: message.content,
+      });
+      continue;
+    }
+
+    if (message.role === 'assistant') {
+      if (message.isToolCallMessage) {
+        continue;
+      }
+
+      messages.push({
+        role: 'assistant',
+        content: message.content,
+      });
+      continue;
+    }
+
+    const toolContent = message.toolName === 'move_player'
+      ? sanitizeMovePlayerToolContent(message.content)
+      : message.content;
+
+    messages.push({
+      role: 'tool',
+      content: toolContent,
+      toolName: message.toolName,
+    });
+  }
+
+  return messages;
+}
+
+export function toClientLargeDescription(
+  record: { id: string; descriptionText: string } | null,
+): GameClientLargeDescription | null {
+  if (!record) {
+    return null;
+  }
+
+  return {
+    id: record.id,
+    descriptionText: record.descriptionText,
+  };
+}
+
+export function toClientSmallDescriptions(
+  records: Array<{ id: string; descriptionText: string; distanceMeters?: number }>,
+): GameClientSmallDescription[] {
+  return records.map((record) => ({
+    id: record.id,
+    descriptionText: record.descriptionText,
+    distanceMeters: record.distanceMeters,
+  }));
+}
+
+function sanitizeMovePlayerToolContent(content: string): string {
+  try {
+    const parsed = JSON.parse(content) as { bearingDegrees?: unknown; distanceMeters?: unknown };
+    const sanitized = {
+      bearingDegrees: Number(parsed.bearingDegrees),
+      distanceMeters: Number(parsed.distanceMeters),
+    };
+
+    if (!Number.isFinite(sanitized.bearingDegrees) || !Number.isFinite(sanitized.distanceMeters)) {
+      return content;
+    }
+
+    return JSON.stringify(sanitized);
+  } catch {
+    return content;
+  }
 }
 
 function createSaveDocument(sessionId: string): GameSaveDocument {

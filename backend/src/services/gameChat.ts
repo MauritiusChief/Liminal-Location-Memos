@@ -1,6 +1,13 @@
 import { movePosition } from './gameMovement.js';
 import { ensureCoverageForPosition, loadSceneContext } from './gameScene.js';
-import { getOrCreateSession, updateLastSceneContextMeta, updateSession } from './gameSessionStore.js';
+import {
+  getOrCreateSession,
+  toClientLargeDescription,
+  toClientMessages,
+  toClientSmallDescriptions,
+  updateLastSceneContextMeta,
+  updateSession,
+} from './gameSessionStore.js';
 import {
   runChatCompletionWithTools,
   type AssistantHistoryMessage,
@@ -75,7 +82,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   // 4. 让模型决定是否调用工具
   // 5. 若触发工具，则由后端执行对应逻辑，并把 assistant(tool_call) + tool(tool_return) 带回后续轮次生成最终自然语言回复
   const session = await getOrCreateSession(input.sessionId);
-  let coverageSyncTriggered = await ensureCoverageForPosition(session.save.playerPosition);
+  await ensureCoverageForPosition(session.save.playerPosition);
   let sceneContext = await loadSceneContext(session.save.playerPosition);
   let activeLargeDescription = await ensureLargeDescription(sceneContext, session);
   let activeSmallDescription = await ensureSmallDescription(sceneContext, session);
@@ -111,7 +118,6 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   });
   console.log('[DEBUG] runGameChatTurn() - first runChatCompletionWithTools() return');
 
-  let movementResult: MovePlayerToolResult | null = null;
   const messagesToAppend: GameMessage[] = [userMessage];
   const currentTurnToolMessages: GameMessage[] = [];
 
@@ -133,13 +139,12 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
       });
 
       const moveCoverageSyncTriggered = await ensureCoverageForPosition(nextPosition);
-      coverageSyncTriggered = coverageSyncTriggered || moveCoverageSyncTriggered;
       sceneContext = await loadSceneContext(nextPosition);
       activeLargeDescription = await ensureLargeDescription(sceneContext, session);
       activeSmallDescription = await ensureSmallDescription(sceneContext, session);
       nearbySmallDescriptions = await mergeNearbySmallDescriptions(session, nextPosition, activeSmallDescription);
 
-      movementResult = {
+      const movementResult: MovePlayerToolResult = {
         previousPosition: session.save.playerPosition,
         nextPosition,
         bearingDegrees: toolInput.bearingDegrees,
@@ -244,16 +249,10 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
 
   return {
     sessionId: session.save.sessionId,
-    messages: session.save.messageHistory,
-    assistantMessage,
+    messages: toClientMessages(session.save.messageHistory),
     playerPosition: session.save.playerPosition,
-    movementResult,
-    activeLargeDescription,
-    nearbySmallDescriptions,
-    debugSceneMeta: {
-      diagnostics: sceneContext.diagnostics,
-      coverageSyncTriggered,
-    },
+    activeLargeDescription: toClientLargeDescription(activeLargeDescription),
+    nearbySmallDescriptions: toClientSmallDescriptions(nearbySmallDescriptions),
   };
 }
 

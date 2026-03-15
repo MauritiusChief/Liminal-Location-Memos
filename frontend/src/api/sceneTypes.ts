@@ -226,38 +226,20 @@ export type GameMessage =
   | {
       role: 'user';
       content: string;
-      isOpeningPrompt?: boolean;
     }
   | {
       role: 'assistant';
       content: string;
-      reasoningContent?: string;
-      isToolCallMessage?: false;
-    }
-  | {
-      role: 'assistant';
-      content: string;
-      reasoningContent?: string;
-      isToolCallMessage: true;
-      toolCallId: string;
-      toolName: string;
-      toolArgumentsText: string;
     }
   | {
       role: 'tool';
-      content: string;
-      toolCallId: string;
       toolName: string;
+      content: string;
     };
 
 export interface MovePlayerToolResult {
-  previousPosition: GamePosition;
-  nextPosition: GamePosition;
   bearingDegrees: number;
   distanceMeters: number;
-  reason: string;
-  targetLabel?: string;
-  coverageSyncTriggered: boolean;
 }
 
 export interface LookFarToolResult {
@@ -266,24 +248,12 @@ export interface LookFarToolResult {
 
 export interface LargeDescriptionRecord {
   id: string;
-  center: GamePosition;
-  sourceRadiusM: number;
-  effectiveRadiusM: number;
   descriptionText: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface SmallDescriptionRecord {
-  // distanceMeters 由后端查询或补算后带回，主要给 debug 列表排序和展示。
   id: string;
-  center: GamePosition;
-  sourceRadiusM: number;
-  effectiveRadiusM: number;
   descriptionText: string;
-  farVisibleNotes: string | null;
-  createdAt: string;
-  updatedAt: string;
   distanceMeters?: number;
 }
 
@@ -294,19 +264,11 @@ export interface GameChatRequest {
 }
 
 export interface GameChatResponse {
-  // 首页每次提交消息后拿到的就是这一包数据：
-  // 新的 assistant 回复、当前位置、当前大描述、附近小描述以及调试元数据。
   sessionId: string;
   messages: GameMessage[];
-  assistantMessage: string;
   playerPosition: GamePosition;
-  movementResult: MovePlayerToolResult | null;
   activeLargeDescription: LargeDescriptionRecord | null;
   nearbySmallDescriptions: SmallDescriptionRecord[];
-  debugSceneMeta: {
-    diagnostics: DbNormalizationDiagnostics;
-    coverageSyncTriggered: boolean;
-  } | null;
 }
 
 export interface GameSessionSnapshotResponse {
@@ -316,7 +278,4 @@ export interface GameSessionSnapshotResponse {
   playerPosition: GamePosition;
   activeLargeDescription: LargeDescriptionRecord | null;
   nearbySmallDescriptions: SmallDescriptionRecord[];
-  debugSceneMeta: {
-    diagnostics: DbNormalizationDiagnostics;
-  } | null;
 }

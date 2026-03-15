@@ -1,4 +1,9 @@
-import type { DbFeatureDetail, DbPolarFeatureRecord } from './dbSceneTypes.js';
+import type {
+  DbFeatureDetail,
+  DbPolarFeatureRecord,
+  GameSceneFeatureDetail,
+  GameScenePolarFeatureRecord,
+} from './dbSceneTypes.js';
 import {
   AREA_PRIMARY_LABEL_KEYS,
   BUILDING_PRIMARY_LABEL_KEYS,
@@ -46,7 +51,7 @@ export interface PolarDirectionCluster {
 
 export interface NormalizedPolarFeatureSummary {
   featureId: string;
-  osmType: string;
+  osmType?: string;
   osmId: number;
   geometryType: string;
   category: PolarFeatureCategory;
@@ -108,8 +113,8 @@ const DIRECTION_CLUSTER_THRESHOLD_DEGREES: Record<1 | 2 | 3, number> = {
 // polar 层的职责是“把 DB 导出的空间样本压缩成叙述友好的极坐标摘要”。
 // 这里不再回看原始 GeoJSON，只消费已经投影好的点、路径和标签。
 export function buildNormalizedPolarView(input: {
-  records: DbPolarFeatureRecord[];
-  featureDetails: Map<string, DbFeatureDetail>;
+  records: Array<DbPolarFeatureRecord | GameScenePolarFeatureRecord>;
+  featureDetails: ReadonlyMap<string, DbFeatureDetail | GameSceneFeatureDetail>;
   request: { lat: number; lon: number };
 }): NormalizedPolarView {
   const origin: [number, number] = [input.request.lon, input.request.lat];
@@ -143,8 +148,8 @@ export function buildNormalizedPolarView(input: {
 }
 
 function buildPolarFeatureSummary(
-  record: DbPolarFeatureRecord,
-  detail: DbFeatureDetail,
+  record: DbPolarFeatureRecord | GameScenePolarFeatureRecord,
+  detail: DbFeatureDetail | GameSceneFeatureDetail,
   origin: [number, number],
 ): NormalizedPolarFeatureSummary | null {
   const metrics = buildPolarFeatureMetrics(record, origin);
@@ -168,7 +173,7 @@ function buildPolarFeatureSummary(
 
   return {
     featureId: record.featureId,
-    osmType: record.osmType,
+    osmType: 'osmType' in record ? record.osmType : undefined,
     osmId: record.osmId,
     geometryType: record.geometryType,
     category: record.category,
@@ -190,7 +195,7 @@ function buildPolarFeatureSummary(
 }
 
 function buildPolarFeatureMetrics(
-  record: DbPolarFeatureRecord,
+  record: DbPolarFeatureRecord | GameScenePolarFeatureRecord,
   origin: [number, number],
 ): PolarFeatureMetrics | null {
   if (record.category === 'line') {
@@ -220,7 +225,7 @@ function buildPolarFeatureMetrics(
 }
 
 function buildLineFeatureMetrics(
-  record: DbPolarFeatureRecord,
+  record: DbPolarFeatureRecord | GameScenePolarFeatureRecord,
   origin: [number, number],
 ): PolarFeatureMetrics | null {
   const linePathCoordinates = dedupeConsecutiveCoordinates(record.linePathCoordinates || record.sampleCoordinates);
@@ -356,7 +361,7 @@ function classifyPolarLevel(distanceMeters: number): 1 | 2 | 3 | null {
 }
 
 function applyPolarLevelFilter(
-  detail: DbFeatureDetail,
+  detail: DbFeatureDetail | GameSceneFeatureDetail,
   level: 1 | 2 | 3,
   metrics: PolarFeatureMetrics,
 ): {
@@ -376,7 +381,7 @@ function applyPolarLevelFilter(
 }
 
 function applyLevel1Filter(
-  detail: DbFeatureDetail,
+  detail: DbFeatureDetail | GameSceneFeatureDetail,
   metrics: PolarFeatureMetrics,
 ): {
   shouldInclude: boolean;
@@ -412,7 +417,7 @@ function applyLevel1Filter(
 }
 
 function applyLevel2Filter(
-  detail: DbFeatureDetail,
+  detail: DbFeatureDetail | GameSceneFeatureDetail,
   metrics: PolarFeatureMetrics,
 ): {
   shouldInclude: boolean;
@@ -454,7 +459,7 @@ function applyLevel2Filter(
 }
 
 function applyLevel3Filter(
-  detail: DbFeatureDetail,
+  detail: DbFeatureDetail | GameSceneFeatureDetail,
   metrics: PolarFeatureMetrics,
 ): {
   shouldInclude: boolean;

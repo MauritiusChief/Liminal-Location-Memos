@@ -147,30 +147,47 @@ export interface GameChatRequest {
   isOpeningPrompt?: boolean;
 }
 
+export type GameClientMessage =
+  | {
+      role: 'user';
+      content: string;
+    }
+  | {
+      role: 'assistant';
+      content: string;
+    }
+  | {
+      role: 'tool';
+      content: string;
+      toolName: string;
+    };
+
+export interface GameClientLargeDescription {
+  id: string;
+  descriptionText: string;
+}
+
+export interface GameClientSmallDescription {
+  id: string;
+  descriptionText: string;
+  distanceMeters?: number;
+}
+
 export interface GameChatResponse {
-  // 首页每次发送消息后，都会拿到最新位置、描述和调试元数据。
+  // 首页每次发送消息后，都会拿到最新位置和必要的展示数据。
   sessionId: string;
-  messages: GameMessage[];
-  assistantMessage: string;
+  messages: GameClientMessage[];
   playerPosition: GamePosition;
-  movementResult: MovePlayerToolResult | null;
-  activeLargeDescription: LargeDescriptionRecord | null;
-  nearbySmallDescriptions: SmallDescriptionRecord[];
-  debugSceneMeta: {
-    diagnostics: DbNormalizationDiagnostics;
-    coverageSyncTriggered: boolean;
-  } | null;
+  activeLargeDescription: GameClientLargeDescription | null;
+  nearbySmallDescriptions: GameClientSmallDescription[];
 }
 
 export interface GameSessionSnapshotResponse {
   // 这是“恢复旧存档”专用的只读快照，不会产生新消息。
   sessionId: string;
   hasStarted: boolean;
-  messages: GameMessage[];
+  messages: GameClientMessage[];
   playerPosition: GamePosition;
-  activeLargeDescription: LargeDescriptionRecord | null;
-  nearbySmallDescriptions: SmallDescriptionRecord[];
-  debugSceneMeta: {
-    diagnostics: DbNormalizationDiagnostics;
-  } | null;
+  activeLargeDescription: GameClientLargeDescription | null;
+  nearbySmallDescriptions: GameClientSmallDescription[];
 }

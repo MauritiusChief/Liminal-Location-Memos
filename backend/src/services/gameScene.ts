@@ -1,5 +1,5 @@
 import { overpassJson } from 'overpass-ts';
-import type { DbFeatureDetail } from './dbSceneTypes.js';
+import type { GameSceneFeatureDetail } from './dbSceneTypes.js';
 import { buildNormalizedMicroGrid } from './overpassGrid.js';
 import {
   buildNormalizedOverpassQuery,
@@ -9,21 +9,21 @@ import {
 import { buildNormalizedPolarView } from './overpassPolar.js';
 import { buildNormalizationPrompt } from './overpassPrompt.js';
 import {
-  fetchFeatureDetailsFromDb,
+  fetchGameSceneFeatureDetailsFromDb,
+  fetchGameScenePolarFeaturesFromDb,
   fetchMicroGridFromDb,
-  fetchPolarFeaturesFromDb,
   findNearestCoverageDistanceMeters,
   syncNormalizedFeaturesToDb,
 } from './osmRepository.js';
 import type { GamePosition, SceneContext } from '../types/game.js';
 
-function buildFeatureDetailIndex(featureDetails: DbFeatureDetail[]): Map<string, DbFeatureDetail> {
+function buildFeatureDetailIndex(featureDetails: GameSceneFeatureDetail[]): Map<string, GameSceneFeatureDetail> {
   // 这里沿用 debug 链路的索引方式，避免后续 grid/polar/prompt 再重复扫描数组。
   return new Map(featureDetails.map((feature) => [feature.featureId, feature]));
 }
 
 function buildDbDiagnostics(input: {
-  featureDetails: DbFeatureDetail[];
+  featureDetails: GameSceneFeatureDetail[];
   microGrid: ReturnType<typeof buildNormalizedMicroGrid>;
   polarView: ReturnType<typeof buildNormalizedPolarView>;
 }) {
@@ -108,9 +108,9 @@ async function loadProjectedScene(request: NormalizedOverpassRequest): Promise<{
   // 这里不重新实现空间投影逻辑，而是直接复用现有 DB-native debug 链路：
   // 取 DB 要素 -> 组装 microGrid/polar -> 生成 prompt summary。
   const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-    fetchFeatureDetailsFromDb(request),
+    fetchGameSceneFeatureDetailsFromDb(request),
     fetchMicroGridFromDb(request),
-    fetchPolarFeaturesFromDb(request),
+    fetchGameScenePolarFeaturesFromDb(request),
   ]);
   const featureDetailIndex = buildFeatureDetailIndex(featureDetails);
   const microGrid = buildNormalizedMicroGrid({

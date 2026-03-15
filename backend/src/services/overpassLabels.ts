@@ -1,4 +1,3 @@
-import type { ContainedPoi } from './overpassNormalization.js';
 import {
   AREA_PRIMARY_LABEL_KEYS,
   BUILDING_PRIMARY_LABEL_KEYS,
@@ -12,9 +11,13 @@ export const AREA_TAG_KEYS = AREA_PRIMARY_LABEL_KEYS;
 export const ROAD_TAG_KEYS = LINE_PRIMARY_LABEL_KEYS;
 const BUILDING_POI_LABEL_LIMIT = 1;
 
+interface LabelContainedPoi {
+  tags: Record<string, string>;
+}
+
 export interface BuildingLabelSource {
   tags: Record<string, string>;
-  containedPois?: ContainedPoi[];
+  containedPois?: LabelContainedPoi[];
 }
 
 // 这个文件专门承接“如何把 normalized feature 压成短标签”这类规则。
@@ -60,7 +63,7 @@ export function getFallbackBuildingLikeLabel(tags: Record<string, string>): stri
 
 // 当前建筑标签规则只在“内部正好有 1 个可展示 contained POI”时借用它。
 // 这是复用现有 overpassGrid 行为，而不是恢复到更早的“前两个 POI 拼接”版本。
-export function getDisplayableContainedPois(containedPois: ContainedPoi[] | undefined): ContainedPoi | null {
+export function getDisplayableContainedPois(containedPois: LabelContainedPoi[] | undefined): LabelContainedPoi | null {
   if (!containedPois || containedPois.length === 0 || containedPois.length > BUILDING_POI_LABEL_LIMIT) {
     return null;
   }
