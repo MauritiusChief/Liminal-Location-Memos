@@ -12,12 +12,6 @@ import { trimTagValue } from './overpassLabels.js';
 
 export type PromptSummaryMode = 'detailed' | 'concise';
 
-export interface PromptPreview {
-  detailedUserPrompt1000: string;
-  conciseUserPrompt1000: string;
-  conciseUserPrompt200: string;
-}
-
 const BUILDING_AND_POI_TAG_KEYS = ['name', 'brand', ...POI_STRUCTURED_TAG_KEYS, ...BUILDING_PRIMARY_LABEL_KEYS] as const;
 const LINE_DETAIL_TAG_KEYS = ['name', ...LINE_PRIMARY_LABEL_KEYS] as const;
 const AREA_DETAIL_TAG_KEYS = ['name', ...AREA_PRIMARY_LABEL_KEYS] as const;
@@ -69,6 +63,11 @@ const SIGNIFICANT_BUILDING_MIN_LEVELS = 10;
 // prompt 层只消费“已经投影好的场景结构”：
 // request + microGrid + polarView + 少量 feature detail。
 // 它不再回看完整 GeoJSON，也不负责任何空间计算。
+/**
+ * TODO: featureDetails是否重复了？polarView好像已经带上 featureDetails 了
+ * @param input
+ * @returns
+ */
 export function buildNormalizationPrompt(input: {
   request: { lat: number; lon: number; radius: number };
   summaryMode?: PromptSummaryMode;

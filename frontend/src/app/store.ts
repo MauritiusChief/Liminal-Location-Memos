@@ -3,6 +3,7 @@ import chatReducer from '../features/chat/chatSlice';
 import llmDebugReducer from '../features/llmDebug/llmDebugSlice';
 import normalizationDebugReducer from '../features/normalizationDebug/normalizationDebugSlice';
 import rawOverpassDebugReducer from '../features/rawOverpassDebug/rawOverpassDebugSlice';
+import summaryPreviewReducer from '../features/summaryPreview/summaryPreviewSlice';
 
 // store 是 Redux 的全局状态仓库。
 // configureStore 会把多个 feature slice 组合成一棵状态树，
@@ -13,6 +14,7 @@ export const store = configureStore({
     normalizationDebug: normalizationDebugReducer,
     rawOverpassDebug: rawOverpassDebugReducer,
     llmDebug: llmDebugReducer,
+    summaryPreview: summaryPreviewReducer,
   },
 });
 

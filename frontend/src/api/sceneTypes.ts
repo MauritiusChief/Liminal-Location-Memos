@@ -1,8 +1,4 @@
-export interface PromptPreview {
-  detailedUserPrompt1000: string;
-  conciseUserPrompt1000: string;
-  conciseUserPrompt200: string;
-}
+export type SummaryPreviewMode = 'detailed_far_1000' | 'concise_far_1000' | 'concise_near_200';
 
 export interface RelationReference {
   role: string;
@@ -174,7 +170,6 @@ export interface NormalizedOverpassResponse {
   diagnostics: NormalizationDiagnostics;
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
-  promptPreview?: PromptPreview;
   raw?: unknown;
 }
 
@@ -209,7 +204,17 @@ export interface SceneLoadResponse {
   featureSummary: DbFeatureSummary[];
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
-  promptPreview?: PromptPreview;
+}
+
+export interface SummaryPreviewRequest {
+  lat: number;
+  lon: number;
+  summaryMode: SummaryPreviewMode;
+}
+
+export interface SummaryPreviewResponse {
+  summaryMode: SummaryPreviewMode;
+  summaryText: string;
 }
 
 export interface RawOverpassResponse {

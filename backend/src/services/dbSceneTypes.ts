@@ -4,6 +4,9 @@ export type DbFeatureCategory = 'building' | 'poi' | 'line' | 'area';
 
 // 这是 DB-native 调试链路里最基础的要素索引。
 // grid / polar / prompt 都只拿它需要的字段，不再依赖完整 GeoJSON feature。
+/**
+ * TODO 验证为什么同时有 GameSceneFeatureDetail 和这个 interface
+ */
 export interface DbFeatureDetail {
   featureId: string;
   osmType: string;
@@ -21,6 +24,9 @@ export interface GameSceneContainedPoi {
   tags: Record<string, string>;
 }
 
+/**
+ * TODO 验证为什么同时有 DbFeatureDetail 和这个 interface
+ */
 export interface GameSceneFeatureDetail {
   featureId: string;
   osmId: number;

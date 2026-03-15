@@ -1,44 +1,13 @@
-import type { GameSceneFeatureDetail } from './dbSceneTypes.js';
-import { buildNormalizedMicroGrid } from './overpassGrid.js';
-import { type NormalizedOverpassRequest } from './overpassNormalization.js';
-import { buildNormalizedPolarView } from './overpassPolar.js';
-import { buildNormalizationPrompt } from './overpassPrompt.js';
 import {
-  fetchGameSceneFeatureDetailsFromDb,
-  fetchGameScenePolarFeaturesFromDb,
-  fetchMicroGridFromDb,
   findNearestCoverageDistanceMeters,
 } from './osmRepository.js';
 import { syncOverpassCoverage } from './overpass/overpassSync.js';
+import {
+  buildSummaryFromProjectedScene,
+  loadGameProjectedScene,
+  type SummaryPreviewMode,
+} from './scene/sceneSummaryService.js';
 import type { GamePosition, SceneContext } from '../types/game.js';
-
-function buildFeatureDetailIndex(featureDetails: GameSceneFeatureDetail[]): Map<string, GameSceneFeatureDetail> {
-  // 这里沿用 debug 链路的索引方式，避免后续 grid/polar/prompt 再重复扫描数组。
-  return new Map(featureDetails.map((feature) => [feature.featureId, feature]));
-}
-
-function buildDbDiagnostics(input: {
-  featureDetails: GameSceneFeatureDetail[];
-  microGrid: ReturnType<typeof buildNormalizedMicroGrid>;
-  polarView: ReturnType<typeof buildNormalizedPolarView>;
-}) {
-  const featureCountsByCategory = input.featureDetails.reduce<Record<'building' | 'poi' | 'line' | 'area', number>>(
-    (counts, feature) => {
-      counts[feature.category] += 1;
-      return counts;
-    },
-    { building: 0, poi: 0, line: 0, area: 0 },
-  );
-
-  return {
-    featureCountsByCategory,
-    totalFeatures: input.featureDetails.length,
-    populatedMicroGridCellCount: input.microGrid.enabled
-      ? input.microGrid.cells.flat().filter((cell) => cell.sourceFeatureIds.length > 0).length
-      : 0,
-    polarFeatureCount: input.polarView.levels.reduce((count, level) => count + level.features.length, 0),
-  };
-}
 
 export async function ensureCoverageForPosition(
   position: GamePosition,
@@ -60,17 +29,16 @@ export async function ensureCoverageForPosition(
   return true;
 }
 
+/**
+ * TODO 解决逻辑漏洞
+ * @param position
+ * @param radius
+ * @returns
+ */
 export async function loadSceneContext(position: GamePosition, radius = 1000): Promise<SceneContext> {
-  // 同一位置会同时加载两份 scene：
-  // 1. 大场景：1km，用于大描述和宏观上下文
-  // 2. 小场景：200m，用于局部描述和移动时的近场判断
-  const largeRequest = { lat: position.lat, lon: position.lon, radius };
-  const smallRequest = { lat: position.lat, lon: position.lon, radius: 200 };
-
-  const [largeScene, smallScene] = await Promise.all([
-    loadProjectedScene(largeRequest),
-    loadProjectedScene(smallRequest),
-  ]);
+  const largeScene = await loadGameProjectedScene({ lat: position.lat, lon: position.lon, radius });
+  // TODO 不要使用 closure 特性，这会造成理解难度的提升
+  const summaryCache = new Map<SummaryPreviewMode, Promise<string>>();
 
   return {
     position,
@@ -78,59 +46,22 @@ export async function loadSceneContext(position: GamePosition, radius = 1000): P
     diagnostics: largeScene.diagnostics,
     microGrid: largeScene.microGrid,
     polarView: largeScene.polarView,
-    detailedSummary1000: largeScene.detailedSummary,
-    conciseSummary1000: largeScene.conciseSummary,
-    conciseSummary200: smallScene.conciseSummary,
-  };
-}
+    getSummary(summaryMode) {
+      const cached = summaryCache.get(summaryMode);
+      if (cached) {
+        return cached;
+      }
 
-async function loadProjectedScene(request: NormalizedOverpassRequest): Promise<{
-  diagnostics: SceneContext['diagnostics'];
-  microGrid: SceneContext['microGrid'];
-  polarView: SceneContext['polarView'];
-  detailedSummary: string;
-  conciseSummary: string;
-}> {
-  // 这里不重新实现空间投影逻辑，而是直接复用现有 DB-native debug 链路：
-  // 取 DB 要素 -> 组装 microGrid/polar -> 生成 prompt summary。
-  const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-    fetchGameSceneFeatureDetailsFromDb(request),
-    fetchMicroGridFromDb(request),
-    fetchGameScenePolarFeaturesFromDb(request),
-  ]);
-  const featureDetailIndex = buildFeatureDetailIndex(featureDetails);
-  const microGrid = buildNormalizedMicroGrid({
-    request,
-    cells: microGridRecords,
-    featureDetails: featureDetailIndex,
-  });
-  const polarView = buildNormalizedPolarView({
-    records: polarRecords,
-    featureDetails: featureDetailIndex,
-    request,
-  });
+      const nextSummaryPromise = (async () => {
+        if (summaryMode === 'detailed_far_1000' || summaryMode === 'concise_far_1000') {
+          return buildSummaryFromProjectedScene(largeScene, summaryMode);
+        }
 
-  return {
-    diagnostics: buildDbDiagnostics({
-      featureDetails,
-      microGrid,
-      polarView,
-    }),
-    microGrid,
-    polarView,
-    detailedSummary: buildNormalizationPrompt({
-      request,
-      summaryMode: 'detailed',
-      microGrid,
-      polarView,
-      featureDetails: featureDetailIndex,
-    }),
-    conciseSummary: buildNormalizationPrompt({
-      request,
-      summaryMode: 'concise',
-      microGrid,
-      polarView,
-      featureDetails: featureDetailIndex,
-    }),
+        const smallScene = await loadGameProjectedScene({ lat: position.lat, lon: position.lon, radius: 200 });
+        return buildSummaryFromProjectedScene(smallScene, summaryMode);
+      })();
+      summaryCache.set(summaryMode, nextSummaryPromise);
+      return nextSummaryPromise;
+    },
   };
 }

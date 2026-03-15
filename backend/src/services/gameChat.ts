@@ -17,6 +17,7 @@ import {
 import { writeGameChatMessageSnapshot } from './gameChatDebugLog.js';
 import { findNearbySmallDescriptions } from './sceneDescriptionRepository.js';
 import { ensureLargeDescription, ensureSmallDescription, filterFarVisibleSmallDescriptions } from './sceneDescriptionService.js';
+import { resolveSceneContextSummaryMode } from './scene/sceneSummaryService.js';
 import type {
   GameChatResponse,
   GameMessage,
@@ -83,6 +84,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   // 5. 若触发工具，则由后端执行对应逻辑，并把 assistant(tool_call) + tool(tool_return) 带回后续轮次生成最终自然语言回复
   const session = await getOrCreateSession(input.sessionId);
   await ensureCoverageForPosition(session.save.playerPosition);
+  // TODO 让逻辑不要再依赖 loadSceneContext 把 summary 准备好
   let sceneContext = await loadSceneContext(session.save.playerPosition);
   let activeLargeDescription = await ensureLargeDescription(sceneContext, session);
   let activeSmallDescription = await ensureSmallDescription(sceneContext, session);
@@ -93,7 +95,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     content: input.message,
     isOpeningPrompt: input.isOpeningPrompt === true,
   };
-  const initialMessages = buildModelMessages({
+  const initialMessages = await buildModelMessages({
     history: session.save.messageHistory,
     userMessage: input.message,
     currentTurnToolMessages: [],
@@ -139,6 +141,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
       });
 
       const moveCoverageSyncTriggered = await ensureCoverageForPosition(nextPosition);
+      // TODO 让逻辑不要再依赖 loadSceneContext 把 summary 准备好。同时清理这部分重复的代码
       sceneContext = await loadSceneContext(nextPosition);
       activeLargeDescription = await ensureLargeDescription(sceneContext, session);
       activeSmallDescription = await ensureSmallDescription(sceneContext, session);
@@ -164,7 +167,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     } else if (modelResponse.toolCall.name === 'look_far') {
       console.log('[DEBUG] runGameChatTurn() - toolCall - look_far');
       promptSummaryMode = 'concise_far';
-      const lookFarResult: LookFarToolResult = buildSceneContextSnapshotPayload({
+      const lookFarResult: LookFarToolResult = await buildSceneContextSnapshotPayload({
         sceneContext,
         largeDescription: activeLargeDescription.descriptionText,
         nearbySmallDescriptions,
@@ -182,7 +185,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     }
 
     const shouldInjectSyntheticSceneRefresh = modelResponse.toolCall.name !== 'look_far';
-    const followUpMessages = buildModelMessages({
+    const followUpMessages = await buildModelMessages({
       history: session.save.messageHistory,
       userMessage: input.message,
       currentTurnToolMessages,
@@ -232,7 +235,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   ];
   session.save.messageHistory = trimMessageHistoryPreservingToolChains(nextHistory, MAX_STORED_TURNS);
   await updateSession(session);
-  const finalMessages = buildModelMessages({
+  const finalMessages = await buildModelMessages({
     history: session.save.messageHistory,
     sceneContext,
     largeDescription: activeLargeDescription.descriptionText,
@@ -323,7 +326,7 @@ function buildGameSystemPrompt(): string {
   ].join('\n');
 }
 
-function buildModelMessages(input: {
+async function buildModelMessages(input: {
   history: GameMessage[];
   sceneContext: SceneContext;
   largeDescription: string;
@@ -333,7 +336,7 @@ function buildModelMessages(input: {
   currentTurnToolMessages?: GameMessage[];
   injectSyntheticSceneRefresh: boolean;
   syntheticSceneRefreshStage?: string;
-}): ChatRequestMessage[] {
+}): Promise<ChatRequestMessage[]> {
   const messages: ChatRequestMessage[] = [
     {
       role: 'system',
@@ -353,7 +356,7 @@ function buildModelMessages(input: {
   if (input.injectSyntheticSceneRefresh) {
     messages.push(...buildSyntheticSceneContextMessages({
       stage: input.syntheticSceneRefreshStage || 'runtime',
-      payload: buildSceneContextSnapshotPayload({
+      payload: await buildSceneContextSnapshotPayload({
         sceneContext: input.sceneContext,
         largeDescription: input.largeDescription,
         nearbySmallDescriptions: input.nearbySmallDescriptions,
@@ -405,19 +408,19 @@ function parseMovePlayerArguments(argumentsText: string): MovePlayerToolInput {
   };
 }
 
-function buildSceneContextSnapshotPayload(input: {
+async function buildSceneContextSnapshotPayload(input: {
   sceneContext: SceneContext;
   largeDescription: string;
   nearbySmallDescriptions: SmallDescriptionRecord[];
   summaryMode: SceneContextSummaryMode;
-}): SceneContextSnapshotPayload {
+}): Promise<SceneContextSnapshotPayload> {
   const farVisibleNotes = filterFarVisibleSmallDescriptions(input.nearbySmallDescriptions, input.sceneContext.position);
 
   return {
     type: 'scene_context_snapshot',
     summaryMode: input.summaryMode,
     largeDescription: input.largeDescription,
-    activeSummary: resolveSceneContextSummary(input.sceneContext, input.summaryMode),
+    activeSummary: await resolveSceneContextSummary(input.sceneContext, input.summaryMode),
     nearbyFarVisibleDetails: farVisibleNotes.map((record) => ({
       distanceMeters: Math.round(record.distanceMeters || 0),
       notes: record.farVisibleNotes || '',
@@ -425,18 +428,17 @@ function buildSceneContextSnapshotPayload(input: {
   };
 }
 
-function resolveSceneContextSummary(
+/**
+ * TODO 改成 object
+ * @param sceneContext
+ * @param summaryMode
+ * @returns
+ */
+async function resolveSceneContextSummary(
   sceneContext: SceneContext,
   summaryMode: SceneContextSummaryMode,
-): string {
-  switch (summaryMode) {
-    case 'concise_far':
-      return sceneContext.conciseSummary1000;
-    case 'detailed_far':
-      return sceneContext.detailedSummary1000;
-    case 'concise_near':
-      return sceneContext.conciseSummary200;
-  }
+): Promise<string> {
+  return sceneContext.getSummary(resolveSceneContextSummaryMode(summaryMode));
 }
 
 function buildSyntheticSceneContextMessages(input: {

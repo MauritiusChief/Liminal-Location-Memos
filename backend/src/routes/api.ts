@@ -11,12 +11,13 @@ import {
 } from '../services/osmRepository.js';
 import { syncOverpassCoverage } from '../services/overpass/overpassSync.js';
 import { buildNormalizedPolarView } from '../services/overpassPolar.js';
-import { buildDefaultDebugSystemPrompt, buildNormalizationPrompt } from '../services/overpassPrompt.js';
+import { buildDefaultDebugSystemPrompt } from '../services/overpassPrompt.js';
 import { type NormalizedOverpassRequest } from '../services/overpassNormalization.js';
 import { runGameChatTurn } from '../services/gameChat.js';
 import { getSessionSnapshot } from '../services/gameSessionStore.js';
+import { buildDebugSummaryPreview, type SummaryPreviewMode } from '../services/scene/sceneSummaryService.js';
 import type { GameChatRequest } from '../types/game.js';
-import type { NormalizedOverpassRequestBody } from '../types/overpass.js';
+import type { NormalizedOverpassRequestBody, SummaryPreviewRequestBody } from '../types/overpass.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -64,11 +65,6 @@ function buildNormalizationDebugPayload(input: {
   featureDetails: DbFeatureDetail[];
   microGridRecords: Awaited<ReturnType<typeof fetchMicroGridFromDb>>;
   polarRecords: Awaited<ReturnType<typeof fetchPolarFeaturesFromDb>>;
-  promptPreview: {
-    detailedUserPrompt1000: string;
-    conciseUserPrompt1000: string;
-    conciseUserPrompt200: string;
-  };
 }) {
   const featureDetailIndex = buildDbFeatureDetailIndex(input.featureDetails);
   // 这里是 DB-native 调试链路的汇合点：
@@ -94,63 +90,6 @@ function buildNormalizationDebugPayload(input: {
     diagnostics,
     microGrid,
     polarView,
-    promptPreview: input.promptPreview,
-  };
-}
-
-async function buildPromptPreviewBundle(position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>) {
-  const farRequest: NormalizedOverpassRequest = { ...position, radius: 1000 };
-  const nearRequest: NormalizedOverpassRequest = { ...position, radius: 200 };
-  const [farScene, nearScene] = await Promise.all([
-    loadPromptScene(farRequest),
-    loadPromptScene(nearRequest),
-  ]);
-
-  return {
-    detailedUserPrompt1000: buildNormalizationPrompt({
-      request: farRequest,
-      summaryMode: 'detailed',
-      microGrid: farScene.microGrid,
-      polarView: farScene.polarView,
-      featureDetails: farScene.featureDetailIndex,
-    }),
-    conciseUserPrompt1000: buildNormalizationPrompt({
-      request: farRequest,
-      summaryMode: 'concise',
-      microGrid: farScene.microGrid,
-      polarView: farScene.polarView,
-      featureDetails: farScene.featureDetailIndex,
-    }),
-    conciseUserPrompt200: buildNormalizationPrompt({
-      request: nearRequest,
-      summaryMode: 'concise',
-      microGrid: nearScene.microGrid,
-      polarView: nearScene.polarView,
-      featureDetails: nearScene.featureDetailIndex,
-    }),
-  };
-}
-
-async function loadPromptScene(request: NormalizedOverpassRequest) {
-  const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-    fetchFeatureDetailsFromDb(request),
-    fetchMicroGridFromDb(request),
-    fetchPolarFeaturesFromDb(request),
-  ]);
-  const featureDetailIndex = buildDbFeatureDetailIndex(featureDetails);
-
-  return {
-    featureDetailIndex,
-    microGrid: buildNormalizedMicroGrid({
-      request,
-      cells: microGridRecords,
-      featureDetails: featureDetailIndex,
-    }),
-    polarView: buildNormalizedPolarView({
-      records: polarRecords,
-      featureDetails: featureDetailIndex,
-      request,
-    }),
   };
 }
 
@@ -179,6 +118,38 @@ function parseNormalizedRequest(body: NormalizedOverpassRequestBody) {
       radius,
     },
   } as const;
+}
+
+function parsePosition(body: Pick<NormalizedOverpassRequestBody, 'lat' | 'lon'>) {
+  const { lat, lon } = body;
+
+  if (
+    typeof lat !== 'number'
+    || !Number.isFinite(lat)
+    || typeof lon !== 'number'
+    || !Number.isFinite(lon)
+  ) {
+    return { error: 'lat and lon must be finite numbers.' } as const;
+  }
+
+  return {
+    value: {
+      lat,
+      lon,
+    },
+  } as const;
+}
+
+function parseSummaryPreviewMode(value: unknown) {
+  if (
+    value === 'detailed_far_1000'
+    || value === 'concise_far_1000'
+    || value === 'concise_near_200'
+  ) {
+    return { value } as const;
+  }
+
+  return { error: 'summaryMode must be one of detailed_far_1000, concise_far_1000, concise_near_200.' } as const;
 }
 
 apiRouter.get('/health', async (_request, response) => {
@@ -321,13 +292,11 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
       fetchMicroGridFromDb(normalizedRequest),
       fetchPolarFeaturesFromDb(normalizedRequest),
     ]);
-    const promptPreview = await buildPromptPreviewBundle(normalizedRequest);
     const debugPayload = buildNormalizationDebugPayload({
       normalizedRequest,
       featureDetails,
       microGridRecords,
       polarRecords,
-      promptPreview,
     });
 
     response.json({
@@ -337,6 +306,33 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
   } catch (error) {
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected database normalized load error.',
+    });
+  }
+});
+
+apiRouter.post('/debug/db/summary-preview', async (request, response) => {
+  const parsedRequest = parsePosition(request.body as SummaryPreviewRequestBody);
+  const parsedSummaryMode = parseSummaryPreviewMode((request.body as SummaryPreviewRequestBody).summaryMode);
+
+  if ('error' in parsedRequest) {
+    response.status(400).json({ error: parsedRequest.error });
+    return;
+  }
+
+  if ('error' in parsedSummaryMode) {
+    response.status(400).json({ error: parsedSummaryMode.error });
+    return;
+  }
+
+  try {
+    const summaryText = await buildDebugSummaryPreview(parsedRequest.value, parsedSummaryMode.value as SummaryPreviewMode);
+    response.json({
+      summaryMode: parsedSummaryMode.value,
+      summaryText,
+    });
+  } catch (error) {
+    response.status(502).json({
+      error: error instanceof Error ? error.message : 'Unexpected summary preview error.',
     });
   }
 });
