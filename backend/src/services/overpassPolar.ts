@@ -471,9 +471,9 @@ function applyLevel3Filter(
     }
     case 'poi':
       return {
-        shouldInclude: false,
-        baseLabel: 'poi',
-        visibleTags: [],
+        shouldInclude: true,
+        baseLabel: getPrimaryLabel(POI_PRIMARY_LABEL_KEYS, detail.tags) || 'poi',
+        visibleTags: collectVisibleTags(detail.tags, ['name', 'brand', ...POI_STRUCTURED_TAG_KEYS]),
       };
     case 'line': {
       const primaryTag = getPrimaryVisibleTag(detail.tags, LINE_PRIMARY_LABEL_KEYS);

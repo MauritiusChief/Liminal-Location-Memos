@@ -43,7 +43,7 @@ export async function ensureLargeDescription(
       '* 再描述 100–300 米范围',
       '* 最后简要提到远处（300 米–1 公里）的地标或环境轮廓',
     ].join('\n'),
-    sceneContext.largeSummary,
+    sceneContext.conciseSummary1000,
     { snapshotType: 'scene-large' },
   );
   console.log('[DEBUG] ensureLargeDescription() - generateReplyWithSystemPrompt() return');
@@ -120,7 +120,7 @@ async function generateSmallDescription(
       '叙述视角：\n纯客观视角，禁止提及人称\n',
       visibleNotes ? `供参考的邻近描述细节：\n${visibleNotes}` : '当前没有可参考的供参考的邻近描述细节。',
     ].join('\n'),
-    sceneContext.smallSummary,
+    sceneContext.conciseSummary200,
     { snapshotType: 'scene-small' },
   );
 

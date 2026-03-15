@@ -104,7 +104,9 @@ export function NormalizationDebugPage() {
   }, [chartPolarView]);
 
   const featureSummaryText = normalizedResult ? JSON.stringify(normalizedResult.featureSummary, null, 2) : '';
-  const promptPreviewText = normalizedResult?.promptPreview?.userPrompt || '';
+  const detailedPromptPreviewText = normalizedResult?.promptPreview?.detailedUserPrompt1000 || '';
+  const conciseFarPromptPreviewText = normalizedResult?.promptPreview?.conciseUserPrompt1000 || '';
+  const conciseNearPromptPreviewText = normalizedResult?.promptPreview?.conciseUserPrompt200 || '';
 
   const handleSyncSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -356,18 +358,29 @@ export function NormalizationDebugPage() {
         <p>No polar view yet.</p>
       )}
 
-      <h3>Prompt Preview</h3>
-      <button type="button" onClick={() => void handleCopyText(promptPreviewText)} disabled={!promptPreviewText}>
-        Copy Prompt
+      <h3>Detailed Prompt Preview (1000m)</h3>
+      <button type="button" onClick={() => void handleCopyText(detailedPromptPreviewText)} disabled={!detailedPromptPreviewText}>
+        Copy Detailed Prompt
       </button>
-      <br />
-      <br />
-      {/* <textarea
-        readOnly
-        rows={20}
-        cols={120}
-        value={normalizedResult?.promptPreview?.userPrompt || 'No prompt preview yet.'}
-      /> */}
+      {/* <pre style={{ border: '1px solid', maxHeight: '320px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+        {detailedPromptPreviewText || 'No detailed prompt preview yet.'}
+      </pre> */}
+
+      <h3>Concise Prompt Preview (1000m)</h3>
+      <button type="button" onClick={() => void handleCopyText(conciseFarPromptPreviewText)} disabled={!conciseFarPromptPreviewText}>
+        Copy Concise 1000m Prompt
+      </button>
+      <pre style={{ border: '1px solid', maxHeight: '320px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+        {conciseFarPromptPreviewText || 'No concise 1000m prompt preview yet.'}
+      </pre>
+
+      <h3>Concise Prompt Preview (200m)</h3>
+      <button type="button" onClick={() => void handleCopyText(conciseNearPromptPreviewText)} disabled={!conciseNearPromptPreviewText}>
+        Copy Concise 200m Prompt
+      </button>
+      {/* <pre style={{ border: '1px solid', maxHeight: '320px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
+        {conciseNearPromptPreviewText || 'No concise 200m prompt preview yet.'}
+      </pre> */}
 
       {syncRequest.error ? (
         <section>

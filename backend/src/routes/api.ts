@@ -68,6 +68,11 @@ function buildNormalizationDebugPayload(input: {
   featureDetails: DbFeatureDetail[];
   microGridRecords: Awaited<ReturnType<typeof fetchMicroGridFromDb>>;
   polarRecords: Awaited<ReturnType<typeof fetchPolarFeaturesFromDb>>;
+  promptPreview: {
+    detailedUserPrompt1000: string;
+    conciseUserPrompt1000: string;
+    conciseUserPrompt200: string;
+  };
 }) {
   const featureDetailIndex = buildDbFeatureDetailIndex(input.featureDetails);
   // 这里是 DB-native 调试链路的汇合点：
@@ -82,14 +87,6 @@ function buildNormalizationDebugPayload(input: {
     featureDetails: featureDetailIndex,
     request: input.normalizedRequest,
   });
-  const promptPreview = {
-    userPrompt: buildNormalizationPrompt({
-      request: input.normalizedRequest,
-      microGrid,
-      polarView,
-      featureDetails: featureDetailIndex,
-    }),
-  };
   const diagnostics = buildDbDiagnostics({
     featureDetails: input.featureDetails,
     microGrid,
@@ -101,7 +98,63 @@ function buildNormalizationDebugPayload(input: {
     diagnostics,
     microGrid,
     polarView,
-    promptPreview,
+    promptPreview: input.promptPreview,
+  };
+}
+
+async function buildPromptPreviewBundle(position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>) {
+  const farRequest: NormalizedOverpassRequest = { ...position, radius: 1000 };
+  const nearRequest: NormalizedOverpassRequest = { ...position, radius: 200 };
+  const [farScene, nearScene] = await Promise.all([
+    loadPromptScene(farRequest),
+    loadPromptScene(nearRequest),
+  ]);
+
+  return {
+    detailedUserPrompt1000: buildNormalizationPrompt({
+      request: farRequest,
+      summaryMode: 'detailed',
+      microGrid: farScene.microGrid,
+      polarView: farScene.polarView,
+      featureDetails: farScene.featureDetailIndex,
+    }),
+    conciseUserPrompt1000: buildNormalizationPrompt({
+      request: farRequest,
+      summaryMode: 'concise',
+      microGrid: farScene.microGrid,
+      polarView: farScene.polarView,
+      featureDetails: farScene.featureDetailIndex,
+    }),
+    conciseUserPrompt200: buildNormalizationPrompt({
+      request: nearRequest,
+      summaryMode: 'concise',
+      microGrid: nearScene.microGrid,
+      polarView: nearScene.polarView,
+      featureDetails: nearScene.featureDetailIndex,
+    }),
+  };
+}
+
+async function loadPromptScene(request: NormalizedOverpassRequest) {
+  const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
+    fetchFeatureDetailsFromDb(request),
+    fetchMicroGridFromDb(request),
+    fetchPolarFeaturesFromDb(request),
+  ]);
+  const featureDetailIndex = buildDbFeatureDetailIndex(featureDetails);
+
+  return {
+    featureDetailIndex,
+    microGrid: buildNormalizedMicroGrid({
+      request,
+      cells: microGridRecords,
+      featureDetails: featureDetailIndex,
+    }),
+    polarView: buildNormalizedPolarView({
+      records: polarRecords,
+      featureDetails: featureDetailIndex,
+      request,
+    }),
   };
 }
 
@@ -277,11 +330,13 @@ apiRouter.post('/db/normalized-load', async (request, response) => {
       fetchMicroGridFromDb(normalizedRequest),
       fetchPolarFeaturesFromDb(normalizedRequest),
     ]);
+    const promptPreview = await buildPromptPreviewBundle(normalizedRequest);
     const debugPayload = buildNormalizationDebugPayload({
       normalizedRequest,
       featureDetails,
       microGridRecords,
       polarRecords,
+      promptPreview,
     });
 
     response.json({

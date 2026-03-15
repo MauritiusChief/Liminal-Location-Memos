@@ -54,7 +54,7 @@ export interface MovePlayerToolResult {
   coverageSyncTriggered: boolean;
 }
 
-export type SceneContextSummaryMode = 'small' | 'large';
+export type SceneContextSummaryMode = 'concise_near' | 'concise_far' | 'detailed_far';
 
 export interface SceneContextSnapshotPayload {
   type: 'scene_context_snapshot';
@@ -77,8 +77,9 @@ export interface SceneContext {
   diagnostics: DbNormalizationDiagnostics;
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
-  largeSummary: string;
-  smallSummary: string;
+  detailedSummary1000: string;
+  conciseSummary1000: string;
+  conciseSummary200: string;
 }
 
 export interface LargeDescriptionRecord {

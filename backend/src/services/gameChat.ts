@@ -80,7 +80,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   let activeLargeDescription = await ensureLargeDescription(sceneContext, session);
   let activeSmallDescription = await ensureSmallDescription(sceneContext, session);
   let nearbySmallDescriptions = await mergeNearbySmallDescriptions(session, session.save.playerPosition, activeSmallDescription);
-  let promptSummaryMode: SceneContextSummaryMode = 'small';
+  let promptSummaryMode: SceneContextSummaryMode = 'concise_near';
   const userMessage: GameMessage = {
     role: 'user',
     content: input.message,
@@ -158,7 +158,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
       });
     } else if (modelResponse.toolCall.name === 'look_far') {
       console.log('[DEBUG] runGameChatTurn() - toolCall - look_far');
-      promptSummaryMode = 'large';
+      promptSummaryMode = 'detailed_far';
       const lookFarResult: LookFarToolResult = buildSceneContextSnapshotPayload({
         sceneContext,
         largeDescription: activeLargeDescription.descriptionText,
@@ -418,14 +418,26 @@ function buildSceneContextSnapshotPayload(input: {
     type: 'scene_context_snapshot',
     summaryMode: input.summaryMode,
     largeDescription: input.largeDescription,
-    activeSummary: input.summaryMode === 'large'
-      ? input.sceneContext.largeSummary
-      : input.sceneContext.smallSummary,
+    activeSummary: resolveSceneContextSummary(input.sceneContext, input.summaryMode),
     nearbyFarVisibleDetails: farVisibleNotes.map((record) => ({
       distanceMeters: Math.round(record.distanceMeters || 0),
       notes: record.farVisibleNotes || '',
     })),
   };
+}
+
+function resolveSceneContextSummary(
+  sceneContext: SceneContext,
+  summaryMode: SceneContextSummaryMode,
+): string {
+  switch (summaryMode) {
+    case 'concise_far':
+      return sceneContext.conciseSummary1000;
+    case 'detailed_far':
+      return sceneContext.detailedSummary1000;
+    case 'concise_near':
+      return sceneContext.conciseSummary200;
+  }
 }
 
 function buildSyntheticSceneContextMessages(input: {

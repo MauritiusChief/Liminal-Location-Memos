@@ -1,5 +1,7 @@
 export interface PromptPreview {
-  userPrompt: string;
+  detailedUserPrompt1000: string;
+  conciseUserPrompt1000: string;
+  conciseUserPrompt200: string;
 }
 
 export interface RelationReference {
