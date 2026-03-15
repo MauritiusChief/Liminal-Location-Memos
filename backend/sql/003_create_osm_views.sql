@@ -9,6 +9,7 @@ SELECT
     jsonb_build_object(
       'name', name,
       'building', building,
+      'man_made', man_made,
       'height', height,
       'level', level,
       'building:levels', building_levels
@@ -36,7 +37,9 @@ SELECT
       'tourism', tourism,
       'leisure', leisure,
       'craft', craft,
-      'healthcare', healthcare
+      'healthcare', healthcare,
+      'natural', "natural",
+      'man_made', man_made
     ) || tags_extra
   )::jsonb AS tags,
   relations,
@@ -56,7 +59,8 @@ SELECT
       'name', name,
       'highway', highway,
       'railway', railway,
-      'waterway', waterway
+      'waterway', waterway,
+      'man_made', man_made
     ) || tags_extra
   )::jsonb AS tags,
   relations,

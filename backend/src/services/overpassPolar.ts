@@ -1,16 +1,21 @@
 import type { DbFeatureDetail, DbPolarFeatureRecord } from './dbSceneTypes.js';
 import {
+  AREA_PRIMARY_LABEL_KEYS,
+  BUILDING_PRIMARY_LABEL_KEYS,
+  BUILDING_STRUCTURED_TAG_KEYS,
+  LINE_PRIMARY_LABEL_KEYS,
+  POI_PRIMARY_LABEL_KEYS,
+  POI_STRUCTURED_TAG_KEYS,
+} from './osmFeatureConfig.js';
+import {
   bearingBetweenCoordinates,
   circularAngleDeltaDegrees,
   distanceBetweenCoordinates,
 } from './overpassGeometry.js';
 import {
-  AREA_TAG_KEYS,
   buildBuildingBaseLabel,
-  getFallbackBuildingLabel,
+  getFallbackBuildingLikeLabel,
   getPrimaryLabel,
-  POI_TAG_KEYS,
-  ROAD_TAG_KEYS,
   trimTagValue,
 } from './overpassLabels.js';
 
@@ -383,25 +388,25 @@ function applyLevel1Filter(
       return {
         shouldInclude: true,
         baseLabel: buildBuildingBaseLabel(detail),
-        visibleTags: collectVisibleTags(detail.tags, ['name', 'brand', ...POI_TAG_KEYS, 'building']),
+        visibleTags: collectVisibleTags(detail.tags, ['name', 'brand', ...POI_STRUCTURED_TAG_KEYS, ...BUILDING_PRIMARY_LABEL_KEYS]),
       };
     case 'poi':
       return {
         shouldInclude: true,
-        baseLabel: getPrimaryLabel(POI_TAG_KEYS, detail.tags) || 'poi',
-        visibleTags: collectVisibleTags(detail.tags, ['name', 'brand', ...POI_TAG_KEYS]),
+        baseLabel: getPrimaryLabel(POI_PRIMARY_LABEL_KEYS, detail.tags) || 'poi',
+        visibleTags: collectVisibleTags(detail.tags, ['name', 'brand', ...POI_STRUCTURED_TAG_KEYS]),
       };
     case 'line':
       return {
         shouldInclude: metrics.orientationDegrees !== undefined,
-        baseLabel: getPrimaryLabel(ROAD_TAG_KEYS, detail.tags) || 'way',
-        visibleTags: collectVisibleTags(detail.tags, ['name', ...ROAD_TAG_KEYS]),
+        baseLabel: getPrimaryLabel(LINE_PRIMARY_LABEL_KEYS, detail.tags) || 'way',
+        visibleTags: collectVisibleTags(detail.tags, ['name', ...LINE_PRIMARY_LABEL_KEYS]),
       };
     case 'area':
       return {
         shouldInclude: true,
-        baseLabel: getPrimaryLabel(AREA_TAG_KEYS, detail.tags) || 'area',
-        visibleTags: collectVisibleTags(detail.tags, ['name', ...AREA_TAG_KEYS]),
+        baseLabel: getPrimaryLabel(AREA_PRIMARY_LABEL_KEYS, detail.tags) || 'area',
+        visibleTags: collectVisibleTags(detail.tags, ['name', ...AREA_PRIMARY_LABEL_KEYS]),
       };
   }
 }
@@ -419,10 +424,10 @@ function applyLevel2Filter(
       return {
         shouldInclude: true,
         baseLabel: buildBuildingBaseLabel(detail),
-        visibleTags: collectVisibleTags(detail.tags, ['building', 'height', 'level', 'building:levels', 'name', 'brand']),
+        visibleTags: collectVisibleTags(detail.tags, [...BUILDING_STRUCTURED_TAG_KEYS, 'name', 'brand']),
       };
     case 'poi': {
-      const primaryTag = getPrimaryVisibleTag(detail.tags, POI_TAG_KEYS);
+      const primaryTag = getPrimaryVisibleTag(detail.tags, POI_PRIMARY_LABEL_KEYS);
       return {
         shouldInclude: primaryTag !== null,
         baseLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'poi',
@@ -430,7 +435,7 @@ function applyLevel2Filter(
       };
     }
     case 'line': {
-      const primaryTag = getPrimaryVisibleTag(detail.tags, ROAD_TAG_KEYS);
+      const primaryTag = getPrimaryVisibleTag(detail.tags, LINE_PRIMARY_LABEL_KEYS);
       return {
         shouldInclude: primaryTag !== null && metrics.orientationDegrees !== undefined,
         baseLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'way',
@@ -438,7 +443,7 @@ function applyLevel2Filter(
       };
     }
     case 'area': {
-      const primaryTag = getPrimaryVisibleTag(detail.tags, AREA_TAG_KEYS);
+      const primaryTag = getPrimaryVisibleTag(detail.tags, AREA_PRIMARY_LABEL_KEYS);
       return {
         shouldInclude: primaryTag !== null,
         baseLabel: primaryTag ? `${primaryTag.key}:${primaryTag.value}` : 'area',
@@ -458,11 +463,10 @@ function applyLevel3Filter(
 } {
   switch (metrics.category) {
     case 'building': {
-      const buildingValue = trimTagValue(detail.tags.building);
       return {
         shouldInclude: true,
-        baseLabel: getFallbackBuildingLabel(buildingValue || undefined),
-        visibleTags: collectVisibleTags(detail.tags, ['building', 'height', 'level', 'building:levels']),
+        baseLabel: getFallbackBuildingLikeLabel(detail.tags),
+        visibleTags: collectVisibleTags(detail.tags, BUILDING_STRUCTURED_TAG_KEYS),
       };
     }
     case 'poi':
@@ -472,7 +476,7 @@ function applyLevel3Filter(
         visibleTags: [],
       };
     case 'line': {
-      const primaryTag = getPrimaryVisibleTag(detail.tags, ROAD_TAG_KEYS);
+      const primaryTag = getPrimaryVisibleTag(detail.tags, LINE_PRIMARY_LABEL_KEYS);
       const shouldInclude =
         primaryTag !== null &&
         metrics.orientationDegrees !== undefined &&
@@ -484,7 +488,7 @@ function applyLevel3Filter(
       };
     }
     case 'area': {
-      const primaryTag = getPrimaryVisibleTag(detail.tags, AREA_TAG_KEYS);
+      const primaryTag = getPrimaryVisibleTag(detail.tags, AREA_PRIMARY_LABEL_KEYS);
       const shouldInclude = primaryTag !== null && metrics.widestSpan.angleWidthDegrees >= 5;
       return {
         shouldInclude,

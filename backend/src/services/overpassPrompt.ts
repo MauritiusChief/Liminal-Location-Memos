@@ -1,15 +1,22 @@
 import type { DbFeatureDetail } from './dbSceneTypes.js';
 import type { NormalizedMicroGrid } from './overpassGrid.js';
 import type { NormalizedPolarFeatureSummary, NormalizedPolarView } from './overpassPolar.js';
-import { AREA_TAG_KEYS, POI_TAG_KEYS, ROAD_TAG_KEYS, trimTagValue } from './overpassLabels.js';
+import {
+  AREA_PRIMARY_LABEL_KEYS,
+  BUILDING_PRIMARY_LABEL_KEYS,
+  LINE_PRIMARY_LABEL_KEYS,
+  POI_PRIMARY_LABEL_KEYS,
+  POI_STRUCTURED_TAG_KEYS,
+} from './osmFeatureConfig.js';
+import { trimTagValue } from './overpassLabels.js';
 
 export interface PromptPreview {
   userPrompt: string;
 }
 
-const BUILDING_AND_POI_TAG_KEYS = ['name', 'brand', ...POI_TAG_KEYS, 'building'] as const;
-const LINE_DETAIL_TAG_KEYS = ['name', ...ROAD_TAG_KEYS] as const;
-const AREA_DETAIL_TAG_KEYS = ['name', ...AREA_TAG_KEYS] as const;
+const BUILDING_AND_POI_TAG_KEYS = ['name', 'brand', ...POI_STRUCTURED_TAG_KEYS, ...BUILDING_PRIMARY_LABEL_KEYS] as const;
+const LINE_DETAIL_TAG_KEYS = ['name', ...LINE_PRIMARY_LABEL_KEYS] as const;
+const AREA_DETAIL_TAG_KEYS = ['name', ...AREA_PRIMARY_LABEL_KEYS] as const;
 const POLAR_LEVEL_PROMPT_CONFIG: Record<
   1 | 2 | 3,
   {
@@ -274,7 +281,7 @@ function getFeatureDisplayTitle(feature: DbFeatureDetail): string {
     return brand;
   }
 
-  for (const key of [...POI_TAG_KEYS, ...ROAD_TAG_KEYS, ...AREA_TAG_KEYS, 'building'] as const) {
+  for (const key of [...POI_PRIMARY_LABEL_KEYS, ...LINE_PRIMARY_LABEL_KEYS, ...AREA_PRIMARY_LABEL_KEYS, ...BUILDING_PRIMARY_LABEL_KEYS] as const) {
     const value = trimTagValue(feature.tags[key]);
     if (value) {
       return `${key}:${value}`;

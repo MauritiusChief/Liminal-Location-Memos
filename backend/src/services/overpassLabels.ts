@@ -1,8 +1,15 @@
 import type { ContainedPoi } from './overpassNormalization.js';
+import {
+  AREA_PRIMARY_LABEL_KEYS,
+  BUILDING_PRIMARY_LABEL_KEYS,
+  LINE_PRIMARY_LABEL_KEYS,
+  POI_PRIMARY_LABEL_KEYS,
+} from './osmFeatureConfig.js';
 
-export const POI_TAG_KEYS = ['shop', 'amenity', 'office', 'tourism', 'leisure', 'craft', 'healthcare'] as const;
-export const AREA_TAG_KEYS = ['landuse', 'natural', 'leisure', 'amenity'] as const;
-export const ROAD_TAG_KEYS = ['highway', 'railway', 'waterway'] as const;
+export const BUILDING_TAG_KEYS = BUILDING_PRIMARY_LABEL_KEYS;
+export const POI_TAG_KEYS = POI_PRIMARY_LABEL_KEYS;
+export const AREA_TAG_KEYS = AREA_PRIMARY_LABEL_KEYS;
+export const ROAD_TAG_KEYS = LINE_PRIMARY_LABEL_KEYS;
 const BUILDING_POI_LABEL_LIMIT = 1;
 
 export interface BuildingLabelSource {
@@ -41,6 +48,16 @@ export function getFallbackBuildingLabel(buildingTagValue: string | undefined): 
   return buildingValue && buildingValue !== 'yes' ? `building:${buildingValue}` : 'building';
 }
 
+export function getFallbackBuildingLikeLabel(tags: Record<string, string>): string {
+  const buildingValue = trimTagValue(tags.building);
+  if (buildingValue) {
+    return getFallbackBuildingLabel(buildingValue);
+  }
+
+  const manMadeValue = trimTagValue(tags.man_made);
+  return manMadeValue ? `man_made:${manMadeValue}` : 'building';
+}
+
 // 当前建筑标签规则只在“内部正好有 1 个可展示 contained POI”时借用它。
 // 这是复用现有 overpassGrid 行为，而不是恢复到更早的“前两个 POI 拼接”版本。
 export function getDisplayableContainedPois(containedPois: ContainedPoi[] | undefined): ContainedPoi | null {
@@ -75,7 +92,7 @@ export function buildBuildingBaseLabel(
   feature: BuildingLabelSource,
 ): string {
   const buildingName = trimTagValue(feature.tags.name);
-  const fallbackBuildingLabel = getFallbackBuildingLabel(feature.tags.building);
+  const fallbackBuildingLabel = getFallbackBuildingLikeLabel(feature.tags);
   const containedPoi = getDisplayableContainedPois(feature.containedPois);
   const containedPoiLabel = containedPoi ? getPoiDisplayLabel(containedPoi.tags) : null;
 
