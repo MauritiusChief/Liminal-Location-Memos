@@ -1,5 +1,6 @@
 import { generateReplyWithSystemPrompt } from './llm.js';
 import {
+  buildSceneSummaryForGamePosition,
   DEFAULT_LARGE_DESCRIPTION_SUMMARY_MODE,
   DEFAULT_SMALL_DESCRIPTION_SUMMARY_MODE,
 } from './scene/sceneSummaryService.js';
@@ -30,8 +31,10 @@ export async function ensureLargeDescription(
   }
 
   console.log('[DEBUG] ensureLargeDescription() - generateReplyWithSystemPrompt() call');
-  // TODO scene context 内部存着一个函数？
-  const conciseFarSummary = await sceneContext.getSummary(DEFAULT_LARGE_DESCRIPTION_SUMMARY_MODE);
+  const conciseFarSummary = await buildSceneSummaryForGamePosition(
+    sceneContext.position,
+    DEFAULT_LARGE_DESCRIPTION_SUMMARY_MODE,
+  );
   const generated = await generateReplyWithSystemPrompt(
     [
       '你是一个环境叙述生成器。你的任务是将结构化的地理环境数据转换为用于文字探索游戏的环境描述。',
@@ -112,8 +115,10 @@ async function generateSmallDescription(
   const visibleNotes = nearbySmallDescriptions
     .flatMap((record) => (record.farVisibleNotes ? [`- ${record.farVisibleNotes}`] : []))
     .join('\n');
-  // TODO scene context 内部存着一个函数？
-  const conciseNearSummary = await sceneContext.getSummary(DEFAULT_SMALL_DESCRIPTION_SUMMARY_MODE);
+  const conciseNearSummary = await buildSceneSummaryForGamePosition(
+    sceneContext.position,
+    DEFAULT_SMALL_DESCRIPTION_SUMMARY_MODE,
+  );
   const generated = await generateReplyWithSystemPrompt(
     [
       '你是一个文字探索游戏中的局部环境描述生成器。',

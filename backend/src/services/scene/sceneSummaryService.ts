@@ -136,6 +136,20 @@ export function buildSummaryFromProjectedScene<TFeatureDetail extends SceneFeatu
   });
 }
 
+export async function buildSceneSummaryForGamePosition(
+  position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>,
+  summaryMode: SummaryPreviewMode,
+): Promise<string> {
+  const config = SUMMARY_PREVIEW_MODE_CONFIG[summaryMode];
+  const scene = await loadProjectedScene({
+    lat: position.lat,
+    lon: position.lon,
+    radius: config.radius,
+  }, 'game');
+
+  return buildSummaryFromProjectedScene(scene, summaryMode);
+}
+
 /**
  * 注：单纯用来 debug `buildNormalizationPrompt` 函数用
  * @param position

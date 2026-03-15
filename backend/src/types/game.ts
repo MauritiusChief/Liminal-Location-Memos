@@ -3,7 +3,6 @@ import type { NormalizedMicroGrid } from '../services/overpassGrid.js';
 import type { NormalizedPolarView } from '../services/overpassPolar.js';
 import type {
   SceneContextSummaryMode,
-  SummaryPreviewMode,
 } from '../services/scene/sceneSummaryService.js';
 
 export type { SceneContextSummaryMode } from '../services/scene/sceneSummaryService.js';
@@ -74,14 +73,13 @@ export interface SceneContextSnapshotPayload {
 export type LookFarToolResult = SceneContextSnapshotPayload;
 
 export interface SceneContext {
-  // SceneContext 是一次“当前位置场景装载”的完整结果。
-  // summary 不落库，而是按需从 scene data 现算并缓存。
+  // SceneContext 只表示一次“当前位置场景装载”的结果。
+  // 它不再负责 summary 生成或缓存。
   position: GamePosition;
   radius: number;
   diagnostics: DbNormalizationDiagnostics;
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
-  getSummary: (summaryMode: SummaryPreviewMode) => Promise<string>;
 }
 
 export interface LargeDescriptionRecord {

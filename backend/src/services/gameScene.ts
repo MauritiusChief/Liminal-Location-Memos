@@ -3,10 +3,7 @@ import {
 } from './osmRepository.js';
 import { syncOverpassCoverage } from './overpass/overpassSync.js';
 import {
-  buildSummaryFromProjectedScene,
   loadProjectedScene,
-  SUMMARY_PREVIEW_MODE_CONFIG,
-  type SummaryPreviewMode,
 } from './scene/sceneSummaryService.js';
 import type { GamePosition, SceneContext } from '../types/game.js';
 
@@ -30,16 +27,8 @@ export async function ensureCoverageForPosition(
   return true;
 }
 
-/**
- * TODO 解决逻辑漏洞
- * @param position
- * @param radius
- * @returns
- */
 export async function loadSceneContext(position: GamePosition, radius = 1000): Promise<SceneContext> {
   const largeScene = await loadProjectedScene({ lat: position.lat, lon: position.lon, radius }, 'game');
-  // TODO 不要使用 closure 特性，这会造成理解难度的提升
-  const summaryCache = new Map<SummaryPreviewMode, Promise<string>>();
 
   return {
     position,
@@ -47,26 +36,5 @@ export async function loadSceneContext(position: GamePosition, radius = 1000): P
     diagnostics: largeScene.diagnostics,
     microGrid: largeScene.microGrid,
     polarView: largeScene.polarView,
-    getSummary(summaryMode) {
-      const cached = summaryCache.get(summaryMode);
-      if (cached) {
-        return cached;
-      }
-
-      const nextSummaryPromise = (async () => {
-        if (SUMMARY_PREVIEW_MODE_CONFIG[summaryMode].radius >= largeScene.request.radius) {
-          return buildSummaryFromProjectedScene(largeScene, summaryMode);
-        }
-
-        const smallScene = await loadProjectedScene({
-          lat: position.lat,
-          lon: position.lon,
-          radius: SUMMARY_PREVIEW_MODE_CONFIG[summaryMode].radius,
-        }, 'game');
-        return buildSummaryFromProjectedScene(smallScene, summaryMode);
-      })();
-      summaryCache.set(summaryMode, nextSummaryPromise);
-      return nextSummaryPromise;
-    },
   };
 }

@@ -17,7 +17,7 @@ import {
 import { writeGameChatMessageSnapshot } from './gameChatDebugLog.js';
 import { findNearbySmallDescriptions } from './sceneDescriptionRepository.js';
 import { ensureLargeDescription, ensureSmallDescription, filterFarVisibleSmallDescriptions } from './sceneDescriptionService.js';
-import { resolveSceneContextSummaryMode } from './scene/sceneSummaryService.js';
+import { buildSceneSummaryForGamePosition, resolveSceneContextSummaryMode } from './scene/sceneSummaryService.js';
 import type {
   GameChatResponse,
   GameMessage,
@@ -84,7 +84,6 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   // 5. 若触发工具，则由后端执行对应逻辑，并把 assistant(tool_call) + tool(tool_return) 带回后续轮次生成最终自然语言回复
   const session = await getOrCreateSession(input.sessionId);
   await ensureCoverageForPosition(session.save.playerPosition);
-  // TODO 让逻辑不要再依赖 loadSceneContext 把 summary 准备好
   let sceneContext = await loadSceneContext(session.save.playerPosition);
   let activeLargeDescription = await ensureLargeDescription(sceneContext, session);
   let activeSmallDescription = await ensureSmallDescription(sceneContext, session);
@@ -141,7 +140,6 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
       });
 
       const moveCoverageSyncTriggered = await ensureCoverageForPosition(nextPosition);
-      // TODO 让逻辑不要再依赖 loadSceneContext 把 summary 准备好。同时清理这部分重复的代码
       sceneContext = await loadSceneContext(nextPosition);
       activeLargeDescription = await ensureLargeDescription(sceneContext, session);
       activeSmallDescription = await ensureSmallDescription(sceneContext, session);
@@ -420,7 +418,10 @@ async function buildSceneContextSnapshotPayload(input: {
     type: 'scene_context_snapshot',
     summaryMode: input.summaryMode,
     largeDescription: input.largeDescription,
-    activeSummary: await input.sceneContext.getSummary(resolveSceneContextSummaryMode(input.summaryMode)),
+    activeSummary: await buildSceneSummaryForGamePosition(
+      input.sceneContext.position,
+      resolveSceneContextSummaryMode(input.summaryMode),
+    ),
     nearbyFarVisibleDetails: farVisibleNotes.map((record) => ({
       distanceMeters: Math.round(record.distanceMeters || 0),
       notes: record.farVisibleNotes || '',
