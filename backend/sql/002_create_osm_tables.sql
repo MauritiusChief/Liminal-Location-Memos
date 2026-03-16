@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS osm_buildings (
   building_levels text NULL,
   tags_extra jsonb NOT NULL DEFAULT '{}'::jsonb,
   relations jsonb NOT NULL DEFAULT '[]'::jsonb,
+  outline_references jsonb NOT NULL DEFAULT '[]'::jsonb,
   meta jsonb NOT NULL DEFAULT '{}'::jsonb,
   tainted boolean NOT NULL DEFAULT false,
   last_synced_at timestamptz NOT NULL DEFAULT now(),

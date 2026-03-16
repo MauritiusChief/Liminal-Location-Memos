@@ -71,6 +71,7 @@ SELECT
     ) || b.tags_extra
   )::jsonb AS tags,
   b.relations,
+  b.outline_references,
   b.meta,
   b.tainted,
   COALESCE(
@@ -119,6 +120,7 @@ GROUP BY
   b.building_levels,
   b.tags_extra,
   b.relations,
+  b.outline_references,
   b.meta,
   b.tainted
 ORDER BY b.osm_id ASC;

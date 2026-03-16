@@ -1,4 +1,4 @@
-import type { ContainedPoi, RelationReference } from '../overpassNormalization.js';
+import type { ContainedPoi, OutlineReference, RelationReference } from '../overpassNormalization.js';
 
 export type DbFeatureCategory = 'building' | 'poi' | 'line' | 'area';
 
@@ -17,6 +17,7 @@ export interface SceneFeatureDetail {
   tags: Record<string, string>;
   osmType?: string;
   relations?: RelationReference[];
+  outlineReferences?: OutlineReference[];
   meta?: Record<string, string | number>;
   tainted?: boolean;
   containedPois?: ContainedPoiString[] | ContainedPoi[];

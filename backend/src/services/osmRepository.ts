@@ -5,6 +5,7 @@ import type {
   NormalizedFeature,
   NormalizedOverpassRequest,
   ContainedPoi,
+  OutlineReference,
   RelationReference,
 } from './overpassNormalization.js';
 import type {
@@ -23,6 +24,7 @@ type BuildingRow = {
   geometry_type: string;
   tags: Record<string, string>;
   relations: RelationReference[];
+  outline_references: OutlineReference[];
   meta: Record<string, string | number>;
   tainted: boolean;
   contained_pois: ContainedPoi[] | null;
@@ -149,6 +151,7 @@ export async function fetchSceneFeatureDetailsFromDb(
       geometryType: row.geometry_type,
       tags: row.tags || {},
       relations: row.relations || [],
+      outlineReferences: row.outline_references || [],
       meta: row.meta || {},
       tainted: row.tainted ?? false,
       containedPois: row.contained_pois && row.contained_pois.length > 0 ? row.contained_pois : undefined,
@@ -302,6 +305,7 @@ async function upsertBuildingFeature(client: PoolClient, feature: NormalizedFeat
       tags['building:levels'] || null,
       JSON.stringify(tagsExtra),
       JSON.stringify(feature.properties.relations),
+      JSON.stringify(feature.properties.outlineReferences || []),
       JSON.stringify(feature.properties.meta),
       feature.properties.tainted,
     ],

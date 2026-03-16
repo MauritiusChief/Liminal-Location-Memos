@@ -20,6 +20,7 @@ import type {
   NormalizationDiagnostics,
   NormalizedFeatureCollection,
   NormalizedFeatureProperties,
+  OutlineReference,
   RelationReference,
 } from '../services/overpassNormalization.js';
 
@@ -77,6 +78,7 @@ export type {
   PolarAngularSpan,
   PolarCoordinateSample,
   PolarDirectionCluster,
+  OutlineReference,
   RelationReference,
   SceneFeatureDetail,
 };
