@@ -1,4 +1,4 @@
-import type { ContainedPoi, OutlineReference, RelationReference } from '../overpassNormalization.js';
+import type { ContainedPoi, OutlineReference, RelationReference } from './overpassNormalization.js';
 
 export type DbFeatureCategory = 'building' | 'poi' | 'line' | 'area';
 

@@ -1,11 +1,11 @@
-import type { DbNormalizationDiagnostics } from '../services/scene/sceneTypes.js';
+import type { DbNormalizationDiagnostics } from '../services/sceneTypes.js';
 import type { NormalizedMicroGrid } from '../services/overpassGrid.js';
 import type { NormalizedPolarView } from '../services/overpassPolar.js';
 import type {
   SceneContextSummaryMode,
-} from '../services/scene/sceneSummaryService.js';
+} from '../services/sceneSummaryService.js';
 
-export type { SceneContextSummaryMode } from '../services/scene/sceneSummaryService.js';
+export type { SceneContextSummaryMode } from '../services/sceneSummaryService.js';
 
 // 这一组类型描述“正式游戏链路”里前后端共享的核心状态：
 // 玩家坐标、会话历史、工具调用结果，以及后端返回给首页 debug 面板的数据。

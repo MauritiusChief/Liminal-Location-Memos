@@ -13,7 +13,7 @@ import type {
   SceneFeatureDetail,
   PolarFeatureRecord,
   DbMicroGridCellRecord,
-} from './scene/sceneTypes.js';
+} from './sceneTypes.js';
 import { getStructuredTagColumns, matchFeatureCategory } from './osmFeatureConfig.js';
 import type { GamePosition } from '../types/game.js';
 

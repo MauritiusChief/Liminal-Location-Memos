@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
-import type { SceneFeatureDetail } from '../services/scene/sceneTypes.js';
+import type { SceneFeatureDetail } from '../services/sceneTypes.js';
 import { generateReplyWithSystemPrompt } from '../services/llm.js';
 import { buildNormalizedMicroGrid } from '../services/overpassGrid.js';
 import {
@@ -9,7 +9,7 @@ import {
   fetchSceneFeatureDetailsFromDb,
   fetchScenePolarFeaturesFromDb,
 } from '../services/osmRepository.js';
-import { syncOverpassCoverage } from '../services/overpass/overpassSync.js';
+import { syncOverpassCoverage } from '../services/overpassSync.js';
 import { buildNormalizedPolarView } from '../services/overpassPolar.js';
 import { buildDefaultDebugSystemPrompt } from '../services/overpassPrompt.js';
 import { type NormalizedOverpassRequest } from '../services/overpassNormalization.js';
@@ -19,7 +19,7 @@ import {
   buildProjectedSceneSummary,
   isSummaryPreviewMode,
   SUMMARY_PREVIEW_MODE_VALUE_LIST,
-} from '../services/scene/sceneSummaryService.js';
+} from '../services/sceneSummaryService.js';
 import type { GameChatRequest } from '../types/game.js';
 import type { NormalizedOverpassRequestBody, SummaryPreviewRequestBody } from '../types/overpass.js';
 

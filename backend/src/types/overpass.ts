@@ -2,9 +2,9 @@ import type {
   DbFeatureCategory,
   DbNormalizationDiagnostics,
   SceneFeatureDetail,
-} from '../services/scene/sceneTypes.js';
+} from '../services/sceneTypes.js';
 import type { NormalizedMicroGrid, NormalizedMicroGridCell } from '../services/overpassGrid.js';
-import type { SummaryPreviewMode } from '../services/scene/sceneSummaryService.js';
+import type { SummaryPreviewMode } from '../services/sceneSummaryService.js';
 import type {
   NormalizedPolarFeatureSummary,
   NormalizedPolarLevel,

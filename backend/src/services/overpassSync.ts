@@ -4,8 +4,8 @@ import {
   convertOverpassToNormalizedFeatures,
   type NormalizedFeature,
   type NormalizedOverpassRequest,
-} from '../overpassNormalization.js';
-import { syncNormalizedFeaturesToDb } from '../osmRepository.js';
+} from './overpassNormalization.js';
+import { syncNormalizedFeaturesToDb } from './osmRepository.js';
 
 export interface OverpassSyncResult {
   query: string;
