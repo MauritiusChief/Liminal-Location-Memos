@@ -21,24 +21,22 @@
 2. `ensureCoverageForPosition()`
    - 在 `backend/src/services/gameScene.ts`
    - 先检查当前位置到最近 `osm_sync_coverage` 的距离
-   - 若 300m 内已有 coverage，则直接复用
+   - 若 300m 内已有 coverage，则直接从数据库请求数据，以复用现存数据
    - 否则发起一次半径 `1000m` 的 Overpass 同步并写回数据库
 3. `loadSceneContext()`
    - 在 `backend/src/services/gameScene.ts`
-   - 同时加载 `1000m` 大场景和 `200m` 小场景
-   - 复用数据库链路生成 `microGrid`、`polarView` 和 summary
-   - 当前 `SceneContext` 里保留：
-     - `detailedSummary1000`
-     - `conciseSummary1000`
-     - `conciseSummary200`
+   - 默认先加载 `1000m` 大场景
+   - 复用数据库链路生成 `diagnostics`、`microGrid`、`polarView`
+   - `SceneContext` 不再预生成三档 summary，而是通过 `getSummary(mode)` 按需生成并缓存
+   - `concise_near_200` 首次被请求时，才会额外装载 `200m` 小场景
 4. `ensureLargeDescription()`
    - 在 `backend/src/services/sceneDescriptionService.ts`
    - 先按距离和 `effectiveRadiusM` 复用已有大描述
-   - 未命中时再基于 `conciseSummary1000` 调用 LLM 生成
+   - 未命中时再按需请求 `concise_far_1000` summary 调用 LLM 生成
 5. `ensureSmallDescription()`
    - 在 `backend/src/services/sceneDescriptionService.ts`
    - 先复用已有小描述
-   - 未命中时基于 `conciseSummary200` 调用 LLM 生成
+   - 未命中时按需请求 `concise_near_200` summary 调用 LLM 生成
    - 小描述仍会保存 `farVisibleNotes`，供后续场景快照提供远距可见细节
 6. `mergeNearbySmallDescriptions()`
    - 在 `backend/src/services/gameChat.ts`
@@ -65,7 +63,7 @@
    - 把工具结果写成 `tool` 消息，继续后续轮次
 4. 如果模型调用 `look_far`
    - 不移动坐标
-   - 只切换为远眺视角，生成新的场景快照并写成 `tool` 消息
+   - 只切换为远眺视角，并按需请求 `concise_far_1000` summary 生成新的场景快照后写成 `tool` 消息
 5. 每次工具调用后
    - 都会再通过 synthetic `scene_context_snapshot` assistant/tool 消息把最新环境快照补回消息流
    - 再次调用 `runChatCompletionWithTools()` 生成后续回复
@@ -90,7 +88,9 @@
 - `backend/src/services/gameChat.ts`
   - 负责单轮对话编排、tool loop、消息组装与 history 裁剪
 - `backend/src/services/gameScene.ts`
-  - 负责 coverage 补洞、场景装载和 `SceneContext` 生成
+  - 负责 coverage 补洞、基础场景装载和带缓存的 `SceneContext` 生成
+- `backend/src/services/scene/sceneSummaryService.ts`
+  - 负责 summary mode 到半径/提示词模式的映射，以及单一 summary 的按需生成
 - `backend/src/services/gameSessionStore.ts`
   - 负责 session 的内存缓存、JSON 持久化和对外快照转换
 - `backend/src/services/sceneDescriptionService.ts`

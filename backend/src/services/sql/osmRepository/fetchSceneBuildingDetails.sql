@@ -24,7 +24,6 @@ poi_best_building AS (
       ORDER BY ST_Area(b.geom::geography) ASC, b.osm_id ASC
     ) AS row_number
   FROM candidate_pois p
-  -- 建筑包含 POI 的归属关系统一以 PostGIS 的 covers 为准。
   JOIN candidate_buildings b ON ST_Covers(b.geom, p.geom)
 ),
 assigned_pois AS (

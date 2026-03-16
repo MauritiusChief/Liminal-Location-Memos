@@ -1,5 +1,10 @@
 import { generateReplyWithSystemPrompt } from './llm.js';
 import {
+  buildProjectedSceneSummary,
+  DEFAULT_LARGE_DESCRIPTION_SUMMARY_MODE,
+  DEFAULT_SMALL_DESCRIPTION_SUMMARY_MODE,
+} from './scene/sceneSummaryService.js';
+import {
   findActiveLargeDescription,
   findNearbySmallDescriptions,
   findReusableSmallDescription,
@@ -26,6 +31,11 @@ export async function ensureLargeDescription(
   }
 
   console.log('[DEBUG] ensureLargeDescription() - generateReplyWithSystemPrompt() call');
+  const conciseFarSummary = await buildProjectedSceneSummary(
+    sceneContext.position,
+    DEFAULT_LARGE_DESCRIPTION_SUMMARY_MODE,
+    'game',
+  );
   const generated = await generateReplyWithSystemPrompt(
     [
       '你是一个环境叙述生成器。你的任务是将结构化的地理环境数据转换为用于文字探索游戏的环境描述。',
@@ -43,7 +53,7 @@ export async function ensureLargeDescription(
       '* 再描述 100–300 米范围',
       '* 最后简要提到远处（300 米–1 公里）的地标或环境轮廓',
     ].join('\n'),
-    sceneContext.conciseSummary1000,
+    conciseFarSummary,
     { snapshotType: 'scene-large' },
   );
   console.log('[DEBUG] ensureLargeDescription() - generateReplyWithSystemPrompt() return');
@@ -106,6 +116,11 @@ async function generateSmallDescription(
   const visibleNotes = nearbySmallDescriptions
     .flatMap((record) => (record.farVisibleNotes ? [`- ${record.farVisibleNotes}`] : []))
     .join('\n');
+  const conciseNearSummary = await buildProjectedSceneSummary(
+    sceneContext.position,
+    DEFAULT_SMALL_DESCRIPTION_SUMMARY_MODE,
+    'game',
+  );
   const generated = await generateReplyWithSystemPrompt(
     [
       '你是一个文字探索游戏中的局部环境描述生成器。',
@@ -120,7 +135,7 @@ async function generateSmallDescription(
       '叙述视角：\n纯客观视角，禁止提及人称\n',
       visibleNotes ? `供参考的邻近描述细节：\n${visibleNotes}` : '当前没有可参考的供参考的邻近描述细节。',
     ].join('\n'),
-    sceneContext.conciseSummary200,
+    conciseNearSummary,
     { snapshotType: 'scene-small' },
   );
 

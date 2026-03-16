@@ -1,10 +1,10 @@
 import type {
   DbFeatureCategory,
-  DbFeatureDetail,
   DbNormalizationDiagnostics,
-} from '../services/dbSceneTypes.js';
+  SceneFeatureDetail,
+} from '../services/scene/sceneTypes.js';
 import type { NormalizedMicroGrid, NormalizedMicroGridCell } from '../services/overpassGrid.js';
-import type { PromptPreview } from '../services/overpassPrompt.js';
+import type { SummaryPreviewMode } from '../services/scene/sceneSummaryService.js';
 import type {
   NormalizedPolarFeatureSummary,
   NormalizedPolarLevel,
@@ -40,23 +40,31 @@ export interface NormalizedOverpassResponseBody {
   diagnostics: NormalizationDiagnostics;
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
-  promptPreview?: PromptPreview;
   raw?: unknown;
 }
 
 export interface DbDebugLoadResponseBody {
   query: string;
   diagnostics: DbNormalizationDiagnostics;
-  featureSummary: DbFeatureDetail[];
+  featureSummary: SceneFeatureDetail[];
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
-  promptPreview?: PromptPreview;
+}
+
+export interface SummaryPreviewRequestBody {
+  lat?: number;
+  lon?: number;
+  summaryMode?: SummaryPreviewMode;
+}
+
+export interface SummaryPreviewResponseBody {
+  summaryMode: SummaryPreviewMode;
+  summaryText: string;
 }
 
 export type {
   ContainedPoi,
   DbFeatureCategory,
-  DbFeatureDetail,
   DbNormalizationDiagnostics,
   NormalizedFeatureProperties,
   NormalizedMicroGrid,
@@ -65,10 +73,10 @@ export type {
   NormalizedPolarLevel,
   NormalizedPolarView,
   PolarFeatureCategory,
-  PromptPreview,
   PolarVisibleTag,
   PolarAngularSpan,
   PolarCoordinateSample,
   PolarDirectionCluster,
   RelationReference,
+  SceneFeatureDetail,
 };

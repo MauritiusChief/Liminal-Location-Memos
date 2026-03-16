@@ -1,26 +1,27 @@
 import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
-import type { DbFeatureDetail } from '../services/dbSceneTypes.js';
+import type { SceneFeatureDetail } from '../services/scene/sceneTypes.js';
 import { generateReplyWithSystemPrompt } from '../services/llm.js';
 import { buildNormalizedMicroGrid } from '../services/overpassGrid.js';
 import {
-  fetchFeatureDetailsFromDb,
   fetchMicroGridFromDb,
-  fetchPolarFeaturesFromDb,
-  syncNormalizedFeaturesToDb,
+  fetchSceneFeatureDetailsFromDb,
+  fetchScenePolarFeaturesFromDb,
 } from '../services/osmRepository.js';
+import { syncOverpassCoverage } from '../services/overpass/overpassSync.js';
 import { buildNormalizedPolarView } from '../services/overpassPolar.js';
-import { buildDefaultDebugSystemPrompt, buildNormalizationPrompt } from '../services/overpassPrompt.js';
-import {
-  buildNormalizedOverpassQuery,
-  convertOverpassToNormalizedFeatures,
-  type NormalizedOverpassRequest,
-} from '../services/overpassNormalization.js';
+import { buildDefaultDebugSystemPrompt } from '../services/overpassPrompt.js';
+import { type NormalizedOverpassRequest } from '../services/overpassNormalization.js';
 import { runGameChatTurn } from '../services/gameChat.js';
 import { getSessionSnapshot } from '../services/gameSessionStore.js';
+import {
+  buildProjectedSceneSummary,
+  isSummaryPreviewMode,
+  SUMMARY_PREVIEW_MODE_VALUE_LIST,
+} from '../services/scene/sceneSummaryService.js';
 import type { GameChatRequest } from '../types/game.js';
-import type { NormalizedOverpassRequestBody } from '../types/overpass.js';
+import type { NormalizedOverpassRequestBody, SummaryPreviewRequestBody } from '../types/overpass.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -34,7 +35,7 @@ interface OverpassRequestBody {
 export const apiRouter = Router();
 
 function buildDbDiagnostics(input: {
-  featureDetails: DbFeatureDetail[];
+  featureDetails: SceneFeatureDetail[];
   microGrid: ReturnType<typeof buildNormalizedMicroGrid>;
   polarView: ReturnType<typeof buildNormalizedPolarView>;
 }) {
@@ -58,23 +59,18 @@ function buildDbDiagnostics(input: {
   };
 }
 
-function buildDbFeatureDetailIndex(featureDetails: DbFeatureDetail[]): Map<string, DbFeatureDetail> {
+function buildDebugSceneFeatureDetailIndex(featureDetails: SceneFeatureDetail[]): Map<string, SceneFeatureDetail> {
   // 统一做成 featureId -> detail 索引，避免 grid/polar/prompt 各自重复扫描数组。
   return new Map(featureDetails.map((feature) => [feature.featureId, feature]));
 }
 
 function buildNormalizationDebugPayload(input: {
   normalizedRequest: NormalizedOverpassRequest;
-  featureDetails: DbFeatureDetail[];
+  featureDetails: SceneFeatureDetail[];
   microGridRecords: Awaited<ReturnType<typeof fetchMicroGridFromDb>>;
-  polarRecords: Awaited<ReturnType<typeof fetchPolarFeaturesFromDb>>;
-  promptPreview: {
-    detailedUserPrompt1000: string;
-    conciseUserPrompt1000: string;
-    conciseUserPrompt200: string;
-  };
+  polarRecords: Awaited<ReturnType<typeof fetchScenePolarFeaturesFromDb>>;
 }) {
-  const featureDetailIndex = buildDbFeatureDetailIndex(input.featureDetails);
+  const featureDetailIndex = buildDebugSceneFeatureDetailIndex(input.featureDetails);
   // 这里是 DB-native 调试链路的汇合点：
   // repository 提供三份投影原料，service 层再分别拼出 grid / polar / prompt。
   const microGrid = buildNormalizedMicroGrid({
@@ -98,63 +94,6 @@ function buildNormalizationDebugPayload(input: {
     diagnostics,
     microGrid,
     polarView,
-    promptPreview: input.promptPreview,
-  };
-}
-
-async function buildPromptPreviewBundle(position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>) {
-  const farRequest: NormalizedOverpassRequest = { ...position, radius: 1000 };
-  const nearRequest: NormalizedOverpassRequest = { ...position, radius: 200 };
-  const [farScene, nearScene] = await Promise.all([
-    loadPromptScene(farRequest),
-    loadPromptScene(nearRequest),
-  ]);
-
-  return {
-    detailedUserPrompt1000: buildNormalizationPrompt({
-      request: farRequest,
-      summaryMode: 'detailed',
-      microGrid: farScene.microGrid,
-      polarView: farScene.polarView,
-      featureDetails: farScene.featureDetailIndex,
-    }),
-    conciseUserPrompt1000: buildNormalizationPrompt({
-      request: farRequest,
-      summaryMode: 'concise',
-      microGrid: farScene.microGrid,
-      polarView: farScene.polarView,
-      featureDetails: farScene.featureDetailIndex,
-    }),
-    conciseUserPrompt200: buildNormalizationPrompt({
-      request: nearRequest,
-      summaryMode: 'concise',
-      microGrid: nearScene.microGrid,
-      polarView: nearScene.polarView,
-      featureDetails: nearScene.featureDetailIndex,
-    }),
-  };
-}
-
-async function loadPromptScene(request: NormalizedOverpassRequest) {
-  const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-    fetchFeatureDetailsFromDb(request),
-    fetchMicroGridFromDb(request),
-    fetchPolarFeaturesFromDb(request),
-  ]);
-  const featureDetailIndex = buildDbFeatureDetailIndex(featureDetails);
-
-  return {
-    featureDetailIndex,
-    microGrid: buildNormalizedMicroGrid({
-      request,
-      cells: microGridRecords,
-      featureDetails: featureDetailIndex,
-    }),
-    polarView: buildNormalizedPolarView({
-      records: polarRecords,
-      featureDetails: featureDetailIndex,
-      request,
-    }),
   };
 }
 
@@ -183,6 +122,34 @@ function parseNormalizedRequest(body: NormalizedOverpassRequestBody) {
       radius,
     },
   } as const;
+}
+
+function parsePosition(body: Pick<NormalizedOverpassRequestBody, 'lat' | 'lon'>) {
+  const { lat, lon } = body;
+
+  if (
+    typeof lat !== 'number'
+    || !Number.isFinite(lat)
+    || typeof lon !== 'number'
+    || !Number.isFinite(lon)
+  ) {
+    return { error: 'lat and lon must be finite numbers.' } as const;
+  }
+
+  return {
+    value: {
+      lat,
+      lon,
+    },
+  } as const;
+}
+
+function parseSummaryPreviewMode(value: unknown) {
+  if (isSummaryPreviewMode(value)) {
+    return { value } as const;
+  }
+
+  return { error: `summaryMode must be one of ${SUMMARY_PREVIEW_MODE_VALUE_LIST}.` } as const;
 }
 
 apiRouter.get('/health', async (_request, response) => {
@@ -262,7 +229,7 @@ apiRouter.get('/game/session/:sessionId', async (request, response) => {
   }
 });
 
-apiRouter.post('/overpass', async (request, response) => {
+apiRouter.post('/debug/overpass', async (request, response) => {
   const { query } = request.body as OverpassRequestBody;
 
   if (!query || !query.trim()) {
@@ -283,7 +250,7 @@ apiRouter.post('/overpass', async (request, response) => {
   }
 });
 
-apiRouter.post('/db/sync-overpass', async (request, response) => {
+apiRouter.post('/debug/db/sync-overpass', async (request, response) => {
   const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
 
   if ('error' in parsed) {
@@ -292,19 +259,14 @@ apiRouter.post('/db/sync-overpass', async (request, response) => {
   }
 
   const normalizedRequest = parsed.value;
-  const query = buildNormalizedOverpassQuery(normalizedRequest);
 
   try {
-    const raw = (await overpassJson(query, {
-      endpoint: 'https://overpass-api.de/api/interpreter',
-    })) as Parameters<typeof convertOverpassToNormalizedFeatures>[0];
-    const features = convertOverpassToNormalizedFeatures(raw);
-    const counts = await syncNormalizedFeaturesToDb(features, normalizedRequest);
+    const result = await syncOverpassCoverage(normalizedRequest);
 
     response.json({
-      query,
-      featureCount: features.length,
-      counts,
+      query: result.query,
+      featureCount: result.features.length,
+      counts: result.counts,
       coverageRecorded: true,
     });
   } catch (error) {
@@ -314,7 +276,7 @@ apiRouter.post('/db/sync-overpass', async (request, response) => {
   }
 });
 
-apiRouter.post('/db/normalized-load', async (request, response) => {
+apiRouter.post('/debug/db/normalized-load', async (request, response) => {
   const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
 
   if ('error' in parsed) {
@@ -326,17 +288,15 @@ apiRouter.post('/db/normalized-load', async (request, response) => {
 
   try {
     const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-      fetchFeatureDetailsFromDb(normalizedRequest),
+      fetchSceneFeatureDetailsFromDb(normalizedRequest, 'debug'),
       fetchMicroGridFromDb(normalizedRequest),
-      fetchPolarFeaturesFromDb(normalizedRequest),
+      fetchScenePolarFeaturesFromDb(normalizedRequest, 'debug'),
     ]);
-    const promptPreview = await buildPromptPreviewBundle(normalizedRequest);
     const debugPayload = buildNormalizationDebugPayload({
       normalizedRequest,
       featureDetails,
       microGridRecords,
       polarRecords,
-      promptPreview,
     });
 
     response.json({
@@ -346,6 +306,33 @@ apiRouter.post('/db/normalized-load', async (request, response) => {
   } catch (error) {
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected database normalized load error.',
+    });
+  }
+});
+
+apiRouter.post('/debug/db/summary-preview', async (request, response) => {
+  const parsedRequest = parsePosition(request.body as SummaryPreviewRequestBody);
+  const parsedSummaryMode = parseSummaryPreviewMode((request.body as SummaryPreviewRequestBody).summaryMode);
+
+  if ('error' in parsedRequest) {
+    response.status(400).json({ error: parsedRequest.error });
+    return;
+  }
+
+  if ('error' in parsedSummaryMode) {
+    response.status(400).json({ error: parsedSummaryMode.error });
+    return;
+  }
+
+  try {
+    const summaryText = await buildProjectedSceneSummary(parsedRequest.value, parsedSummaryMode.value, 'debug');
+    response.json({
+      summaryMode: parsedSummaryMode.value,
+      summaryText,
+    });
+  } catch (error) {
+    response.status(502).json({
+      error: error instanceof Error ? error.message : 'Unexpected summary preview error.',
     });
   }
 });

@@ -98,8 +98,6 @@ non_line_features AS (
     p.osm_id,
     p.category,
     p.geometry_type,
-    -- 非 line 仍然只需要一组样本点；
-    -- 这里直接按拓扑顺序聚合，避免再额外引入坐标排序副作用。
     jsonb_agg(jsonb_build_array(ST_X(p.point_geom), ST_Y(p.point_geom)) ORDER BY p.point_path) AS sample_coordinates,
     jsonb_build_array(MIN(ST_X(p.center_geom)), MIN(ST_Y(p.center_geom))) AS center_coordinate,
     NULL::jsonb AS line_path_coordinates,

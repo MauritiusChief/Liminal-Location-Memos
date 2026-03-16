@@ -1,6 +1,11 @@
-import type { DbNormalizationDiagnostics } from '../services/dbSceneTypes.js';
+import type { DbNormalizationDiagnostics } from '../services/scene/sceneTypes.js';
 import type { NormalizedMicroGrid } from '../services/overpassGrid.js';
 import type { NormalizedPolarView } from '../services/overpassPolar.js';
+import type {
+  SceneContextSummaryMode,
+} from '../services/scene/sceneSummaryService.js';
+
+export type { SceneContextSummaryMode } from '../services/scene/sceneSummaryService.js';
 
 // 这一组类型描述“正式游戏链路”里前后端共享的核心状态：
 // 玩家坐标、会话历史、工具调用结果，以及后端返回给首页 debug 面板的数据。
@@ -54,8 +59,6 @@ export interface MovePlayerToolResult {
   coverageSyncTriggered: boolean;
 }
 
-export type SceneContextSummaryMode = 'concise_near' | 'concise_far' | 'detailed_far';
-
 export interface SceneContextSnapshotPayload {
   type: 'scene_context_snapshot';
   summaryMode: SceneContextSummaryMode;
@@ -70,16 +73,13 @@ export interface SceneContextSnapshotPayload {
 export type LookFarToolResult = SceneContextSnapshotPayload;
 
 export interface SceneContext {
-  // SceneContext 是一次“当前位置场景装载”的完整结果。
-  // summary 不落库，而是每次从 scene data 现算后塞进这里。
+  // SceneContext 只表示一次“当前位置场景装载”的结果。
+  // 它不再负责 summary 生成或缓存。
   position: GamePosition;
   radius: number;
   diagnostics: DbNormalizationDiagnostics;
   microGrid?: NormalizedMicroGrid;
   polarView?: NormalizedPolarView;
-  detailedSummary1000: string;
-  conciseSummary1000: string;
-  conciseSummary200: string;
 }
 
 export interface LargeDescriptionRecord {

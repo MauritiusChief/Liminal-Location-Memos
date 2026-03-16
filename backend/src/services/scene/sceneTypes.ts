@@ -1,33 +1,25 @@
-import type { ContainedPoi, RelationReference } from './overpassNormalization.js';
+import type { ContainedPoi, RelationReference } from '../overpassNormalization.js';
 
 export type DbFeatureCategory = 'building' | 'poi' | 'line' | 'area';
 
-// 这是 DB-native 调试链路里最基础的要素索引。
-// grid / polar / prompt 都只拿它需要的字段，不再依赖完整 GeoJSON feature。
-export interface DbFeatureDetail {
-  featureId: string;
-  osmType: string;
-  osmId: number;
-  category: DbFeatureCategory;
-  geometryType: string;
-  tags: Record<string, string>;
-  relations: RelationReference[];
-  meta: Record<string, string | number>;
-  tainted: boolean;
-  containedPois?: ContainedPoi[];
-}
-
-export interface GameSceneContainedPoi {
+export interface ContainedPoiString {
   tags: Record<string, string>;
 }
 
-export interface GameSceneFeatureDetail {
+/**
+ * 描述 scene 中地物细节，grid / polar / prompt 只依赖这一组公共字段。
+ */
+export interface SceneFeatureDetail {
   featureId: string;
   osmId: number;
   category: DbFeatureCategory;
   geometryType: string;
   tags: Record<string, string>;
-  containedPois?: GameSceneContainedPoi[];
+  osmType?: string;
+  relations?: RelationReference[];
+  meta?: Record<string, string | number>;
+  tainted?: boolean;
+  containedPois?: ContainedPoiString[] | ContainedPoi[];
 }
 
 // Micro grid 在 SQL 里已经完成了“这个格子命中了谁”的空间判断；
@@ -44,12 +36,12 @@ export interface DbMicroGridCellRecord {
 
 // Polar 记录保留“用于叙述的坐标样本”和一个中心候选点，
 // bearing / widest span / 方向聚类仍在 TS 中完成。
-export interface DbPolarFeatureRecord {
+export interface PolarFeatureRecord {
   featureId: string;
-  osmType: string;
   osmId: number;
   category: DbFeatureCategory;
   geometryType: string;
+  osmType?: string;
   sampleCoordinates: [number, number][];
   centerCoordinate: [number, number] | null;
   // line 会额外带一条“按可见顺序排列”的路径，
@@ -57,17 +49,6 @@ export interface DbPolarFeatureRecord {
   linePathCoordinates?: [number, number][];
   // line 顶点序列和 centerPoint 分离：
   // 后续 4 点抽样与回归都只从这组顶点里挑。
-  lineVertexCoordinates?: [number, number][];
-}
-
-export interface GameScenePolarFeatureRecord {
-  featureId: string;
-  osmId: number;
-  category: DbFeatureCategory;
-  geometryType: string;
-  sampleCoordinates: [number, number][];
-  centerCoordinate: [number, number] | null;
-  linePathCoordinates?: [number, number][];
   lineVertexCoordinates?: [number, number][];
 }
 

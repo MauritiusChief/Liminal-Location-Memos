@@ -12,6 +12,9 @@ function ensureDbConfig() {
   }
 }
 
+/**
+ * 连接数据库 helper
+ */
 export function getDbPool(): pg.Pool {
   ensureDbConfig();
 
@@ -29,6 +32,9 @@ export function getDbPool(): pg.Pool {
   return pool;
 }
 
+/**
+ * 查询数据库 helper
+ */
 export async function query<T extends QueryResultRow = QueryResultRow>(
   text: string,
   params: unknown[] = [],
@@ -36,6 +42,9 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
   return getDbPool().query<T>(text, params);
 }
 
+/**
+ * TODO 搞清楚这个函数究竟是干什么的
+ */
 export async function withTransaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await getDbPool().connect();
 
@@ -52,6 +61,10 @@ export async function withTransaction<T>(callback: (client: PoolClient) => Promi
   }
 }
 
+/**
+ * 注：通过查询数据库中的表格名表示数据库连接成功
+ * @returns 注：若成功会返回数据库中的表格名
+ */
 export async function checkDatabaseHealth(): Promise<
   | { enabled: false; ok: false; reason: string }
   | { enabled: true; ok: true; tableNames: string | null }

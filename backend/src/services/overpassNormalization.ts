@@ -5,7 +5,7 @@ export interface NormalizedOverpassRequest {
   lat: number;
   lon: number;
   radius: number;
-  includeRaw?: boolean;
+  includeRaw?: boolean; // debug 用，用来检查规整化前的 overpass api 返回结果
 }
 
 export interface RelationReference {
@@ -204,7 +204,12 @@ function isMemberLineCoveredByRelationLine(feature: NormalizedFeature, relationL
   });
 }
 
-export function buildNormalizedOverpassQuery(request: NormalizedOverpassRequest): string {
+/**
+ * 生成专门用于规整化函数的 Overpass Query，无任何过滤且启用 skel 参数
+ * @param request 经纬度与范围
+ * @returns 生成的 Overpass Query
+ */
+export function buildJsonSkelOverpassQuery(request: NormalizedOverpassRequest): string {
   return [
     '[out:json][timeout:25];',
     `nwr(around:${request.radius},${request.lat},${request.lon});`,
@@ -214,6 +219,11 @@ export function buildNormalizedOverpassQuery(request: NormalizedOverpassRequest)
   ].join('\n');
 }
 
+/**
+ * 注：规整化过程中有一些数据会被刻意舍弃
+ * @param raw 规整化之前的 osm 数据
+ * @returns 规整化后的地物数据
+ */
 export function convertOverpassToNormalizedFeatures(raw: OverpassJsonResponse): NormalizedFeature[] {
   const converted = osmtogeojson(raw, { flatProperties: false }) as FeatureCollection;
   const normalizedCandidates = converted.features.map((feature) => normalizeFeature(feature));
