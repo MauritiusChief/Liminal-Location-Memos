@@ -276,8 +276,15 @@ type RawRelationMember = {
 type BuildingRelationInfo = {
   rel: number;
   reltags: Record<string, string>;
+  outlineMembers: RawRelationMember[];
   outlineReferences: OutlineReference[];
   inheritedTags: Record<string, string>;
+};
+
+type FeatureTagSource = {
+  osmType: string;
+  osmId: number;
+  tags: Record<string, string>;
 };
 
 /**
@@ -311,10 +318,43 @@ function buildRawWayTagIndex(raw: OverpassJsonResponse): Map<number, RawWayEleme
       continue;
     }
 
+    const tags = toStringRecord(element.tags);
+    const existing = index.get(element.id);
+    const mergedTags = existing ? mergeTagsPreferPrimary(existing.tags, tags) : tags;
+
     index.set(element.id, {
       type: 'way',
       id: element.id,
-      tags: toStringRecord(element.tags),
+      tags: mergedTags,
+    });
+  }
+
+  return index;
+}
+
+/**
+ * 从已转换的 polygon feature 中建立稳定的标签索引，避免 skel element 覆盖掉 body tags。
+ * @param features 规整化候选地物
+ * @returns 以 osmType/osmId 为键的标签索引
+ */
+function buildFeatureTagIndex(features: NormalizedFeature[]): Map<string, FeatureTagSource> {
+  const index = new Map<string, FeatureTagSource>();
+
+  for (const feature of features) {
+    if (!isPolygonGeometry(feature)) {
+      continue;
+    }
+
+    const key = `${feature.properties.osmType}/${feature.properties.osmId}`;
+    const existing = index.get(key);
+    const mergedTags = existing
+      ? mergeTagsPreferPrimary(existing.tags, feature.properties.tags)
+      : feature.properties.tags;
+
+    index.set(key, {
+      osmType: feature.properties.osmType,
+      osmId: feature.properties.osmId,
+      tags: mergedTags,
     });
   }
 
@@ -330,8 +370,15 @@ function toRelationMembers(value: unknown): RawRelationMember[] {
   if (!Array.isArray(value)) {
     return [];
   }
+  // console.log("toRelationMembers() value:", value);
 
   return value.flatMap((entry) => {
+    // console.log("entry",entry);
+    // console.log(isRecord(entry));
+    // console.log(entry.type);
+    // console.log(entry.ref);
+    // console.log(entry.role);
+
     if (
       !isRecord(entry)
       || typeof entry.type !== 'string'
@@ -370,18 +417,23 @@ function mergeTagsPreferPrimary(
 }
 
 /**
- * 为 building relation 汇总 outline 引用与可继承标签，供最终 relation feature 提升信息。
+ * 先从未被 osmtogeojson 改写的 raw relation 中提取 outline members，保留原始 number 型 ref。
  * @param raw overpass 原始响应
- * @param rawWayTagIndex 原始 way tags 索引
- * @returns 以 relation id 为键的 building relation 信息索引
+ * @returns 以 relation id 为键的 building relation 信息索引骨架
  */
-function buildBuildingRelationIndex(raw: OverpassJsonResponse, rawWayTagIndex: Map<number, RawWayElement>): Map<number, BuildingRelationInfo> {
+function buildBuildingRelationSkeletonIndex(raw: OverpassJsonResponse): Map<number, BuildingRelationInfo> {
   const relationIndex = new Map<number, BuildingRelationInfo>();
 
   for (const element of raw.elements) {
     if (!isRelationElement(element) || element.type !== 'relation' || typeof element.id !== 'number') {
       continue;
     }
+    // if (element.id === 7816899) {
+    //   console.log("buildBuildingRelationIndex(): element.members", element.members);
+    //   // 控制台显示大量 {type: 'way', role: 'part'/'outline', ref: ..., geometry: [...]}
+    //   console.log("buildBuildingRelationIndex(): toRelationMembers(element.members)", toRelationMembers(element.members));
+    //   // 控制台显示为空 []
+    // }
 
     const reltags = toStringRecord(element.tags);
     if (reltags.type !== 'building') {
@@ -389,17 +441,51 @@ function buildBuildingRelationIndex(raw: OverpassJsonResponse, rawWayTagIndex: M
     }
 
     const outlineMembers = toRelationMembers(element.members)
-      .filter((member) => member.type === 'way' && member.role === 'outline')
+      .filter((member) => member.type === 'way' && member.role === 'outline');
+
+    relationIndex.set(element.id, {
+      rel: element.id,
+      reltags,
+      outlineMembers,
+      outlineReferences: [],
+      inheritedTags: reltags,
+    });
+  }
+
+  return relationIndex;
+}
+
+/**
+ * 为 building relation 汇总 outline 引用与可继承标签，供最终 relation feature 提升信息。
+ * @param relationSkeletonIndex 基于原始 raw relation 提前提取出的成员索引
+ * @param featureTagIndex 已转换 polygon feature 的标签索引
+ * @param rawWayTagIndex 原始 way tags 索引
+ * @returns 以 relation id 为键的 building relation 信息索引
+ */
+function buildBuildingRelationIndex(
+  relationSkeletonIndex: Map<number, BuildingRelationInfo>,
+  featureTagIndex: Map<string, FeatureTagSource>,
+  rawWayTagIndex: Map<number, RawWayElement>,
+): Map<number, BuildingRelationInfo> {
+  const relationIndex = new Map<number, BuildingRelationInfo>();
+
+  for (const buildingRelation of relationSkeletonIndex.values()) {
+    const outlineMembers = buildingRelation.outlineMembers
       .map((member) => ({
         member,
-        tags: rawWayTagIndex.get(member.ref)?.tags || {},
+        tags: mergeTagsPreferPrimary(
+          featureTagIndex.get(`${member.type}/${member.ref}`)?.tags || {},
+          rawWayTagIndex.get(member.ref)?.tags || {},
+        ),
       }));
+    // console.log("buildBuildingRelationIndex(): outlineMembers", outlineMembers);
+
     const outlineReferences = outlineMembers.map<OutlineReference>(({ member, tags }) => ({
         osmType: member.type,
         osmId: member.ref,
         role: member.role,
-        rel: element.id as number,
-        reltags,
+        rel: buildingRelation.rel,
+        reltags: buildingRelation.reltags,
         tags,
       }));
     const inheritedTags = outlineMembers.reduce<Record<string, string>>(
@@ -407,11 +493,12 @@ function buildBuildingRelationIndex(raw: OverpassJsonResponse, rawWayTagIndex: M
       {},
     );
 
-    relationIndex.set(element.id, {
-      rel: element.id,
-      reltags,
+    relationIndex.set(buildingRelation.rel, {
+      rel: buildingRelation.rel,
+      reltags: buildingRelation.reltags,
+      outlineMembers: buildingRelation.outlineMembers,
       outlineReferences,
-      inheritedTags: mergeTagsPreferPrimary(reltags, inheritedTags),
+      inheritedTags: mergeTagsPreferPrimary(buildingRelation.reltags, inheritedTags),
     });
   }
 
@@ -603,25 +690,62 @@ function isBuildingRelationFeature(
 }
 
 /**
- * 为 building relation 本体补齐 outline 带来的继承标签，保证后续分类与展示能拿到完整信息。
+ * 判断当前 feature 是否是 building relation 的面状 part，最终由它代表复杂建筑入库。
+ * @param feature 待判断地物
+ * @param buildingRelationIndex building relation 信息索引
+ * @returns 是否命中 building part polygon
+ */
+function isBuildingPartPolygonFeature(
+  feature: NormalizedFeature,
+  buildingRelationIndex: Map<number, BuildingRelationInfo>,
+): boolean {
+  if (!isPolygonGeometry(feature) || feature.properties.osmType !== 'way') {
+    return false;
+  }
+
+  return feature.properties.relations.some((relation) => {
+    return buildingRelationIndex.has(relation.rel) && relation.role === 'part';
+  });
+}
+
+/**
+ * 为 building relation 本体和 part polygon 补齐继承标签，保证后续分类与展示能拿到完整信息。
  * @param feature 当前待收口的 feature
  * @param buildingRelationIndex building relation 信息索引
  * @returns 合并好 tags 的结果；非 building relation 原样返回
  */
-function elevateBuildingRelationTags(
+function elevateBuildingTags(
   feature: NormalizedFeature,
   buildingRelationIndex: Map<number, BuildingRelationInfo>,
 ): Record<string, string> {
-  if (!isBuildingRelationFeature(feature, buildingRelationIndex)) {
+  const buildingRelations = feature.properties.relations
+    .filter((relation) => buildingRelationIndex.has(relation.rel));
+
+  if (!isBuildingRelationFeature(feature, buildingRelationIndex) && buildingRelations.length === 0) {
     return feature.properties.tags;
   }
 
-  const buildingRelation = buildingRelationIndex.get(feature.properties.osmId);
-  if (!buildingRelation) {
+  if (isBuildingRelationFeature(feature, buildingRelationIndex)) {
+    const buildingRelation = buildingRelationIndex.get(feature.properties.osmId);
+    if (!buildingRelation) {
+      return feature.properties.tags;
+    }
+
+    return mergeTagsPreferPrimary(feature.properties.tags, buildingRelation.inheritedTags);
+  }
+
+  if (!isBuildingPartPolygonFeature(feature, buildingRelationIndex)) {
     return feature.properties.tags;
   }
 
-  return mergeTagsPreferPrimary(feature.properties.tags, buildingRelation.inheritedTags);
+  return buildingRelations.reduce<Record<string, string>>((tags, relation) => {
+    const buildingRelation = buildingRelationIndex.get(relation.rel);
+    if (!buildingRelation) {
+      return tags;
+    }
+
+    return mergeTagsPreferPrimary(tags, buildingRelation.inheritedTags);
+  }, feature.properties.tags);
 }
 
 /**
@@ -639,12 +763,16 @@ function finalizeFeature(
   const filteredRelations = stripRelations(feature.properties.relations, (relation) => {
     return relationLineIds.has(relation.rel);
   });
-  const outlineReferences = isBuildingRelationFeature(feature, buildingRelationIndex)
+  const outlineReferences = isBuildingRelationFeature(feature, buildingRelationIndex) || isBuildingPartPolygonFeature(feature, buildingRelationIndex)
     ? buildingRelationIndex.get(feature.properties.osmId)?.outlineReferences || []
     : isPolygonGeometry(feature)
       ? collectBuildingOutlineReferences(filteredRelations, buildingRelationIndex)
       : [];
-  const tags = elevateBuildingRelationTags(feature, buildingRelationIndex);
+  const tags = elevateBuildingTags(feature, buildingRelationIndex);
+
+  const resolvedOutlineReferences = isBuildingPartPolygonFeature(feature, buildingRelationIndex)
+    ? collectBuildingOutlineReferences(filteredRelations, buildingRelationIndex)
+    : outlineReferences;
 
   return {
     ...feature,
@@ -652,7 +780,7 @@ function finalizeFeature(
       ...feature.properties,
       tags,
       relations: filteredRelations,
-      outlineReferences,
+      outlineReferences: resolvedOutlineReferences,
     },
   };
 }
@@ -678,24 +806,21 @@ export function buildJsonSkelOverpassQuery(request: NormalizedOverpassRequest): 
  * @returns 规整化后的地物数据
  */
 export function convertOverpassToNormalizedFeatures(raw: OverpassJsonResponse): NormalizedFeature[] {
+  const rawWayTagIndex = buildRawWayTagIndex(raw);
+  const buildingRelationSkeletonIndex = buildBuildingRelationSkeletonIndex(raw);
   const converted = osmtogeojson(raw, { flatProperties: false }) as FeatureCollection;
   const normalizedCandidates = converted.features.map((feature) => normalizeFeature(feature));
   const normalizedFeatures = normalizedCandidates.filter((feature): feature is NormalizedFeature => feature !== null);
 
-  const rawWayTagIndex = buildRawWayTagIndex(raw);
-  const buildingRelationIndex = buildBuildingRelationIndex(raw, rawWayTagIndex);
-  console.log("rawWayTagIndex[30172308]",rawWayTagIndex.get(30172308));
-  // 控制台：rawWayTagIndex[30172308] { type: 'way', id: 30172308, tags: {} }
+  const featureTagIndex = buildFeatureTagIndex(normalizedFeatures);
   // 30172308 在 osm 官网上已确认是 role: outline 的 way
-  console.log("buildingRelationIndex[7816899]",buildingRelationIndex.get(7816899));
+  // console.log("featureTagIndex[way/30172308]",featureTagIndex.get("way/30172308"));
+  // console.log("rawWayTagIndex[30172308]",rawWayTagIndex.get(30172308));
+
+  const buildingRelationIndex = buildBuildingRelationIndex(buildingRelationSkeletonIndex, featureTagIndex, rawWayTagIndex);
+  // console.log("buildingRelationIndex[7816899]",buildingRelationIndex.get(7816899));
   /*
   控制台：在 osm 官网上已确认是包含 30172308 的 relation
-  buildingRelationIndex[7816899] {
-    rel: 7816899,
-    reltags: { type: 'building' },
-    outlineReferences: [],
-    inheritedTags: { type: 'building' }
-  }
   */
 
   const areaRelationIds = buildAreaRelationIndex(normalizedFeatures);
