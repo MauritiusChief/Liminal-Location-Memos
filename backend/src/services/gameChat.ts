@@ -10,6 +10,7 @@ import {
 } from './gameSessionStore.js';
 import {
   runChatCompletionWithTools,
+  ToolEnabledChatResponse,
   type AssistantHistoryMessage,
   type ChatRequestMessage,
   type ToolDefinition,
@@ -22,6 +23,7 @@ import type {
   GameChatResponse,
   GameMessage,
   GameChatRequest,
+  LargeDescriptionRecord,
   LookFarToolResult,
   LoadedGameSession,
   MovePlayerToolInput,
@@ -30,6 +32,7 @@ import type {
   SceneContextSummaryMode,
   SceneContext,
   SmallDescriptionRecord,
+  GamePosition,
 } from '../types/game.js';
 import { styleRule } from './sharedDefaultSysPromptPart.js';
 
@@ -73,6 +76,35 @@ const SYNTHETIC_SCENE_CONTEXT_TOOL_NAME = 'refresh_scene_context';
 const SYNTHETIC_SCENE_CONTEXT_TOOL_ARGUMENTS = '{}';
 const MAX_STORED_TURNS = 6;
 
+interface TurnRuntime {
+  session: LoadedGameSession;
+  inputMessage: string;
+  userMessage: GameMessage;
+  sceneContext: SceneContext;
+  activeLargeDescription: LargeDescriptionRecord;
+  activeSmallDescription: SmallDescriptionRecord;
+  nearbySmallDescriptions: SmallDescriptionRecord[];
+  promptSummaryMode: SceneContextSummaryMode;
+  currentTurnToolMessages: GameMessage[];
+}
+
+interface RequestModelTurnOptions {
+  tools: ToolDefinition[];
+  injectSyntheticSceneRefresh: boolean;
+  syntheticSceneRefreshStage: string;
+}
+
+interface ToolStepResult {
+  remainingTools: ToolDefinition[];
+  injectSyntheticSceneRefresh: boolean;
+  syntheticSceneRefreshStage: string;
+}
+
+/**
+ * 运行一个对话回合
+ * @param input
+ * @returns 发送给前端的数据
+ */
 export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' | 'message' | 'isOpeningPrompt'> & {
   message: string;
 }): Promise<GameChatResponse> {
@@ -83,177 +115,273 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   // 4. 让模型决定是否调用工具
   // 5. 若触发工具，则由后端执行对应逻辑，并把 assistant(tool_call) + tool(tool_return) 带回后续轮次生成最终自然语言回复
   const session = await getOrCreateSession(input.sessionId);
-  await ensureCoverageForPosition(session.save.playerPosition);
-  let sceneContext = await loadSceneContext(session.save.playerPosition);
-  let activeLargeDescription = await ensureLargeDescription(sceneContext, session);
-  let activeSmallDescription = await ensureSmallDescription(sceneContext, session);
-  let nearbySmallDescriptions = await mergeNearbySmallDescriptions(session, session.save.playerPosition, activeSmallDescription);
-  let promptSummaryMode: SceneContextSummaryMode = 'concise_near';
   const userMessage: GameMessage = {
     role: 'user',
     content: input.message,
     isOpeningPrompt: input.isOpeningPrompt === true,
   };
-  const initialMessages = await buildModelMessages({
-    history: session.save.messageHistory,
-    userMessage: input.message,
-    currentTurnToolMessages: [],
-    sceneContext,
-    largeDescription: activeLargeDescription.descriptionText,
-    nearbySmallDescriptions,
-    promptSummaryMode,
+  const runtime = await initializeTurnRuntime(
+    session,
+    input.message,
+    userMessage,
+  );
+  let modelResponse = await requestModelTurn(runtime, {
+    tools: GAME_CHAT_TOOLS,
     injectSyntheticSceneRefresh: true,
     syntheticSceneRefreshStage: 'initial',
   });
-  await writeGameChatMessageSnapshot({
-    direction: 'to-llm',
-    sessionId: session.save.sessionId,
-    message: input.message,
-    messages: initialMessages,
-  });
-
-  console.log('[DEBUG] runGameChatTurn() - first runChatCompletionWithTools() call');
-  let modelResponse = await runChatCompletionWithTools({
-    messages: initialMessages,
-    tools: GAME_CHAT_TOOLS,
-  });
-  console.log('[DEBUG] runGameChatTurn() - first runChatCompletionWithTools() return');
-
-  const messagesToAppend: GameMessage[] = [userMessage];
-  const currentTurnToolMessages: GameMessage[] = [];
 
   while (modelResponse.toolCall) {
-    const assistantToolCallMessage = toStoredAssistantToolCallMessage(
-      modelResponse.toolCall,
-      modelResponse.assistantMessageForHistory,
-    );
-    currentTurnToolMessages.push(assistantToolCallMessage);
-
-    if (modelResponse.toolCall.name === 'move_player') {
-      console.log('[DEBUG] runGameChatTurn() - toolCall - move_player');
-      // 工具调用只负责决定位移；真正的坐标计算、补洞和描述更新都由后端执行。
-      const toolInput = parseMovePlayerArguments(modelResponse.toolCall.argumentsText);
-      const nextPosition = movePosition({
-        position: session.save.playerPosition,
-        bearingDegrees: toolInput.bearingDegrees,
-        distanceMeters: toolInput.distanceMeters,
-      });
-
-      const moveCoverageSyncTriggered = await ensureCoverageForPosition(nextPosition);
-      sceneContext = await loadSceneContext(nextPosition);
-      activeLargeDescription = await ensureLargeDescription(sceneContext, session);
-      activeSmallDescription = await ensureSmallDescription(sceneContext, session);
-      nearbySmallDescriptions = await mergeNearbySmallDescriptions(session, nextPosition, activeSmallDescription);
-
-      const movementResult: MovePlayerToolResult = {
-        previousPosition: session.save.playerPosition,
-        nextPosition,
-        bearingDegrees: toolInput.bearingDegrees,
-        distanceMeters: toolInput.distanceMeters,
-        reason: toolInput.reason || '根据用户输入执行移动。',
-        targetLabel: toolInput.targetLabel,
-        coverageSyncTriggered: moveCoverageSyncTriggered,
-      };
-      session.save.playerPosition = nextPosition;
-
-      currentTurnToolMessages.push({
-        role: 'tool',
-        content: JSON.stringify(movementResult),
-        toolCallId: assistantToolCallMessage.toolCallId,
-        toolName: assistantToolCallMessage.toolName,
-      });
-    } else if (modelResponse.toolCall.name === 'look_far') {
-      console.log('[DEBUG] runGameChatTurn() - toolCall - look_far');
-      promptSummaryMode = 'concise_far';
-      const lookFarResult: LookFarToolResult = await buildSceneContextSnapshotPayload({
-        sceneContext,
-        largeDescription: activeLargeDescription.descriptionText,
-        nearbySmallDescriptions,
-        summaryMode: promptSummaryMode,
-      });
-
-      currentTurnToolMessages.push({
-        role: 'tool',
-        content: JSON.stringify(lookFarResult),
-        toolCallId: assistantToolCallMessage.toolCallId,
-        toolName: assistantToolCallMessage.toolName,
-      });
-    } else {
-      throw new Error(`Unsupported tool call: ${modelResponse.toolCall.name}`);
-    }
-
-    const shouldInjectSyntheticSceneRefresh = modelResponse.toolCall.name !== 'look_far';
-    const followUpMessages = await buildModelMessages({
-      history: session.save.messageHistory,
-      userMessage: input.message,
-      currentTurnToolMessages,
-      sceneContext,
-      largeDescription: activeLargeDescription.descriptionText,
-      nearbySmallDescriptions,
-      promptSummaryMode,
-      injectSyntheticSceneRefresh: shouldInjectSyntheticSceneRefresh,
-      syntheticSceneRefreshStage: `post_${modelResponse.toolCall.name}`,
+    const step = await executeToolStep(runtime, modelResponse);
+    modelResponse = await requestModelTurn(runtime, {
+      tools: step.remainingTools,
+      injectSyntheticSceneRefresh: step.injectSyntheticSceneRefresh,
+      syntheticSceneRefreshStage: step.syntheticSceneRefreshStage,
     });
-    // TODO 这个机制是否允许连续调用同一个工具？
-    const remainingTools = GAME_CHAT_TOOLS.filter((tool) => tool.function.name !== modelResponse.toolCall?.name);
-
-    await writeGameChatMessageSnapshot({
-      direction: 'to-llm',
-      sessionId: session.save.sessionId,
-      message: input.message,
-      messages: followUpMessages,
-    });
-
-    console.log('[DEBUG] runGameChatTurn() - toolCall runChatCompletionWithTools() call');
-    modelResponse = await runChatCompletionWithTools({
-      messages: followUpMessages,
-      tools: remainingTools,
-    });
-    console.log('[DEBUG] runGameChatTurn() - toolCall runChatCompletionWithTools() return');
   }
 
-  const assistantMessage = modelResponse.reply || activeLargeDescription.descriptionText;
-  messagesToAppend.push(
-    ...currentTurnToolMessages,
+  return finalizeTurn(runtime, modelResponse);
+}
+
+/**
+ * 初始化回合，准备该回合所有需要的 runtime
+ * @param session 游戏的 session
+ * @param inputMessage 玩家输入的消息
+ * @param userMessage 用户端发送的消息
+ * @returns 打包好的 runtime
+ */
+async function initializeTurnRuntime(
+  session: LoadedGameSession,
+  inputMessage: string,
+  userMessage: GameMessage
+): Promise<TurnRuntime> {
+  const runtime: TurnRuntime = {
+    session: session,
+    inputMessage: inputMessage,
+    userMessage: userMessage,
+    sceneContext: await loadSceneContext(session.save.playerPosition),
+    activeLargeDescription: {} as LargeDescriptionRecord,
+    activeSmallDescription: {} as SmallDescriptionRecord,
+    nearbySmallDescriptions: [],
+    promptSummaryMode: 'concise_near',
+    currentTurnToolMessages: [],
+  };
+
+  await prepareRuntimeForPosition(runtime, session.save.playerPosition);
+  return runtime;
+}
+
+/**
+ * 根据打包好的 runtime 以及经纬度，更新 runtime 中的环境上下文以及大小环境描述
+ * @param runtime
+ * @param position
+ * @returns
+ */
+async function prepareRuntimeForPosition(
+  runtime: TurnRuntime,
+  position: GamePosition,
+): Promise<boolean> {
+  const coverageSyncTriggered = await ensureCoverageForPosition(position);
+  runtime.sceneContext = await loadSceneContext(position);
+  runtime.activeLargeDescription = await ensureLargeDescription(runtime.sceneContext, runtime.session);
+  runtime.activeSmallDescription = await ensureSmallDescription(runtime.sceneContext, runtime.session);
+  runtime.nearbySmallDescriptions = await mergeNearbySmallDescriptions(
+    runtime.session,
+    position,
+    runtime.activeSmallDescription,
+  );
+
+  return coverageSyncTriggered;
+}
+
+/**
+ * 整理 runtime 里所有 LLM 需要的信息，然后发送给 LLM
+ * @param runtime
+ * @param options
+ * @returns
+ */
+async function requestModelTurn(
+  runtime: TurnRuntime,
+  options: RequestModelTurnOptions,
+) {
+  const messages = await buildModelMessages({
+    history: runtime.session.save.messageHistory,
+    userMessage: runtime.inputMessage,
+    currentTurnToolMessages: runtime.currentTurnToolMessages,
+    sceneContext: runtime.sceneContext,
+    largeDescription: runtime.activeLargeDescription.descriptionText,
+    nearbySmallDescriptions: runtime.nearbySmallDescriptions,
+    promptSummaryMode: runtime.promptSummaryMode,
+    injectSyntheticSceneRefresh: options.injectSyntheticSceneRefresh,
+    syntheticSceneRefreshStage: options.syntheticSceneRefreshStage,
+  });
+
+  await writeGameChatMessageSnapshot({
+    direction: 'to-llm',
+    sessionId: runtime.session.save.sessionId,
+    message: runtime.inputMessage,
+    messages,
+  });
+
+  console.log('[DEBUG] runGameChatTurn() - runChatCompletionWithTools() call');
+  const modelResponse = await runChatCompletionWithTools({
+    messages,
+    tools: options.tools,
+  });
+  console.log('[DEBUG] runGameChatTurn() - runChatCompletionWithTools() return');
+
+  return modelResponse;
+}
+
+/**
+ * 根据模型的工具选择，呼叫对应的工具函数对 runtime 进行更新
+ * @param runtime
+ * @param modelResponse
+ * @returns
+ */
+async function executeToolStep(
+  runtime: TurnRuntime,
+  modelResponse: ToolEnabledChatResponse,
+): Promise<ToolStepResult> {
+  if (!modelResponse.toolCall) {
+    throw new Error('executeToolStep requires a tool call response.');
+  }
+
+  const toolCall = modelResponse.toolCall;
+  const assistantToolCallMessage = toStoredAssistantToolCallMessage(
+    toolCall,
+    modelResponse.assistantMessageForHistory,
+  );
+  runtime.currentTurnToolMessages.push(assistantToolCallMessage);
+
+  if (toolCall.name === 'move_player') {
+    await handleMovePlayerTool(runtime, toolCall, assistantToolCallMessage);
+  } else if (toolCall.name === 'look_far') {
+    await handleLookFarTool(runtime, assistantToolCallMessage);
+  } else {
+    throw new Error(`Unsupported tool call: ${toolCall.name}`);
+  }
+
+  return {
+    remainingTools: GAME_CHAT_TOOLS.filter((tool) => tool.function.name !== toolCall.name),
+    injectSyntheticSceneRefresh: toolCall.name !== 'look_far',
+    syntheticSceneRefreshStage: `post_${toolCall.name}`,
+  };
+}
+
+async function handleMovePlayerTool(
+  runtime: TurnRuntime,
+  toolCall: { id: string; name: string; argumentsText: string },
+  assistantToolCallMessage: Extract<GameMessage, { role: 'assistant'; isToolCallMessage: true }>,
+): Promise<void> {
+  console.log('[DEBUG] runGameChatTurn() - toolCall - move_player');
+  const toolInput = parseMovePlayerArguments(toolCall.argumentsText);
+  const previousPosition = runtime.session.save.playerPosition;
+  const nextPosition = movePosition({
+    position: previousPosition,
+    bearingDegrees: toolInput.bearingDegrees,
+    distanceMeters: toolInput.distanceMeters,
+  });
+
+  const coverageSyncTriggered = await prepareRuntimeForPosition(runtime, nextPosition);
+  runtime.session.save.playerPosition = nextPosition;
+
+  const movementResult: MovePlayerToolResult = {
+    previousPosition,
+    nextPosition,
+    bearingDegrees: toolInput.bearingDegrees,
+    distanceMeters: toolInput.distanceMeters,
+    reason: toolInput.reason || '根据用户输入执行移动。',
+    targetLabel: toolInput.targetLabel,
+    coverageSyncTriggered,
+  };
+
+  runtime.currentTurnToolMessages.push({
+    role: 'tool',
+    content: JSON.stringify(movementResult),
+    toolCallId: assistantToolCallMessage.toolCallId,
+    toolName: assistantToolCallMessage.toolName,
+  });
+}
+
+async function handleLookFarTool(
+  runtime: TurnRuntime,
+  assistantToolCallMessage: Extract<GameMessage, { role: 'assistant'; isToolCallMessage: true }>,
+): Promise<void> {
+  console.log('[DEBUG] runGameChatTurn() - toolCall - look_far');
+  runtime.promptSummaryMode = 'concise_far';
+  const lookFarResult: LookFarToolResult = await buildSceneContextSnapshotPayload({
+    sceneContext: runtime.sceneContext,
+    largeDescription: runtime.activeLargeDescription.descriptionText,
+    nearbySmallDescriptions: runtime.nearbySmallDescriptions,
+    summaryMode: runtime.promptSummaryMode,
+  });
+
+  runtime.currentTurnToolMessages.push({
+    role: 'tool',
+    content: JSON.stringify(lookFarResult),
+    toolCallId: assistantToolCallMessage.toolCallId,
+    toolName: assistantToolCallMessage.toolName,
+  });
+}
+
+/**
+ * 得到 LLM 返回的消息后，相应更新 runtime
+ * @param runtime
+ * @param modelResponse
+ * @returns 将被 runChatTurn 发送给前端的数据
+ */
+async function finalizeTurn(
+  runtime: TurnRuntime,
+  modelResponse: ToolEnabledChatResponse,
+): Promise<GameChatResponse> {
+  const assistantMessage = modelResponse.reply || runtime.activeLargeDescription.descriptionText;
+  // 组装被存入存档的历史对话
+  const messagesToAppend: GameMessage[] = [
+    runtime.userMessage,
+    ...runtime.currentTurnToolMessages,
     {
       role: 'assistant',
       content: assistantMessage,
       reasoningContent: modelResponse.assistantMessageForHistory.reasoningContent,
     },
-  );
+  ];
 
-  session.save.activeLargeDescriptionId = activeLargeDescription.id;
-  session.save.visibleSmallDescriptionIds = nearbySmallDescriptions.map((record) => record.id);
-  updateLastSceneContextMeta(session, {
-    diagnostics: sceneContext.diagnostics,
+  // 更新 runtime 数据
+  runtime.session.save.activeLargeDescriptionId = runtime.activeLargeDescription.id;
+  runtime.session.save.visibleSmallDescriptionIds = runtime.nearbySmallDescriptions.map((record) => record.id);
+  updateLastSceneContextMeta(runtime.session, {
+    diagnostics: runtime.sceneContext.diagnostics,
   });
   const nextHistory: GameMessage[] = [
-    ...session.save.messageHistory,
+    ...runtime.session.save.messageHistory,
     ...messagesToAppend,
   ];
-  session.save.messageHistory = trimMessageHistoryPreservingToolChains(nextHistory, MAX_STORED_TURNS);
-  await updateSession(session);
+  runtime.session.save.messageHistory = trimMessageHistoryPreservingToolChains(nextHistory, MAX_STORED_TURNS);
+  await updateSession(runtime.session);
+
+  // 组装被写入快照的历史对话
   const finalMessages = await buildModelMessages({
-    history: session.save.messageHistory,
-    sceneContext,
-    largeDescription: activeLargeDescription.descriptionText,
-    nearbySmallDescriptions,
-    promptSummaryMode,
+    history: runtime.session.save.messageHistory,
+    sceneContext: runtime.sceneContext,
+    largeDescription: runtime.activeLargeDescription.descriptionText,
+    nearbySmallDescriptions: runtime.nearbySmallDescriptions,
+    promptSummaryMode: runtime.promptSummaryMode,
     injectSyntheticSceneRefresh: false,
   });
   await writeGameChatMessageSnapshot({
     direction: 'from-llm',
-    sessionId: session.save.sessionId,
-    message: input.message,
+    sessionId: runtime.session.save.sessionId,
+    message: runtime.inputMessage,
     messages: finalMessages,
   });
 
   return {
-    sessionId: session.save.sessionId,
-    messages: toClientMessages(session.save.messageHistory),
-    playerPosition: session.save.playerPosition,
-    activeLargeDescription: toClientLargeDescription(activeLargeDescription),
-    nearbySmallDescriptions: toClientSmallDescriptions(nearbySmallDescriptions),
+    sessionId: runtime.session.save.sessionId,
+    messages: toClientMessages(runtime.session.save.messageHistory),
+    playerPosition: runtime.session.save.playerPosition,
+    activeLargeDescription: toClientLargeDescription(runtime.activeLargeDescription),
+    nearbySmallDescriptions: toClientSmallDescriptions(runtime.nearbySmallDescriptions),
   };
 }
 
@@ -406,6 +534,11 @@ function parseMovePlayerArguments(argumentsText: string): MovePlayerToolInput {
   };
 }
 
+/**
+ * 根据 scene context 等信息，返回用来表示某一时刻玩家周遭场景的摘要以及其他信息
+ * @param input
+ * @returns
+ */
 async function buildSceneContextSnapshotPayload(input: {
   sceneContext: SceneContext;
   largeDescription: string;

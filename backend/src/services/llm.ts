@@ -61,17 +61,15 @@ export interface ToolEnabledChatResponse extends LlmDebugResponse {
   assistantMessageForHistory: AssistantHistoryMessage;
 }
 
-export type AssistantHistoryMessage =
-  | { role: 'assistant'; content: string; reasoningContent?: string; isToolCallMessage?: false }
-  | {
-      role: 'assistant';
-      content: string;
-      reasoningContent?: string;
-      isToolCallMessage: true;
-      toolCallId: string;
-      toolName: string;
-      toolArgumentsText: string;
-    };
+export type AssistantHistoryMessage = {
+  role: 'assistant';
+  content: string;
+  reasoningContent?: string;
+  isToolCallMessage?: boolean;
+  toolCallId?: string;
+  toolName?: string;
+  toolArgumentsText?: string;
+};
 
 export type ChatRequestMessage =
   | { role: 'system' | 'user'; content: string }
