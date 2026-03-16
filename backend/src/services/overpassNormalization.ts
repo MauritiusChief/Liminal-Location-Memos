@@ -681,9 +681,25 @@ export function convertOverpassToNormalizedFeatures(raw: OverpassJsonResponse): 
   const converted = osmtogeojson(raw, { flatProperties: false }) as FeatureCollection;
   const normalizedCandidates = converted.features.map((feature) => normalizeFeature(feature));
   const normalizedFeatures = normalizedCandidates.filter((feature): feature is NormalizedFeature => feature !== null);
+
   const rawWayTagIndex = buildRawWayTagIndex(raw);
   const buildingRelationIndex = buildBuildingRelationIndex(raw, rawWayTagIndex);
+  console.log("rawWayTagIndex[30172308]",rawWayTagIndex.get(30172308));
+  // 控制台：rawWayTagIndex[30172308] { type: 'way', id: 30172308, tags: {} }
+  // 30172308 在 osm 官网上已确认是 role: outline 的 way
+  console.log("buildingRelationIndex[7816899]",buildingRelationIndex.get(7816899));
+  /*
+  控制台：在 osm 官网上已确认是包含 30172308 的 relation
+  buildingRelationIndex[7816899] {
+    rel: 7816899,
+    reltags: { type: 'building' },
+    outlineReferences: [],
+    inheritedTags: { type: 'building' }
+  }
+  */
+
   const areaRelationIds = buildAreaRelationIndex(normalizedFeatures);
+
   const lineRelationIds = buildLineRelationIndex(normalizedFeatures);
 
   return normalizedFeatures

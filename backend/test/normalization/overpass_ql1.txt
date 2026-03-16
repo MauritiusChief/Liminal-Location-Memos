@@ -1,5 +1,0 @@
-[out:json];
-nwr(around:30, 39.999264907163784, -83.01487466197513);
-out body geom;
->;
-out skel geom;
