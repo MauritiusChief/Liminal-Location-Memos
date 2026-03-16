@@ -102,9 +102,9 @@ interface PolarFeatureMetrics {
 }
 
 const MAX_POLAR_RADIUS_METERS = 1000 as const;
-const CONCISE_BUILDING_MIN_ANGLE_BY_LEVEL: Record<1 | 2 | 3, number> = { 1: 5, 2: 15, 3: 15 };
-const CONCISE_AREA_MIN_ANGLE_BY_LEVEL: Record<1 | 2 | 3, number> = { 1: 10, 2: 20, 3: 20 };
-const CONCISE_LINE_MIN_ANGLE_BY_LEVEL: Record<1 | 2 | 3, number> = { 1: 15, 2: 25, 3: 25 };
+const CONCISE_BUILDING_MIN_ANGLE_BY_LEVEL: Record<1 | 2 | 3, number> = { 1: 5, 2: 15, 3: 20 };
+const CONCISE_AREA_MIN_ANGLE_BY_LEVEL: Record<1 | 2 | 3, number> = { 1: 10, 2: 20, 3: 25 };
+const CONCISE_LINE_MIN_ANGLE_BY_LEVEL: Record<1 | 2 | 3, number> = { 1: 15, 2: 25, 3: 30 };
 const CONCISE_SIGNIFICANT_POI_TAGS = new Set(['man_made:antenna', 'man_made:tower']);
 
 const SIGNIFICANT_BUILDING_MIN_HEIGHT_METERS = 35;
@@ -218,7 +218,7 @@ function buildPromptSignals(
       case 'building':
         return metrics.widestSpan.angleWidthDegrees >= CONCISE_BUILDING_MIN_ANGLE_BY_LEVEL[level] || isTallBuilding;
       case 'poi':
-        return isSignificantPoi;
+        return level > 1 ? isSignificantPoi : true;
       case 'line':
         return metrics.widestSpan.angleWidthDegrees >= CONCISE_LINE_MIN_ANGLE_BY_LEVEL[level];
       case 'area':

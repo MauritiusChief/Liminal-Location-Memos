@@ -292,6 +292,8 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
       fetchMicroGridFromDb(normalizedRequest),
       fetchScenePolarFeaturesFromDb(normalizedRequest, 'debug'),
     ]);
+    // console.log(polarRecords.filter(r => r.osmId == 547336301));
+
     const debugPayload = buildNormalizationDebugPayload({
       normalizedRequest,
       featureDetails,

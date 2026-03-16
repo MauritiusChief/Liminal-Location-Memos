@@ -7,7 +7,7 @@ export type PromptSummaryMode = 'detailed' | 'concise';
  * representativeLimit: 每个 feature cluster 最多展示 feature 数量的上限；
  * representativeMinAngleDegrees: feature cluster 中的一个被展示的 feature 应当满足的视野角的底线；
  */
-const POLAR_LEVEL_PROMPT_CONFIG: Record<
+const POLAR_LEVEL_CLUSTER_PROMPT_CONFIG: Record<
   1 | 2 | 3,
   {
     representativeLimit: number;
@@ -15,7 +15,7 @@ const POLAR_LEVEL_PROMPT_CONFIG: Record<
   }
 > = {
   1: {
-    representativeLimit: 3,
+    representativeLimit: 4,
     representativeMinAngleDegrees: 0,
   },
   2: {
@@ -23,7 +23,7 @@ const POLAR_LEVEL_PROMPT_CONFIG: Record<
     representativeMinAngleDegrees: 3,
   },
   3: {
-    representativeLimit: 4,
+    representativeLimit: 2,
     representativeMinAngleDegrees: 5,
   },
 };
@@ -240,25 +240,30 @@ function buildPolarClusterSummaryLines(
   entries: NormalizedPolarFeatureSummary[],
   summaryMode: PromptSummaryMode,
 ): string[] {
-  const config = POLAR_LEVEL_PROMPT_CONFIG[level];
+  const config = POLAR_LEVEL_CLUSTER_PROMPT_CONFIG[level];
+  // 先对所有元素排序
   const sortedEntries = [...entries].sort(
     (left, right) =>
       left.widestSpan.angleWidthDegrees - right.widestSpan.angleWidthDegrees ||
       left.centerPoint.distanceMeters - right.centerPoint.distanceMeters ||
       left.osmId - right.osmId,
   );
+  // 按照 POLAR_LEVEL_CLUSTER_PROMPT_CONFIG 过滤出有代表性的元素
   const representativeEntries = sortedEntries
     .filter((entry) => entry.widestSpan.angleWidthDegrees >= config.representativeMinAngleDegrees)
     .slice(0, config.representativeLimit);
-  const omittedCount = Math.max(0, entries.length - representativeEntries.length);
+  const fallbackEntry = representativeEntries.length === 0 ? (sortedEntries[0] ?? null) : null;
+  // 实际应展示的元素
+  const resolvedRepresentativeEntries = fallbackEntry ? [fallbackEntry] : representativeEntries;
+  const omittedCount = Math.max(0, entries.length - resolvedRepresentativeEntries.length);
   const directionCluster = entries[0]!.directionCluster;
   const shouldShowOmissionSummary = omittedCount > 0;
   const hint = shouldShowOmissionSummary
-    ? `，共${entries.length}个要素，展示${representativeEntries.length}个代表要素，其余${omittedCount}个仅保留数量`
+    ? `，共${entries.length}个要素，展示${resolvedRepresentativeEntries.length}个代表要素，其余${omittedCount}个仅保留数量`
     : '';
   const lines = [`* 群中心方位${formatAngle(directionCluster.centerBearingDegrees)}${hint}`];
 
-  for (const anchor of representativeEntries) {
+  for (const anchor of resolvedRepresentativeEntries) {
     lines.push(...buildPolarFeatureLines(anchor));
   }
 
