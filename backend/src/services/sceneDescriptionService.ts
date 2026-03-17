@@ -3,7 +3,7 @@ import {
   buildProjectedSceneSummary,
   DEFAULT_LARGE_DESCRIPTION_SUMMARY_MODE,
   DEFAULT_SMALL_DESCRIPTION_SUMMARY_MODE,
-} from './scene/sceneSummaryService.js';
+} from './sceneSummaryService.js';
 import {
   findActiveLargeDescription,
   findNearbySmallDescriptions,

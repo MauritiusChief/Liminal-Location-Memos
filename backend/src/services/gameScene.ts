@@ -4,7 +4,7 @@ import {
 import { syncOverpassCoverage } from './overpassSync.js';
 import {
   loadProjectedScene,
-} from './scene/sceneSummaryService.js';
+} from './sceneSummaryService.js';
 import type { GamePosition, SceneContext } from '../types/game.js';
 
 export async function ensureCoverageForPosition(

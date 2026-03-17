@@ -1,7 +1,7 @@
 import type {
   SceneFeatureDetail,
   PolarFeatureRecord,
-} from './scene/sceneTypes.js';
+} from './sceneTypes.js';
 import {
   AREA_PRIMARY_LABEL_KEYS,
   BUILDING_PRIMARY_LABEL_KEYS,

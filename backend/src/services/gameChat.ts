@@ -18,7 +18,7 @@ import {
 import { writeGameChatMessageSnapshot } from './gameChatDebugLog.js';
 import { findNearbySmallDescriptions } from './sceneDescriptionRepository.js';
 import { ensureLargeDescription, ensureSmallDescription, filterFarVisibleSmallDescriptions } from './sceneDescriptionService.js';
-import { buildProjectedSceneSummary, SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE } from './scene/sceneSummaryService.js';
+import { buildProjectedSceneSummary, SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE } from './sceneSummaryService.js';
 import type {
   GameChatResponse,
   GameMessage,
@@ -444,6 +444,7 @@ function buildGameSystemPrompt(): string {
     '如果用户要求真实移动，调用 move_player 工具；如果用户要求观察远处、确认远方情况，或准备前往远处前先看一眼，则调用 look_far 工具；否则直接自然回复。',
     '即使用户要求移动了，也需要结合周遭环境信息分析能否成功到达，是否有阻碍移动的要素。如果有，可以将移动的目的地截停在障碍前。',
     '如果用户寻求建议或者提出问题，回答时应减少你的存在感，让回答看起来像是用户自己寻思出来的结论或者自问自答。',
+    '如果用户输入的内容与游戏完全无关，或者根据当前游戏情景完全不可能，通过看起来像是用户自言自语的方式回绝这个输入。',
     styleRule,
     '叙述视角：\n第二人称“你”，以玩家为中心进行描述，使用类似“你所在的位置”“在你附近”“更远处”等空间表达。',
     '不要在文本回复里暴露经纬度、网格、极坐标等内部实现。',
