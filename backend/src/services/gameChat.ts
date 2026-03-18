@@ -91,6 +91,7 @@ interface TurnRuntime {
 
 interface RequestModelTurnOptions {
   tools: ToolDefinition[];
+  snapshotDirection: 'to-llm' | 'llm-use-tool';
   injectSyntheticSceneRefresh: boolean;
   syntheticSceneRefreshStage: string;
 }
@@ -128,6 +129,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
   );
   let modelResponse = await requestModelTurn(runtime, {
     tools: GAME_CHAT_TOOLS,
+    snapshotDirection: 'to-llm',
     injectSyntheticSceneRefresh: true,
     syntheticSceneRefreshStage: 'initial',
   });
@@ -136,6 +138,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
     const step = await executeToolStep(runtime, modelResponse);
     modelResponse = await requestModelTurn(runtime, {
       tools: step.remainingTools,
+      snapshotDirection: 'llm-use-tool',
       injectSyntheticSceneRefresh: step.injectSyntheticSceneRefresh,
       syntheticSceneRefreshStage: step.syntheticSceneRefreshStage,
     });
@@ -218,7 +221,7 @@ async function requestModelTurn(
   });
 
   await writeGameChatMessageSnapshot({
-    direction: 'to-llm',
+    direction: options.snapshotDirection,
     sessionId: runtime.session.save.sessionId,
     message: runtime.inputMessage,
     messages,

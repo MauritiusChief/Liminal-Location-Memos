@@ -18,7 +18,7 @@ interface DerivedSnapshotFile {
 }
 
 export async function writeGameChatMessageSnapshot(input: {
-  direction: 'from-llm' | 'to-llm';
+  direction: 'from-llm' | 'to-llm' | 'llm-use-tool';
   sessionId: string;
   message?: string;
   messages: ChatRequestMessage[];

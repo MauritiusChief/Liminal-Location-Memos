@@ -16,5 +16,37 @@
 
 按照此主题，结合建筑的 tag 以及面积，LLM 为建筑生成模板。比方说对于多层大酒店而言，可能一楼是大堂、顶楼是游泳池、其余都是客房等。
 
+```json
+{
+  "buildingSchema": {
+    "way/123": {
+      "theme": "主题，比如普通民宅（这部分程序生成）",
+      // 以下部分由 LLM 通过读取建筑的 tag 生成
+      "levels": {
+        "roof": {
+          "span": [2],
+          "rooms": { "storage:" { "count": 1, "desc": "楼顶阁楼储物间", "access": "可收回的木梯"} }
+        },
+        "ground": {
+          "span": [1], // 要表示多层的话，用包括首尾的数列，比方说 1~10层 为 [1,10]
+          "rooms": {
+            "livingRoom:" { "count": 1, "desc": "客厅", "access": "大门"},
+            "hallWay": { "count": 1, "desc": "连接各房间的走道", "access": "木质楼梯"},
+            "masterBedRoom": { "count": 1, "desc": "主卧"},
+            "bedRoom": { "count": 2, "desc": "普通卧室"},
+            "restRoom": { "count": 2, "desc": "厕所"},
+            "kitchen": { "count": 1, "desc": "厨房"}
+          }
+        },
+        "basement": {
+          "span": [-1],
+          "rooms": { "storage:" { "count": 1, "desc": "地下室储物间", "access": "木质楼梯"} }
+        }
+      }
+    }
+  }
+}
+```
+
 当玩家进入某个房间时，则按图索骥生成房间与楼层的描述。
 房间也可能有随机主题，而此主题与建筑主题有关。
