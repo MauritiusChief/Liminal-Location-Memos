@@ -342,10 +342,11 @@ async function finalizeTurn(
   modelResponse: ToolEnabledChatResponse,
 ): Promise<GameChatResponse> {
   const assistantMessage = modelResponse.reply || runtime.activeLargeDescription.descriptionText;
+  const persistedToolMessages = redactToolMessagesForStorage(runtime.currentTurnToolMessages);
   // 组装被存入存档的历史对话
   const messagesToAppend: GameMessage[] = [
     runtime.userMessage,
-    ...runtime.currentTurnToolMessages,
+    ...persistedToolMessages,
     {
       role: 'assistant',
       content: assistantMessage,
@@ -687,4 +688,62 @@ function toStoredAssistantToolCallMessage(
     toolName: toolCall.name,
     toolArgumentsText: toolCall.argumentsText,
   };
+}
+
+function redactToolMessagesForStorage(messages: GameMessage[]): GameMessage[] {
+  return messages.map((message) => {
+    if (message.role !== 'tool' || message.toolName !== 'look_far') {
+      return message;
+    }
+
+    return {
+      ...message,
+      content: buildRedactedLookFarToolContent(message.content),
+    };
+  });
+}
+
+function buildRedactedLookFarToolContent(content: string): string {
+  const parsed = tryParseSceneContextSnapshotPayload(content);
+
+  if (!parsed) {
+    return JSON.stringify({
+      type: 'scene_context_snapshot',
+      redacted: true,
+      note: 'look_far tool content removed after LLM consumption to reduce stored context size.',
+    });
+  }
+
+  return JSON.stringify({
+    type: parsed.type,
+    summaryMode: parsed.summaryMode,
+    redacted: true,
+    note: 'look_far tool content removed after LLM consumption to reduce stored context size.',
+  });
+}
+
+function tryParseSceneContextSnapshotPayload(content: string): {
+  type: 'scene_context_snapshot';
+  summaryMode?: SceneContextSummaryMode;
+} | null {
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+
+    const candidate = parsed as Record<string, unknown>;
+    if (candidate.type !== 'scene_context_snapshot') {
+      return null;
+    }
+
+    return {
+      type: 'scene_context_snapshot',
+      summaryMode: typeof candidate.summaryMode === 'string'
+        ? candidate.summaryMode as SceneContextSummaryMode
+        : undefined,
+    };
+  } catch {
+    return null;
+  }
 }
