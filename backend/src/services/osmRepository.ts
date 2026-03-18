@@ -15,7 +15,7 @@ import type {
   DbMicroGridCellRecord,
 } from './sceneTypes.js';
 import { getStructuredTagColumns, matchFeatureCategory } from './osmFeatureConfig.js';
-import type { GamePosition } from '../types/game.js';
+import type { BuildingSummary, GamePosition } from '../types/game.js';
 
 type BuildingRow = {
   feature_id: string;
@@ -65,6 +65,12 @@ type PolarFeatureRow = {
   line_vertex_coordinates: Array<[number, number]> | null;
 };
 
+type BuildingAtPositionRow = {
+  building_id: string;
+  tags: Record<string, string>;
+  area_square_meters: number;
+};
+
 const BUILDING_TAG_COLUMNS = getStructuredTagColumns('building');
 const POI_TAG_COLUMNS = getStructuredTagColumns('poi');
 const ROAD_TAG_COLUMNS = getStructuredTagColumns('line');
@@ -73,6 +79,7 @@ const fetchMicroGridFromDbSqlPromise = loadServiceSql('osmRepository/fetchMicroG
 const fetchScenePolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fetchScenePolarFeaturesFromDb.sql');
 const fetchSceneBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneBuildingDetails.sql');
 const fetchSceneNonBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneNonBuildingDetails.sql');
+const findBuildingAtPositionSqlPromise = loadServiceSql('osmRepository/findBuildingAtPosition.sql');
 const upsertBuildingFeatureSqlPromise = loadServiceSql('osmRepository/upsertBuildingFeature.sql');
 const upsertPoiFeatureSqlPromise = loadServiceSql('osmRepository/upsertPoiFeature.sql');
 const upsertLineFeatureSqlPromise = loadServiceSql('osmRepository/upsertLineFeature.sql');
@@ -252,6 +259,24 @@ export async function findNearestCoverageDistanceMeters(position: GamePosition):
 
   const value = result.rows[0]?.distance_meters;
   return value === null || value === undefined ? null : Number(value);
+}
+
+export async function findBuildingAtPosition(position: GamePosition): Promise<BuildingSummary | null> {
+  const sql = await findBuildingAtPositionSqlPromise;
+  const result = await query<BuildingAtPositionRow>(
+    sql,
+    [position.lon, position.lat],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    buildingId: row.building_id,
+    tags: row.tags || {},
+    areaSquareMeters: Number(row.area_square_meters),
+  };
 }
 
 /**

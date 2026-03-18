@@ -49,6 +49,12 @@ export interface MovePlayerToolInput {
   targetLabel?: string;
 }
 
+export interface BuildingSummary {
+  buildingId: string;
+  tags: Record<string, string>;
+  areaSquareMeters: number;
+}
+
 export interface MovePlayerToolResult {
   previousPosition: GamePosition;
   nextPosition: GamePosition;
@@ -57,6 +63,7 @@ export interface MovePlayerToolResult {
   reason: string;
   targetLabel?: string;
   coverageSyncTriggered: boolean;
+  currentBuilding?: BuildingSummary;
 }
 
 export interface SceneContextSnapshotPayload {

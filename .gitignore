@@ -7,3 +7,4 @@ coverage/
 _experimental/
 backend/data/game-saves/*.json
 backend/data/game-chat-debug/*.json
+backend/data/game-chat-debug/*.md

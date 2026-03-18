@@ -1,13 +1,13 @@
-import { buildNormalizedMicroGrid } from '../overpassGrid.js';
-import { type NormalizedOverpassRequest } from '../overpassNormalization.js';
-import { buildNormalizedPolarView } from '../overpassPolar.js';
-import { buildNormalizationPrompt, type PromptSummaryMode } from '../overpassPrompt.js';
+import { buildNormalizedMicroGrid } from './overpassGrid.js';
+import { type NormalizedOverpassRequest } from './overpassNormalization.js';
+import { buildNormalizedPolarView } from './overpassPolar.js';
+import { buildNormalizationPrompt, type PromptSummaryMode } from './overpassPrompt.js';
 import {
   fetchSceneFeatureDetailsFromDb,
   fetchMicroGridFromDb,
   fetchScenePolarFeaturesFromDb,
   type SceneDataProfile,
-} from '../osmRepository.js';
+} from './osmRepository.js';
 import type {
   DbNormalizationDiagnostics,
   SceneFeatureDetail,
