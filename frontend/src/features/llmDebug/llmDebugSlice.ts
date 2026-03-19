@@ -1,7 +1,7 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { submitDebugLlm, type DebugLlmRequest, type DebugLlmResponse } from '../../api/llmDebugApi';
 import type { RootState } from '../../app/store';
-import { DEFAULT_LLM_DEBUG_SYSTEM_PROMPT } from './defaultSystemPrompt';
+import { DEFAULT_LLM_DEBUG_SYSTEM_PROMPT, DEFAULT_BUILDING_SCHEMA_SYSTEM_PROMPT } from './defaultSystemPrompt';
 
 type RequestStatus = 'idle' | 'loading' | 'succeeded' | 'failed';
 
@@ -22,7 +22,8 @@ interface LlmDebugState {
 }
 
 const initialState: LlmDebugState = {
-  systemPrompt: DEFAULT_LLM_DEBUG_SYSTEM_PROMPT,
+  // systemPrompt: DEFAULT_LLM_DEBUG_SYSTEM_PROMPT,
+  systemPrompt: DEFAULT_BUILDING_SCHEMA_SYSTEM_PROMPT,
   message: '',
   request: {
     status: 'idle',

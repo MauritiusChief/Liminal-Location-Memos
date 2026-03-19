@@ -15,7 +15,7 @@ import type {
   DbMicroGridCellRecord,
 } from './sceneTypes.js';
 import { getStructuredTagColumns, matchFeatureCategory } from './osmFeatureConfig.js';
-import type { BuildingSummary, GamePosition } from '../types/game.js';
+import type { AreaSummary, BuildingSummary, GamePosition } from '../types/game.js';
 
 type BuildingRow = {
   feature_id: string;
@@ -71,6 +71,12 @@ type BuildingAtPositionRow = {
   area_square_meters: number;
 };
 
+type AreaAtPositionRow = {
+  area_id: string;
+  tags: Record<string, string>;
+  area_square_meters: number;
+};
+
 const BUILDING_TAG_COLUMNS = getStructuredTagColumns('building');
 const POI_TAG_COLUMNS = getStructuredTagColumns('poi');
 const ROAD_TAG_COLUMNS = getStructuredTagColumns('line');
@@ -80,6 +86,7 @@ const fetchScenePolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fe
 const fetchSceneBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneBuildingDetails.sql');
 const fetchSceneNonBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneNonBuildingDetails.sql');
 const findBuildingAtPositionSqlPromise = loadServiceSql('osmRepository/findBuildingAtPosition.sql');
+const findAreasAtPositionSqlPromise = loadServiceSql('osmRepository/findAreasAtPosition.sql');
 const upsertBuildingFeatureSqlPromise = loadServiceSql('osmRepository/upsertBuildingFeature.sql');
 const upsertPoiFeatureSqlPromise = loadServiceSql('osmRepository/upsertPoiFeature.sql');
 const upsertLineFeatureSqlPromise = loadServiceSql('osmRepository/upsertLineFeature.sql');
@@ -277,6 +284,20 @@ export async function findBuildingAtPosition(position: GamePosition): Promise<Bu
     tags: row.tags || {},
     areaSquareMeters: Number(row.area_square_meters),
   };
+}
+
+export async function findAreasAtPosition(position: GamePosition): Promise<AreaSummary[]> {
+  const sql = await findAreasAtPositionSqlPromise;
+  const result = await query<AreaAtPositionRow>(
+    sql,
+    [position.lon, position.lat],
+  );
+
+  return result.rows.map((row) => ({
+    areaId: row.area_id,
+    tags: row.tags || {},
+    areaSquareMeters: Number(row.area_square_meters),
+  }));
 }
 
 /**

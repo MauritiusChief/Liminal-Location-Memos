@@ -8,4 +8,4 @@ _experimental/
 backend/data/game-saves/*.json
 backend/data/game-chat-debug/*.json
 backend/data/game-chat-debug/*.md
-backend/data_bk
+_data_bk/
