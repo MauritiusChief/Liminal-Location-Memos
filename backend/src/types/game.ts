@@ -1,6 +1,7 @@
 import type { DbNormalizationDiagnostics } from '../services/sceneTypes.js';
 import type { NormalizedMicroGrid } from '../services/overpassGrid.js';
 import type { NormalizedPolarView } from '../services/overpassPolar.js';
+import type { ContainedPoi, RelationReference } from '../services/overpassNormalization.js';
 import type {
   SceneContextSummaryMode,
 } from '../services/sceneSummaryService.js';
@@ -53,6 +54,8 @@ export interface BuildingSummary {
   buildingId: string;
   tags: Record<string, string>;
   areaSquareMeters: number;
+  relations: RelationReference[];
+  containedPois: ContainedPoi[];
 }
 
 export interface AreaSummary {
@@ -69,7 +72,7 @@ export interface MovePlayerToolResult {
   reason: string;
   targetLabel?: string;
   coverageSyncTriggered: boolean;
-  currentBuilding?: BuildingSummary;
+  currentBuildings: BuildingSummary[];
   currentAreas: AreaSummary[];
 }
 

@@ -66,17 +66,19 @@ export const DEFAULT_BUILDING_SCHEMA_SYSTEM_PROMPT = `
 
 ## 输入数据
 你会收到一个 JSON，其中包含：
-- currentBuilding：当前建筑（可能信息不完整）
-  - 信息中的面积指的是投影面积，也就是每层的面积，不是建筑总面积
+- currentBuildings：当前建筑集合
+  - 第一个元素是玩家当前所在的建筑，后续元素是同属一个 relation 的关联建筑（可能不存在）
+  - 每个元素中的面积指的是投影面积，也就是每层的面积，不是建筑总面积
+  - 每个元素都可能包含 containedPois，可用于辅助判断建筑用途
 - currentAreas：建筑所在的更大区域（用于补充语义）
 
 ## 任务
-根据输入信息，生成该建筑的“楼层结构”，用于游戏中的建筑内部生成。
+根据输入信息，生成该建筑或建筑组合内所有建筑的“楼层结构”，用于游戏中的建筑内部生成。
 
 ## 生成原则
 
 ### 1. 信息优先级
-- 优先使用 currentBuilding.tags 判断建筑类型（如 library / residential / commercial）
+- 优先使用 currentBuildings[*].tags 判断建筑类型（如 library / residential / commercial）
 - 若信息不足，从 currentAreas 推断，例如：
   - university → 教学/图书馆/办公
   - commercial → 商业用途
@@ -94,11 +96,14 @@ export const DEFAULT_BUILDING_SCHEMA_SYSTEM_PROMPT = `
 每个房间所需字段：
 - count：数量（合理）
 - desc：简短中文描述
-- access（可选）：只能为 "entrance" 或 "vertical"，分别表示该房间是否为外部出入口、该房间是否能通向其他楼层
+- access（可选）：只能为 "entrance"，"vertical" 或 "internal"
+  - "entrance" 表示该房间是否为外部出入口
+  - "vertical" 表示该房间是否能通向其他楼层
+  - "internal" 只在当前房间所属建筑属于一个建筑组合时可用，表示该房间是否通向同一建筑组合内的其他建筑
 
 套房的的所需的字段：
 - count：套房的数量
-- desc：简短中文数量
+- desc：简短中文描述
 - subRooms：一个 JSON object，以类似 rooms 的方式表示单个套房内部的房间情况。
 
 套房内部不允许嵌套套房，只允许单个房间；套房以及其内部的房间不添加 access。
@@ -109,16 +114,22 @@ export const DEFAULT_BUILDING_SCHEMA_SYSTEM_PROMPT = `
 
 - 第1层必须包含“入口相关房间”（如 lobby / reception / hallWay），且该房间必须包含 access。
 - 多层建筑：
-  - 必须包含楼梯、电梯连接或其他连接方式（写在 access 中）
+  - 每层都必须包含楼梯、电梯连接或其他连接方式（写在该层某个房间的 access 中）
   - 即使第1层与其他楼层共享同一种设计，第1层也必须单独列出，用来标记与外界的连接方式
 - 房间数量与面积匹配（不要极端值）
+
+### 5. 建筑组合要求
+
+整个建筑组合在逻辑上表示的其实是一整个大建筑，只不过各个部分有不同的属性，比如层数可能不同。
+
+因此，虽然生成时仍然按照各个建筑生成其结构，但各个建筑可以各自承担不同的功能。
+也因此，建筑组合中不一定每个建筑都有 "access": "entrance"，但是每个建筑都必须有 "access": "internal"。
 
 ### 5. 输出格式（严格）
 
 输出必须是 JSON，且仅包含：
-
 {
-  "levels": {
+  "way/123": { // 某一建筑的 id
     "xxx": { // 该类型楼层的key
       "span": [...], // 共用此 schema 的楼层
       "rooms": {
@@ -139,7 +150,8 @@ export const DEFAULT_BUILDING_SCHEMA_SYSTEM_PROMPT = `
         }
       }
     }
-  }
+  },
+  "way/456": {...} // 其他建筑（如果输入有多个建筑）
 }
 
 其中span的格式需符合：

@@ -19,7 +19,7 @@ import { writeGameChatMessageSnapshot } from './gameChatDebugLog.js';
 import { findNearbySmallDescriptions } from './sceneDescriptionRepository.js';
 import { ensureLargeDescription, ensureSmallDescription, filterFarVisibleSmallDescriptions } from './sceneDescriptionService.js';
 import { buildProjectedSceneSummary, SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE } from './sceneSummaryService.js';
-import { findAreasAtPosition, findBuildingAtPosition } from './osmRepository.js';
+import { findAreasAtPosition, findBuildingsAtPosition } from './osmRepository.js';
 import type {
   GameChatResponse,
   GameMessage,
@@ -288,7 +288,7 @@ async function handleMovePlayerTool(
   });
 
   const coverageSyncTriggered = await prepareRuntimeForPosition(runtime, nextPosition);
-  const currentBuilding = await findBuildingAtPosition(nextPosition);
+  const currentBuildings = await findBuildingsAtPosition(nextPosition);
   const currentAreas = await findAreasAtPosition(nextPosition);
   runtime.session.save.playerPosition = nextPosition;
 
@@ -300,7 +300,7 @@ async function handleMovePlayerTool(
     reason: toolInput.reason || '根据用户输入执行移动。',
     targetLabel: toolInput.targetLabel,
     coverageSyncTriggered,
-    currentBuilding: currentBuilding || undefined,
+    currentBuildings,
     currentAreas,
   };
 

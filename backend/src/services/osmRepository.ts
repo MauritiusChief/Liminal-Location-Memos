@@ -69,6 +69,8 @@ type BuildingAtPositionRow = {
   building_id: string;
   tags: Record<string, string>;
   area_square_meters: number;
+  relations: RelationReference[] | null;
+  contained_pois: ContainedPoi[] | null;
 };
 
 type AreaAtPositionRow = {
@@ -85,7 +87,7 @@ const fetchMicroGridFromDbSqlPromise = loadServiceSql('osmRepository/fetchMicroG
 const fetchScenePolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fetchScenePolarFeaturesFromDb.sql');
 const fetchSceneBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneBuildingDetails.sql');
 const fetchSceneNonBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneNonBuildingDetails.sql');
-const findBuildingAtPositionSqlPromise = loadServiceSql('osmRepository/findBuildingAtPosition.sql');
+const findBuildingsAtPositionSqlPromise = loadServiceSql('osmRepository/findBuildingAtPosition.sql');
 const findAreasAtPositionSqlPromise = loadServiceSql('osmRepository/findAreasAtPosition.sql');
 const upsertBuildingFeatureSqlPromise = loadServiceSql('osmRepository/upsertBuildingFeature.sql');
 const upsertPoiFeatureSqlPromise = loadServiceSql('osmRepository/upsertPoiFeature.sql');
@@ -268,22 +270,20 @@ export async function findNearestCoverageDistanceMeters(position: GamePosition):
   return value === null || value === undefined ? null : Number(value);
 }
 
-export async function findBuildingAtPosition(position: GamePosition): Promise<BuildingSummary | null> {
-  const sql = await findBuildingAtPositionSqlPromise;
+export async function findBuildingsAtPosition(position: GamePosition): Promise<BuildingSummary[]> {
+  const sql = await findBuildingsAtPositionSqlPromise;
   const result = await query<BuildingAtPositionRow>(
     sql,
     [position.lon, position.lat],
   );
-  const row = result.rows[0];
-  if (!row) {
-    return null;
-  }
 
-  return {
+  return result.rows.map((row) => ({
     buildingId: row.building_id,
     tags: row.tags || {},
     areaSquareMeters: Number(row.area_square_meters),
-  };
+    relations: row.relations || [],
+    containedPois: row.contained_pois || [],
+  }));
 }
 
 export async function findAreasAtPosition(position: GamePosition): Promise<AreaSummary[]> {
