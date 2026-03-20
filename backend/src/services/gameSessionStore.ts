@@ -20,9 +20,13 @@ import type {
   PlayerIndoorLocation,
 } from '../types/game.js';
 
+const testPosition = [39.90310484384369, -83.44964892561046]
+
 const DEFAULT_START_POSITION: GamePosition = {
-  lat: 33.83653441683847,
-  lon: -84.34211999827654,
+  // lat: 33.83653441683847,
+  // lon: -84.34211999827654,
+  lat: testPosition[0],
+  lon: testPosition[1]
 };
 
 const SAVE_DIRECTORY = path.resolve(process.cwd(), 'data', 'game-saves');

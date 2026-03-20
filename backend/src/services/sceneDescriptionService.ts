@@ -125,10 +125,16 @@ export async function ensureBuildingSchema(
   }
 
   const missingBuildingIds = buildingIds.filter((buildingId) => !session.save.buildingSchemas[buildingId]);
+  console.log('[DEBUG] ensureBuildingSchema() - reuse result', {
+    reused: missingBuildingIds.length === 0,
+    buildingCount: buildingIds.length,
+    missingBuildingIds,
+  });
   if (missingBuildingIds.length === 0) {
     return Object.fromEntries(buildingIds.map((buildingId) => [buildingId, session.save.buildingSchemas[buildingId]]));
   }
 
+  console.log('[DEBUG] ensureBuildingSchema() - generateReplyWithSystemPrompt() call');
   const generated = await generateReplyWithSystemPrompt(
     buildGameSystemPrompt.trim(),
     JSON.stringify({
@@ -138,6 +144,7 @@ export async function ensureBuildingSchema(
     }, null, 2),
     { snapshotType: 'scene-building' },
   );
+  console.log('[DEBUG] ensureBuildingSchema() - generateReplyWithSystemPrompt() return');
   const parsed = parseBuildingSchemaJson(generated.reply, buildingIds);
 
   for (const [buildingId, schema] of Object.entries(parsed)) {
@@ -163,10 +170,16 @@ export async function ensureLevelDescription(
   // 楼层描述按“buildingId + level”缓存。
   // 顶楼允许在描述里保留一些可见的外部环境暗示，其他楼层严格聚焦室内。
   const existing = session.save.levelDescriptions[buildLevelDescriptionKey(input.buildingId, input.level)];
+  console.log('[DEBUG] ensureLevelDescription() - reuse result', {
+    reused: existing !== undefined,
+    buildingId: input.buildingId,
+    level: input.level,
+  });
   if (existing) {
     return existing;
   }
 
+  console.log('[DEBUG] ensureLevelDescription() - generateReplyWithSystemPrompt() call');
   const generated = await generateReplyWithSystemPrompt(
     [
       '你是一个文字探索游戏中的建筑楼层环境描述生成器。',
@@ -187,9 +200,10 @@ export async function ensureLevelDescription(
       currentAreas: input.currentAreas,
       nearbyLines: input.nearbyLines,
       isTopFloor: input.isTopFloor,
-    }, null, 2),
+    }),
     { snapshotType: 'scene-level' },
   );
+  console.log('[DEBUG] ensureLevelDescription() - generateReplyWithSystemPrompt() return');
 
   const now = new Date().toISOString();
   const record: LevelDescriptionRecord = {

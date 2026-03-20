@@ -142,9 +142,6 @@ function collectGameChatDerivedFiles(messages: ChatRequestMessage[]): DerivedSna
       if (typeof parsedContent.activeSummary === 'string') {
         files.push(buildMarkdownDerivedFile('scene-context_activeSummary', parsedContent.activeSummary));
       }
-      if (typeof parsedContent.levelDescription === 'string') {
-        files.push(buildMarkdownDerivedFile('scene-context_levelDescription', parsedContent.levelDescription));
-      }
       continue;
     }
 
@@ -165,7 +162,9 @@ function collectSceneDescriptionDerivedFiles(input: {
   const promptMessage = input.messages.find((message) => message.role === 'user');
 
   if (promptMessage?.content.trim()) {
-    files.push(buildMarkdownDerivedFile('prompt', promptMessage.content));
+    files.push(input.type === 'scene-building' || input.type === 'scene-level'
+      ? buildJsonStringDerivedFile('prompt', promptMessage.content)
+      : buildMarkdownDerivedFile('prompt', promptMessage.content));
   }
 
   if (input.type === 'scene-small') {
@@ -183,6 +182,14 @@ function buildJsonDerivedFile(suffix: string, payload: unknown): DerivedSnapshot
     suffix,
     extension: 'json',
     content: JSON.stringify(payload, null, 2),
+  };
+}
+
+function buildJsonStringDerivedFile(suffix: string, content: string): DerivedSnapshotFile {
+  return {
+    suffix,
+    extension: 'json',
+    content: JSON.stringify(content),
   };
 }
 
