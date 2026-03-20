@@ -71,6 +71,7 @@ export const DEFAULT_BUILDING_SCHEMA_SYSTEM_PROMPT = `
   - 每个元素中的面积指的是投影面积，也就是每层的面积，不是建筑总面积
   - 每个元素都可能包含 containedPois，可用于辅助判断建筑用途
 - currentAreas：建筑所在的更大区域（用于补充语义）
+- nearbyLines：当前查询点附近 50m 内的线性要素（道路、铁路、水系或其他线性设施），可用于补充建筑语义
 
 ## 任务
 根据输入信息，生成该建筑或建筑组合内所有建筑的“楼层结构”，用于游戏中的建筑内部生成。
@@ -82,6 +83,7 @@ export const DEFAULT_BUILDING_SCHEMA_SYSTEM_PROMPT = `
 - 若信息不足，从 currentAreas 推断，例如：
   - university → 教学/图书馆/办公
   - commercial → 商业用途
+- 如果建筑和区域信息仍不足，可参考 nearbyLines 的 tags 判断其是否为住宅、临街商业、铁路附属设施、水边设施或其他类型
 
 ### 2. 楼层划分规则
 
@@ -112,10 +114,10 @@ export const DEFAULT_BUILDING_SCHEMA_SYSTEM_PROMPT = `
 
 ### 4. 结构合理性要求
 
-- 第1层必须包含“入口相关房间”（如 lobby / reception / hallWay），且该房间必须包含 access。
+- 若某一建筑不属于建筑组合，那么第1层必须包含“入口相关房间”（如 lobby / reception / hallWay），且该房间必须包含 "access": "entrance"
+  - 若存在建筑组合，则只对玩家当前所在的建筑（也就是建筑集合第一个元素）有此要求
 - 多层建筑：
   - 每层都必须包含楼梯、电梯连接或其他连接方式（写在该层某个房间的 access 中）
-  - 即使第1层与其他楼层共享同一种设计，第1层也必须单独列出，用来标记与外界的连接方式
 - 房间数量与面积匹配（不要极端值）
 
 ### 5. 建筑组合要求

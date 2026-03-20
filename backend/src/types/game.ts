@@ -64,6 +64,11 @@ export interface AreaSummary {
   areaSquareMeters: number;
 }
 
+export interface LineSummary {
+  lineId: string;
+  tags: Record<string, string>;
+}
+
 export interface MovePlayerToolResult {
   previousPosition: GamePosition;
   nextPosition: GamePosition;
@@ -74,6 +79,7 @@ export interface MovePlayerToolResult {
   coverageSyncTriggered: boolean;
   currentBuildings: BuildingSummary[];
   currentAreas: AreaSummary[];
+  nearbyLines: LineSummary[];
 }
 
 export interface SceneContextSnapshotPayload {

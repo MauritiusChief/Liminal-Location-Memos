@@ -15,7 +15,7 @@ import type {
   DbMicroGridCellRecord,
 } from './sceneTypes.js';
 import { getStructuredTagColumns, matchFeatureCategory } from './osmFeatureConfig.js';
-import type { AreaSummary, BuildingSummary, GamePosition } from '../types/game.js';
+import type { AreaSummary, BuildingSummary, GamePosition, LineSummary } from '../types/game.js';
 
 type BuildingRow = {
   feature_id: string;
@@ -79,6 +79,11 @@ type AreaAtPositionRow = {
   area_square_meters: number;
 };
 
+type LineNearPositionRow = {
+  line_id: string;
+  tags: Record<string, string>;
+};
+
 const BUILDING_TAG_COLUMNS = getStructuredTagColumns('building');
 const POI_TAG_COLUMNS = getStructuredTagColumns('poi');
 const ROAD_TAG_COLUMNS = getStructuredTagColumns('line');
@@ -89,6 +94,7 @@ const fetchSceneBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchS
 const fetchSceneNonBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneNonBuildingDetails.sql');
 const findBuildingsAtPositionSqlPromise = loadServiceSql('osmRepository/findBuildingAtPosition.sql');
 const findAreasAtPositionSqlPromise = loadServiceSql('osmRepository/findAreasAtPosition.sql');
+const findNearbyLinesAtPositionSqlPromise = loadServiceSql('osmRepository/findNearbyLinesAtPosition.sql');
 const upsertBuildingFeatureSqlPromise = loadServiceSql('osmRepository/upsertBuildingFeature.sql');
 const upsertPoiFeatureSqlPromise = loadServiceSql('osmRepository/upsertPoiFeature.sql');
 const upsertLineFeatureSqlPromise = loadServiceSql('osmRepository/upsertLineFeature.sql');
@@ -297,6 +303,19 @@ export async function findAreasAtPosition(position: GamePosition): Promise<AreaS
     areaId: row.area_id,
     tags: row.tags || {},
     areaSquareMeters: Number(row.area_square_meters),
+  }));
+}
+
+export async function findNearbyLinesAtPosition(position: GamePosition): Promise<LineSummary[]> {
+  const sql = await findNearbyLinesAtPositionSqlPromise;
+  const result = await query<LineNearPositionRow>(
+    sql,
+    [position.lon, position.lat],
+  );
+
+  return result.rows.map((row) => ({
+    lineId: row.line_id,
+    tags: row.tags || {},
   }));
 }
 
