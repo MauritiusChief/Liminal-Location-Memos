@@ -50,6 +50,54 @@ export interface MovePlayerToolInput {
   targetLabel?: string;
 }
 
+export type BuildingRoomAccess = 'entrance' | 'vertical' | 'internal';
+
+export interface BuildingSchemaSubRoom {
+  count: number;
+  desc: string;
+}
+
+export interface BuildingSchemaRoom {
+  count: number;
+  desc: string;
+  access?: BuildingRoomAccess;
+}
+
+export interface BuildingSchemaSuiteRoom {
+  count: number;
+  desc: string;
+  subRooms: Record<string, BuildingSchemaSubRoom>;
+}
+
+export type BuildingSchemaRoomEntry = BuildingSchemaRoom | BuildingSchemaSuiteRoom;
+
+export interface BuildingLevelSchemaDefinition {
+  span: [number] | [number, number];
+  rooms: Record<string, BuildingSchemaRoomEntry>;
+}
+
+export type BuildingSchema = Record<string, BuildingLevelSchemaDefinition>;
+
+export interface ActiveLevelSchema {
+  schemaKey: string;
+  span: [number] | [number, number];
+  rooms: Record<string, BuildingSchemaRoomEntry>;
+}
+
+export interface LevelDescriptionRecord {
+  buildingId: string;
+  level: number;
+  descriptionText: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlayerIndoorLocation {
+  buildingId: string;
+  level: number;
+  roomKey: string;
+}
+
 export interface BuildingSummary {
   buildingId: string;
   tags: Record<string, string>;
@@ -80,10 +128,14 @@ export interface MovePlayerToolResult {
   currentBuildings: BuildingSummary[];
   currentAreas: AreaSummary[];
   nearbyLines: LineSummary[];
+  enteredBuilding: boolean;
+  activeBuildingId?: string;
+  playerIndoorLocation?: PlayerIndoorLocation;
 }
 
-export interface SceneContextSnapshotPayload {
+export interface OutdoorSceneContextSnapshotPayload {
   type: 'scene_context_snapshot';
+  context: 'outdoor';
   summaryMode: SceneContextSummaryMode;
   largeDescription: string;
   activeSummary: string;
@@ -92,6 +144,24 @@ export interface SceneContextSnapshotPayload {
     notes: string;
   }>;
 }
+
+export interface IndoorSceneContextSnapshotPayload {
+  type: 'scene_context_snapshot';
+  context: 'indoor';
+  summaryMode: SceneContextSummaryMode;
+  levelSchema: ActiveLevelSchema;
+  levelDescription: string;
+  nearbyFarVisibleDetails: Array<{
+    distanceMeters: number;
+    notes: string;
+  }>;
+  activeSummary?: string;
+  largeDescription?: string;
+}
+
+export type SceneContextSnapshotPayload =
+  | OutdoorSceneContextSnapshotPayload
+  | IndoorSceneContextSnapshotPayload;
 
 export type LookFarToolResult = SceneContextSnapshotPayload;
 
@@ -137,11 +207,14 @@ export interface GameSaveDocument {
   // 这是单会话单 JSON 文件的落盘格式。
   sessionId: string;
   playerPosition: GamePosition;
+  playerIndoorLocation: PlayerIndoorLocation | null;
   messageHistory: GameMessage[];
   activeLargeDescriptionId: string | null;
   visibleSmallDescriptionIds: string[];
   largeDescriptions: LargeDescriptionRecord[];
   smallDescriptions: SmallDescriptionRecord[];
+  buildingSchemas: Record<string, BuildingSchema>;
+  levelDescriptions: Record<string, LevelDescriptionRecord>;
   lastSceneContextMeta: LastSceneContextMeta | null;
 }
 
@@ -196,6 +269,12 @@ export interface GameClientSmallDescription {
   distanceMeters?: number;
 }
 
+export interface GameClientLevelDescription {
+  buildingId: string;
+  level: number;
+  descriptionText: string;
+}
+
 export interface GameChatResponse {
   // 首页每次发送消息后，都会拿到最新位置和必要的展示数据。
   sessionId: string;
@@ -203,6 +282,10 @@ export interface GameChatResponse {
   playerPosition: GamePosition;
   activeLargeDescription: GameClientLargeDescription | null;
   nearbySmallDescriptions: GameClientSmallDescription[];
+  playerIndoorLocation: PlayerIndoorLocation | null;
+  currentBuildingSchema: BuildingSchema | null;
+  currentLevelSchema: ActiveLevelSchema | null;
+  currentLevelDescription: GameClientLevelDescription | null;
 }
 
 export interface GameSessionSnapshotResponse {
@@ -213,4 +296,8 @@ export interface GameSessionSnapshotResponse {
   playerPosition: GamePosition;
   activeLargeDescription: GameClientLargeDescription | null;
   nearbySmallDescriptions: GameClientSmallDescription[];
+  playerIndoorLocation: PlayerIndoorLocation | null;
+  currentBuildingSchema: BuildingSchema | null;
+  currentLevelSchema: ActiveLevelSchema | null;
+  currentLevelDescription: GameClientLevelDescription | null;
 }

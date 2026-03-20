@@ -4,6 +4,9 @@ import path from 'node:path';
 import { buildDescriptionIndex } from './gameDescriptionIndex.js';
 import { distanceBetweenCoordinates } from './overpassGeometry.js';
 import type {
+  ActiveLevelSchema,
+  BuildingSchema,
+  GameClientLevelDescription,
   GameClientLargeDescription,
   GameClientMessage,
   GameClientSmallDescription,
@@ -11,8 +14,10 @@ import type {
   GameMessage,
   GameSaveDocument,
   GameSessionSnapshotResponse,
+  LevelDescriptionRecord,
   LoadedGameSession,
   LastSceneContextMeta,
+  PlayerIndoorLocation,
 } from '../types/game.js';
 
 const DEFAULT_START_POSITION: GamePosition = {
@@ -68,12 +73,18 @@ export async function getSessionSnapshot(sessionId: string): Promise<GameSession
       ),
     }))
     .sort((left, right) => left.distanceMeters - right.distanceMeters);
+  const currentBuildingSchema = getCurrentBuildingSchema(session.save.buildingSchemas, session.save.playerIndoorLocation);
+  const currentLevelSchema = getCurrentLevelSchema(currentBuildingSchema, session.save.playerIndoorLocation);
+  const currentLevelDescription = getCurrentLevelDescription(session.save.levelDescriptions, session.save.playerIndoorLocation);
 
   // 若 sessionId 对应的 JSON 根本不存在，则 getOrCreateSession 会新建一个空存档。
   // 恢复接口不应该把“新建空存档”误认为成功恢复，因此这里要求至少已有历史或描述才算可恢复。
   const hasPersistedState = session.save.messageHistory.length > 0
     || session.save.largeDescriptions.length > 0
-    || session.save.smallDescriptions.length > 0;
+    || session.save.smallDescriptions.length > 0
+    || Object.keys(session.save.buildingSchemas).length > 0
+    || Object.keys(session.save.levelDescriptions).length > 0
+    || session.save.playerIndoorLocation !== null;
 
   if (!hasPersistedState) {
     return null;
@@ -86,6 +97,10 @@ export async function getSessionSnapshot(sessionId: string): Promise<GameSession
     playerPosition: session.save.playerPosition,
     activeLargeDescription: toClientLargeDescription(activeLargeDescription),
     nearbySmallDescriptions: toClientSmallDescriptions(nearbySmallDescriptions),
+    playerIndoorLocation: session.save.playerIndoorLocation,
+    currentBuildingSchema,
+    currentLevelSchema,
+    currentLevelDescription: toClientLevelDescription(currentLevelDescription),
   };
 }
 
@@ -161,6 +176,20 @@ export function toClientSmallDescriptions(
   }));
 }
 
+export function toClientLevelDescription(
+  record: LevelDescriptionRecord | null,
+): GameClientLevelDescription | null {
+  if (!record) {
+    return null;
+  }
+
+  return {
+    buildingId: record.buildingId,
+    level: record.level,
+    descriptionText: record.descriptionText,
+  };
+}
+
 function sanitizeMovePlayerToolContent(content: string): string {
   try {
     const parsed = JSON.parse(content) as { bearingDegrees?: unknown; distanceMeters?: unknown };
@@ -183,11 +212,14 @@ function createSaveDocument(sessionId: string): GameSaveDocument {
   return {
     sessionId,
     playerPosition: { ...DEFAULT_START_POSITION },
+    playerIndoorLocation: null,
     messageHistory: [],
     activeLargeDescriptionId: null,
     visibleSmallDescriptionIds: [],
     largeDescriptions: [],
     smallDescriptions: [],
+    buildingSchemas: {},
+    levelDescriptions: {},
     lastSceneContextMeta: null,
   };
 }
@@ -220,11 +252,14 @@ function normalizeSaveDocument(input: Partial<GameSaveDocument>, sessionId: stri
   return {
     sessionId: input.sessionId || sessionId,
     playerPosition: normalizePosition(input.playerPosition),
+    playerIndoorLocation: normalizePlayerIndoorLocation(input.playerIndoorLocation),
     messageHistory: normalizeMessageHistory(input.messageHistory),
     activeLargeDescriptionId: typeof input.activeLargeDescriptionId === 'string' ? input.activeLargeDescriptionId : null,
     visibleSmallDescriptionIds: Array.isArray(input.visibleSmallDescriptionIds) ? input.visibleSmallDescriptionIds : [],
     largeDescriptions: normalizeLargeDescriptions(input.largeDescriptions),
     smallDescriptions: normalizeSmallDescriptions(input.smallDescriptions),
+    buildingSchemas: normalizeBuildingSchemas(input.buildingSchemas),
+    levelDescriptions: normalizeLevelDescriptions(input.levelDescriptions),
     lastSceneContextMeta: normalizeLastSceneContextMeta(input.lastSceneContextMeta),
   };
 }
@@ -311,6 +346,71 @@ function normalizeLastSceneContextMeta(input: unknown): LastSceneContextMeta | n
   };
 }
 
+function normalizePlayerIndoorLocation(input: unknown): PlayerIndoorLocation | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const candidate = input as Record<string, unknown>;
+  const buildingId = typeof candidate.buildingId === 'string' ? candidate.buildingId : null;
+  const level = Number(candidate.level);
+  const roomKey = typeof candidate.roomKey === 'string' ? candidate.roomKey : null;
+
+  if (!buildingId || !Number.isInteger(level) || !roomKey) {
+    return null;
+  }
+
+  return {
+    buildingId,
+    level,
+    roomKey,
+  };
+}
+
+function normalizeBuildingSchemas(input: unknown): GameSaveDocument['buildingSchemas'] {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return {};
+  }
+
+  const entries = Object.entries(input as Record<string, unknown>)
+    .filter(([, schema]) => isBuildingSchema(schema));
+
+  return Object.fromEntries(entries) as GameSaveDocument['buildingSchemas'];
+}
+
+function normalizeLevelDescriptions(input: unknown): GameSaveDocument['levelDescriptions'] {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return {};
+  }
+
+  const normalizedEntries = Object.entries(input as Record<string, unknown>).flatMap(([key, value]) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return [];
+    }
+
+    const candidate = value as Record<string, unknown>;
+    const buildingId = typeof candidate.buildingId === 'string' ? candidate.buildingId : null;
+    const level = Number(candidate.level);
+    const descriptionText = typeof candidate.descriptionText === 'string' ? candidate.descriptionText : null;
+    const createdAt = typeof candidate.createdAt === 'string' ? candidate.createdAt : null;
+    const updatedAt = typeof candidate.updatedAt === 'string' ? candidate.updatedAt : null;
+
+    if (!buildingId || !Number.isInteger(level) || !descriptionText || !createdAt || !updatedAt) {
+      return [];
+    }
+
+    return [[key, {
+      buildingId,
+      level,
+      descriptionText,
+      createdAt,
+      updatedAt,
+    } satisfies LevelDescriptionRecord] as const];
+  });
+
+  return Object.fromEntries(normalizedEntries);
+}
+
 function normalizeMessageHistory(history: unknown): GameMessage[] {
   if (!Array.isArray(history)) {
     return [];
@@ -375,6 +475,74 @@ function normalizeMessageHistory(history: unknown): GameMessage[] {
   }
 
   return messages;
+}
+
+function getCurrentBuildingSchema(
+  buildingSchemas: Record<string, BuildingSchema>,
+  playerIndoorLocation: PlayerIndoorLocation | null,
+): BuildingSchema | null {
+  if (!playerIndoorLocation) {
+    return null;
+  }
+
+  return buildingSchemas[playerIndoorLocation.buildingId] || null;
+}
+
+function getCurrentLevelSchema(
+  buildingSchema: BuildingSchema | null,
+  playerIndoorLocation: PlayerIndoorLocation | null,
+): ActiveLevelSchema | null {
+  if (!buildingSchema || !playerIndoorLocation) {
+    return null;
+  }
+
+  for (const [schemaKey, definition] of Object.entries(buildingSchema)) {
+    const [start, end = start] = definition.span;
+    if (playerIndoorLocation.level >= start && playerIndoorLocation.level <= end) {
+      return {
+        schemaKey,
+        span: definition.span,
+        rooms: definition.rooms,
+      };
+    }
+  }
+
+  return null;
+}
+
+function getCurrentLevelDescription(
+  levelDescriptions: Record<string, LevelDescriptionRecord>,
+  playerIndoorLocation: PlayerIndoorLocation | null,
+): LevelDescriptionRecord | null {
+  if (!playerIndoorLocation) {
+    return null;
+  }
+
+  return levelDescriptions[buildLevelDescriptionKey(playerIndoorLocation.buildingId, playerIndoorLocation.level)] || null;
+}
+
+function buildLevelDescriptionKey(buildingId: string, level: number): string {
+  return `${buildingId}::${level}`;
+}
+
+function isBuildingSchema(value: unknown): value is BuildingSchema {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+
+  return Object.values(value as Record<string, unknown>).every((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      return false;
+    }
+
+    const candidate = entry as Record<string, unknown>;
+    return Array.isArray(candidate.span)
+      && (candidate.span.length === 1 || candidate.span.length === 2)
+      && candidate.span.every((item) => Number.isInteger(item))
+      && candidate.rooms !== null
+      && typeof candidate.rooms === 'object'
+      && !Array.isArray(candidate.rooms);
+  });
 }
 
 function normalizePosition(position: Partial<GamePosition> | undefined): GamePosition {

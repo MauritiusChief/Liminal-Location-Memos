@@ -2,6 +2,7 @@ import { movePosition } from './gameMovement.js';
 import { ensureCoverageForPosition, loadSceneContext } from './gameScene.js';
 import {
   getOrCreateSession,
+  toClientLevelDescription,
   toClientLargeDescription,
   toClientMessages,
   toClientSmallDescriptions,
@@ -17,13 +18,25 @@ import {
 } from './llm.js';
 import { writeGameChatMessageSnapshot } from './gameChatDebugLog.js';
 import { findNearbySmallDescriptions } from './sceneDescriptionRepository.js';
-import { ensureLargeDescription, ensureSmallDescription, filterFarVisibleSmallDescriptions } from './sceneDescriptionService.js';
+import {
+  ensureBuildingSchema,
+  ensureLargeDescription,
+  ensureLevelDescription,
+  ensureSmallDescription,
+  filterFarVisibleSmallDescriptions,
+  isTopFloorOfBuilding,
+  resolveActiveLevelSchema,
+  resolveIndoorEntranceLocation,
+} from './sceneDescriptionService.js';
 import { buildProjectedSceneSummary, SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE } from './sceneSummaryService.js';
 import { findAreasAtPosition, findBuildingsAtPosition, findNearbyLinesAtPosition } from './osmRepository.js';
 import type {
+  ActiveLevelSchema,
+  BuildingSchema,
   GameChatResponse,
   GameMessage,
   GameChatRequest,
+  LevelDescriptionRecord,
   LargeDescriptionRecord,
   LookFarToolResult,
   LoadedGameSession,
@@ -34,6 +47,9 @@ import type {
   SceneContext,
   SmallDescriptionRecord,
   GamePosition,
+  BuildingSummary,
+  AreaSummary,
+  LineSummary,
 } from '../types/game.js';
 import { styleRule } from './sharedDefaultSysPromptPart.js';
 
@@ -82,11 +98,21 @@ interface TurnRuntime {
   inputMessage: string;
   userMessage: GameMessage;
   sceneContext: SceneContext;
-  activeLargeDescription: LargeDescriptionRecord;
-  activeSmallDescription: SmallDescriptionRecord;
+  activeLargeDescription: LargeDescriptionRecord | null;
+  activeSmallDescription: SmallDescriptionRecord | null;
   nearbySmallDescriptions: SmallDescriptionRecord[];
+  currentBuildingSchema: BuildingSchema | null;
+  currentLevelSchema: ActiveLevelSchema | null;
+  currentLevelDescription: LevelDescriptionRecord | null;
+  indoorTopFloor: boolean;
   promptSummaryMode: SceneContextSummaryMode;
   currentTurnToolMessages: GameMessage[];
+}
+
+interface PositionContextBundle {
+  currentBuildings: BuildingSummary[];
+  currentAreas: AreaSummary[];
+  nearbyLines: LineSummary[];
 }
 
 interface RequestModelTurnOptions {
@@ -164,9 +190,13 @@ async function initializeTurnRuntime(
     inputMessage: inputMessage,
     userMessage: userMessage,
     sceneContext: await loadSceneContext(session.save.playerPosition),
-    activeLargeDescription: {} as LargeDescriptionRecord,
-    activeSmallDescription: {} as SmallDescriptionRecord,
+    activeLargeDescription: null,
+    activeSmallDescription: null,
     nearbySmallDescriptions: [],
+    currentBuildingSchema: null,
+    currentLevelSchema: null,
+    currentLevelDescription: null,
+    indoorTopFloor: false,
     promptSummaryMode: 'concise_near',
     currentTurnToolMessages: [],
   };
@@ -184,9 +214,51 @@ async function initializeTurnRuntime(
 async function prepareRuntimeForPosition(
   runtime: TurnRuntime,
   position: GamePosition,
+  prefetchedContext?: PositionContextBundle & { coverageSyncTriggered?: boolean },
 ): Promise<boolean> {
-  const coverageSyncTriggered = await ensureCoverageForPosition(position);
+  const coverageSyncTriggered = prefetchedContext?.coverageSyncTriggered
+    ?? await ensureCoverageForPosition(position);
   runtime.sceneContext = await loadSceneContext(position);
+  runtime.currentBuildingSchema = null;
+  runtime.currentLevelSchema = null;
+  runtime.currentLevelDescription = null;
+  runtime.indoorTopFloor = false;
+
+  if (runtime.session.save.playerIndoorLocation) {
+    const context = prefetchedContext || await loadPositionContext(position);
+    const buildingSchemas = await ensureBuildingSchema(context, runtime.session);
+    const indoorLocation = runtime.session.save.playerIndoorLocation;
+    const currentBuildingSchema = buildingSchemas[indoorLocation.buildingId] || runtime.session.save.buildingSchemas[indoorLocation.buildingId] || null;
+    if (!currentBuildingSchema) {
+      throw new Error(`Missing building schema for ${indoorLocation.buildingId}.`);
+    }
+
+    const currentLevelSchema = resolveActiveLevelSchema(currentBuildingSchema, indoorLocation.level);
+    if (!currentLevelSchema) {
+      throw new Error(`Missing level schema for ${indoorLocation.buildingId} level ${indoorLocation.level}.`);
+    }
+
+    runtime.currentBuildingSchema = currentBuildingSchema;
+    runtime.currentLevelSchema = currentLevelSchema;
+    runtime.indoorTopFloor = isTopFloorOfBuilding(currentBuildingSchema, indoorLocation.level);
+    runtime.currentLevelDescription = await ensureLevelDescription({
+      buildingId: indoorLocation.buildingId,
+      level: indoorLocation.level,
+      buildingSchema: currentBuildingSchema,
+      activeLevelSchema: currentLevelSchema,
+      currentBuildings: context.currentBuildings,
+      currentAreas: context.currentAreas,
+      nearbyLines: context.nearbyLines,
+      isTopFloor: runtime.indoorTopFloor,
+    }, runtime.session);
+    runtime.activeLargeDescription = runtime.indoorTopFloor
+      ? await ensureLargeDescription(runtime.sceneContext, runtime.session)
+      : null;
+    runtime.activeSmallDescription = null;
+    runtime.nearbySmallDescriptions = await findNearbySmallDescriptions(runtime.session, position, 200);
+    return coverageSyncTriggered;
+  }
+
   runtime.activeLargeDescription = await ensureLargeDescription(runtime.sceneContext, runtime.session);
   runtime.activeSmallDescription = await ensureSmallDescription(runtime.sceneContext, runtime.session);
   runtime.nearbySmallDescriptions = await mergeNearbySmallDescriptions(
@@ -212,10 +284,7 @@ async function requestModelTurn(
     history: runtime.session.save.messageHistory,
     userMessage: runtime.inputMessage,
     currentTurnToolMessages: runtime.currentTurnToolMessages,
-    sceneContext: runtime.sceneContext,
-    largeDescription: runtime.activeLargeDescription.descriptionText,
-    nearbySmallDescriptions: runtime.nearbySmallDescriptions,
-    promptSummaryMode: runtime.promptSummaryMode,
+    runtime,
     injectSyntheticSceneRefresh: options.injectSyntheticSceneRefresh,
     syntheticSceneRefreshStage: options.syntheticSceneRefreshStage,
   });
@@ -287,11 +356,30 @@ async function handleMovePlayerTool(
     distanceMeters: toolInput.distanceMeters,
   });
 
-  const coverageSyncTriggered = await prepareRuntimeForPosition(runtime, nextPosition);
-  const currentBuildings = await findBuildingsAtPosition(nextPosition);
-  const currentAreas = await findAreasAtPosition(nextPosition);
-  const nearbyLines = await findNearbyLinesAtPosition(nextPosition);
+  const coverageSyncTriggered = await ensureCoverageForPosition(nextPosition);
+  const context = await loadPositionContext(nextPosition);
   runtime.session.save.playerPosition = nextPosition;
+
+  if (context.currentBuildings.length > 0) {
+    const buildingSchemas = await ensureBuildingSchema(context, runtime.session);
+    const activeBuildingId = context.currentBuildings[0].buildingId;
+    const activeBuildingSchema = buildingSchemas[activeBuildingId] || runtime.session.save.buildingSchemas[activeBuildingId];
+    if (!activeBuildingSchema) {
+      throw new Error(`Missing active building schema for ${activeBuildingId}.`);
+    }
+
+    runtime.session.save.playerIndoorLocation = resolveIndoorEntranceLocation(activeBuildingId, activeBuildingSchema);
+    await prepareRuntimeForPosition(runtime, nextPosition, {
+      ...context,
+      coverageSyncTriggered,
+    });
+  } else {
+    runtime.session.save.playerIndoorLocation = null;
+    await prepareRuntimeForPosition(runtime, nextPosition, {
+      ...context,
+      coverageSyncTriggered,
+    });
+  }
 
   const movementResult: MovePlayerToolResult = {
     previousPosition,
@@ -301,9 +389,12 @@ async function handleMovePlayerTool(
     reason: toolInput.reason || '根据用户输入执行移动。',
     targetLabel: toolInput.targetLabel,
     coverageSyncTriggered,
-    currentBuildings,
-    currentAreas,
-    nearbyLines,
+    currentBuildings: context.currentBuildings,
+    currentAreas: context.currentAreas,
+    nearbyLines: context.nearbyLines,
+    enteredBuilding: runtime.session.save.playerIndoorLocation !== null,
+    activeBuildingId: runtime.session.save.playerIndoorLocation?.buildingId,
+    playerIndoorLocation: runtime.session.save.playerIndoorLocation || undefined,
   };
 
   runtime.currentTurnToolMessages.push({
@@ -320,12 +411,7 @@ async function handleLookFarTool(
 ): Promise<void> {
   console.log('[DEBUG] runGameChatTurn() - toolCall - look_far');
   runtime.promptSummaryMode = 'concise_far';
-  const lookFarResult: LookFarToolResult = await buildSceneContextSnapshotPayload({
-    sceneContext: runtime.sceneContext,
-    largeDescription: runtime.activeLargeDescription.descriptionText,
-    nearbySmallDescriptions: runtime.nearbySmallDescriptions,
-    summaryMode: runtime.promptSummaryMode,
-  });
+  const lookFarResult: LookFarToolResult = await buildSceneContextSnapshotPayload(runtime, runtime.promptSummaryMode);
 
   runtime.currentTurnToolMessages.push({
     role: 'tool',
@@ -345,7 +431,10 @@ async function finalizeTurn(
   runtime: TurnRuntime,
   modelResponse: ToolEnabledChatResponse,
 ): Promise<GameChatResponse> {
-  const assistantMessage = modelResponse.reply || runtime.activeLargeDescription.descriptionText;
+  const assistantMessage = modelResponse.reply
+    || runtime.currentLevelDescription?.descriptionText
+    || runtime.activeLargeDescription?.descriptionText
+    || '';
   const persistedToolMessages = redactToolMessagesForStorage(runtime.currentTurnToolMessages);
   // 组装被存入存档的历史对话
   const messagesToAppend: GameMessage[] = [
@@ -359,7 +448,7 @@ async function finalizeTurn(
   ];
 
   // 更新 runtime 数据
-  runtime.session.save.activeLargeDescriptionId = runtime.activeLargeDescription.id;
+  runtime.session.save.activeLargeDescriptionId = runtime.activeLargeDescription?.id || null;
   runtime.session.save.visibleSmallDescriptionIds = runtime.nearbySmallDescriptions.map((record) => record.id);
   updateLastSceneContextMeta(runtime.session, {
     diagnostics: runtime.sceneContext.diagnostics,
@@ -374,10 +463,7 @@ async function finalizeTurn(
   // 组装被写入快照的历史对话
   const finalMessages = await buildModelMessages({
     history: runtime.session.save.messageHistory,
-    sceneContext: runtime.sceneContext,
-    largeDescription: runtime.activeLargeDescription.descriptionText,
-    nearbySmallDescriptions: runtime.nearbySmallDescriptions,
-    promptSummaryMode: runtime.promptSummaryMode,
+    runtime,
     injectSyntheticSceneRefresh: false,
   });
   await writeGameChatMessageSnapshot({
@@ -393,6 +479,10 @@ async function finalizeTurn(
     playerPosition: runtime.session.save.playerPosition,
     activeLargeDescription: toClientLargeDescription(runtime.activeLargeDescription),
     nearbySmallDescriptions: toClientSmallDescriptions(runtime.nearbySmallDescriptions),
+    playerIndoorLocation: runtime.session.save.playerIndoorLocation,
+    currentBuildingSchema: runtime.currentBuildingSchema,
+    currentLevelSchema: runtime.currentLevelSchema,
+    currentLevelDescription: toClientLevelDescription(runtime.currentLevelDescription),
   };
 }
 
@@ -466,10 +556,7 @@ function buildGameSystemPrompt(): string {
 
 async function buildModelMessages(input: {
   history: GameMessage[];
-  sceneContext: SceneContext;
-  largeDescription: string;
-  nearbySmallDescriptions: SmallDescriptionRecord[];
-  promptSummaryMode: SceneContextSummaryMode;
+  runtime: TurnRuntime;
   userMessage?: string;
   currentTurnToolMessages?: GameMessage[];
   injectSyntheticSceneRefresh: boolean;
@@ -494,12 +581,7 @@ async function buildModelMessages(input: {
   if (input.injectSyntheticSceneRefresh) {
     messages.push(...buildSyntheticSceneContextMessages({
       stage: input.syntheticSceneRefreshStage || 'runtime',
-      payload: await buildSceneContextSnapshotPayload({
-        sceneContext: input.sceneContext,
-        largeDescription: input.largeDescription,
-        nearbySmallDescriptions: input.nearbySmallDescriptions,
-        summaryMode: input.promptSummaryMode,
-      }),
+      payload: await buildSceneContextSnapshotPayload(input.runtime, input.runtime.promptSummaryMode),
     }));
   }
 
@@ -509,8 +591,12 @@ async function buildModelMessages(input: {
 async function mergeNearbySmallDescriptions(
   session: LoadedGameSession,
   position: SceneContext['position'],
-  activeSmallDescription: SmallDescriptionRecord,
+  activeSmallDescription: SmallDescriptionRecord | null,
 ): Promise<SmallDescriptionRecord[]> {
+  if (!activeSmallDescription) {
+    return findNearbySmallDescriptions(session, position, 200);
+  }
+
   // 确保“当前命中的小描述”一定出现在首页 200m 列表中，
   // 即使索引查询排序或时序上暂时没把它带回来。
   const nearby = await findNearbySmallDescriptions(session, position, 200);
@@ -546,32 +632,77 @@ function parseMovePlayerArguments(argumentsText: string): MovePlayerToolInput {
   };
 }
 
-/**
- * 根据 scene context 等信息，返回用来表示某一时刻玩家周遭场景的摘要以及其他信息
- * @param input
- * @returns
- */
-async function buildSceneContextSnapshotPayload(input: {
-  sceneContext: SceneContext;
-  largeDescription: string;
-  nearbySmallDescriptions: SmallDescriptionRecord[];
+async function loadPositionContext(position: GamePosition): Promise<PositionContextBundle> {
+  const [currentBuildings, currentAreas, nearbyLines] = await Promise.all([
+    findBuildingsAtPosition(position),
+    findAreasAtPosition(position),
+    findNearbyLinesAtPosition(position),
+  ]);
+
+  return {
+    currentBuildings,
+    currentAreas,
+    nearbyLines,
+  };
+}
+
+async function buildSceneContextSnapshotPayload(
+  runtime: TurnRuntime,
+  summaryMode: SceneContextSummaryMode,
+): Promise<SceneContextSnapshotPayload> {
+  return buildSceneContextSnapshotPayloadFromInput({
+    runtime,
+    summaryMode,
+  });
+}
+
+async function buildSceneContextSnapshotPayloadFromInput(input: {
+  runtime: TurnRuntime;
   summaryMode: SceneContextSummaryMode;
 }): Promise<SceneContextSnapshotPayload> {
-  const farVisibleNotes = filterFarVisibleSmallDescriptions(input.nearbySmallDescriptions, input.sceneContext.position);
+  const farVisibleNotes = filterFarVisibleSmallDescriptions(input.runtime.nearbySmallDescriptions, input.runtime.sceneContext.position);
+  const nearbyFarVisibleDetails = farVisibleNotes.map((record) => ({
+    distanceMeters: Math.round(record.distanceMeters || 0),
+    notes: record.farVisibleNotes || '',
+  }));
+
+  if (input.runtime.session.save.playerIndoorLocation && input.runtime.currentLevelSchema && input.runtime.currentLevelDescription) {
+    const payload: SceneContextSnapshotPayload = {
+      type: 'scene_context_snapshot',
+      context: 'indoor',
+      summaryMode: input.summaryMode,
+      levelSchema: input.runtime.currentLevelSchema,
+      levelDescription: input.runtime.currentLevelDescription.descriptionText,
+      nearbyFarVisibleDetails,
+      ...(input.runtime.indoorTopFloor && input.runtime.activeLargeDescription
+        ? {
+            activeSummary: await buildProjectedSceneSummary(
+              input.runtime.sceneContext.position,
+              SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE[input.summaryMode],
+              'game',
+            ),
+            largeDescription: input.runtime.activeLargeDescription.descriptionText,
+          }
+        : {}),
+    };
+    return payload;
+  }
+
+  if (!input.runtime.activeLargeDescription) {
+    throw new Error('Outdoor scene snapshot requires activeLargeDescription.');
+  }
 
   return {
     type: 'scene_context_snapshot',
+    context: 'outdoor',
     summaryMode: input.summaryMode,
-    largeDescription: input.largeDescription,
+    largeDescription: input.runtime.activeLargeDescription.descriptionText,
     activeSummary: await buildProjectedSceneSummary(
-      input.sceneContext.position,
+      input.runtime.sceneContext.position,
       SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE[input.summaryMode],
       'game',
     ),
-    nearbyFarVisibleDetails: farVisibleNotes.map((record) => ({
-      distanceMeters: Math.round(record.distanceMeters || 0),
-      notes: record.farVisibleNotes || '',
-    })),
+    nearbyFarVisibleDetails,
   };
 }
 

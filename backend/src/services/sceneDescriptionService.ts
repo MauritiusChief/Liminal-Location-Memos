@@ -11,8 +11,26 @@ import {
   insertLargeDescription,
   insertSmallDescription,
 } from './sceneDescriptionRepository.js';
-import type { GamePosition, LargeDescriptionRecord, LoadedGameSession, SceneContext, SmallDescriptionRecord } from '../types/game.js';
-import { styleRule } from './sharedDefaultSysPromptPart.js';
+import type {
+  ActiveLevelSchema,
+  AreaSummary,
+  BuildingLevelSchemaDefinition,
+  BuildingSchema,
+  BuildingSchemaRoom,
+  BuildingSchemaRoomEntry,
+  BuildingSchemaSubRoom,
+  BuildingSchemaSuiteRoom,
+  BuildingSummary,
+  GamePosition,
+  LevelDescriptionRecord,
+  LineSummary,
+  LoadedGameSession,
+  PlayerIndoorLocation,
+  LargeDescriptionRecord,
+  SceneContext,
+  SmallDescriptionRecord,
+} from '../types/game.js';
+import { buildGameSystemPrompt, styleRule } from './sharedDefaultSysPromptPart.js';
 
 export async function ensureLargeDescription(
   sceneContext: SceneContext,
@@ -89,6 +107,96 @@ export async function ensureSmallDescription(
     descriptionText: generated.descriptionText,
     farVisibleNotes: generated.farVisibleNotes,
   });
+}
+
+export async function ensureBuildingSchema(
+  input: {
+    currentBuildings: BuildingSummary[];
+    currentAreas: AreaSummary[];
+    nearbyLines: LineSummary[];
+  },
+  session: LoadedGameSession,
+): Promise<Record<string, BuildingSchema>> {
+  const buildingIds = input.currentBuildings.map((building) => building.buildingId);
+  if (buildingIds.length === 0) {
+    return {};
+  }
+
+  const missingBuildingIds = buildingIds.filter((buildingId) => !session.save.buildingSchemas[buildingId]);
+  if (missingBuildingIds.length === 0) {
+    return Object.fromEntries(buildingIds.map((buildingId) => [buildingId, session.save.buildingSchemas[buildingId]]));
+  }
+
+  const generated = await generateReplyWithSystemPrompt(
+    buildGameSystemPrompt.trim(),
+    JSON.stringify({
+      currentBuildings: input.currentBuildings,
+      currentAreas: input.currentAreas,
+      nearbyLines: input.nearbyLines,
+    }, null, 2),
+    { snapshotType: 'scene-building' },
+  );
+  const parsed = parseBuildingSchemaJson(generated.reply, buildingIds);
+
+  for (const [buildingId, schema] of Object.entries(parsed)) {
+    session.save.buildingSchemas[buildingId] = schema;
+  }
+
+  return Object.fromEntries(buildingIds.map((buildingId) => [buildingId, session.save.buildingSchemas[buildingId]]));
+}
+
+export async function ensureLevelDescription(
+  input: {
+    buildingId: string;
+    level: number;
+    buildingSchema: BuildingSchema;
+    activeLevelSchema: ActiveLevelSchema;
+    currentBuildings: BuildingSummary[];
+    currentAreas: AreaSummary[];
+    nearbyLines: LineSummary[];
+    isTopFloor: boolean;
+  },
+  session: LoadedGameSession,
+): Promise<LevelDescriptionRecord> {
+  const existing = session.save.levelDescriptions[buildLevelDescriptionKey(input.buildingId, input.level)];
+  if (existing) {
+    return existing;
+  }
+
+  const generated = await generateReplyWithSystemPrompt(
+    [
+      '你是一个文字探索游戏中的建筑楼层环境描述生成器。',
+      '你会收到一个 JSON，其中包含当前建筑、建筑完整楼层结构、当前所在楼层结构、周边区域和附近线性要素。',
+      '你的任务是只描述当前这一层能够被体验到的内部环境。',
+      input.isTopFloor
+        ? '当前楼层是顶楼。你可以在描述中保留一些通过窗户、露台或边缘位置能观察到的外部环境暗示，但主体仍然是楼层内部。'
+        : '当前楼层不是顶楼。请只聚焦这一层的内部环境，不要补写楼外大场景。',
+      styleRule,
+      '叙述视角：\n纯客观视角，禁止提及人称\n',
+      '输出格式：只输出一段或两段自然语言描述，不要输出 JSON，不要加标题。',
+    ].join('\n'),
+    JSON.stringify({
+      buildingId: input.buildingId,
+      buildingSchema: input.buildingSchema,
+      activeLevelSchema: input.activeLevelSchema,
+      currentBuildings: input.currentBuildings,
+      currentAreas: input.currentAreas,
+      nearbyLines: input.nearbyLines,
+      isTopFloor: input.isTopFloor,
+    }, null, 2),
+    { snapshotType: 'scene-level' },
+  );
+
+  const now = new Date().toISOString();
+  const record: LevelDescriptionRecord = {
+    buildingId: input.buildingId,
+    level: input.level,
+    descriptionText: generated.reply.trim(),
+    createdAt: now,
+    updatedAt: now,
+  };
+  session.save.levelDescriptions[buildLevelDescriptionKey(input.buildingId, input.level)] = record;
+  return record;
 }
 
 export function filterFarVisibleSmallDescriptions(
@@ -182,4 +290,247 @@ function approximateDistanceMeters(left: GamePosition, right: GamePosition): num
   const dLat = (right.lat - left.lat) * latFactor;
   const dLon = (right.lon - left.lon) * lonFactor;
   return Math.sqrt((dLat * dLat) + (dLon * dLon));
+}
+
+export function resolveActiveLevelSchema(
+  buildingSchema: BuildingSchema,
+  level: number,
+): ActiveLevelSchema | null {
+  for (const [schemaKey, definition] of Object.entries(buildingSchema)) {
+    const [start, end = start] = definition.span;
+    if (level >= start && level <= end) {
+      return {
+        schemaKey,
+        span: definition.span,
+        rooms: definition.rooms,
+      };
+    }
+  }
+
+  return null;
+}
+
+export function resolveIndoorEntranceLocation(
+  buildingId: string,
+  buildingSchema: BuildingSchema,
+): PlayerIndoorLocation {
+  let bestMatch: { level: number; roomKey: string } | null = null;
+
+  for (const definition of Object.values(buildingSchema)) {
+    const [start, end = start] = definition.span;
+    for (let level = start; level <= end; level += 1) {
+      for (const [roomKey, room] of Object.entries(definition.rooms)) {
+        if (isSingleRoomEntry(room) && room.access === 'entrance') {
+          if (!bestMatch || level < bestMatch.level) {
+            bestMatch = { level, roomKey };
+          }
+        }
+      }
+    }
+  }
+
+  if (!bestMatch) {
+    throw new Error(`Building schema for ${buildingId} does not contain an entrance room.`);
+  }
+
+  return {
+    buildingId,
+    level: bestMatch.level,
+    roomKey: bestMatch.roomKey,
+  };
+}
+
+export function isTopFloorOfBuilding(
+  buildingSchema: BuildingSchema,
+  level: number,
+): boolean {
+  const maxLevel = Object.values(buildingSchema).reduce<number | null>((currentMax, definition) => {
+    const [, end = definition.span[0]] = definition.span;
+    if (end <= 0) {
+      return currentMax;
+    }
+
+    return currentMax === null ? end : Math.max(currentMax, end);
+  }, null);
+
+  return maxLevel !== null && level === maxLevel;
+}
+
+function parseBuildingSchemaJson(
+  input: string,
+  expectedBuildingIds: string[],
+): Record<string, BuildingSchema> {
+  const parsed = parseLooseJsonObject(input);
+  if (!parsed) {
+    throw new Error('Failed to parse building schema JSON.');
+  }
+
+  const resultEntries = expectedBuildingIds.flatMap((buildingId) => {
+    const rawSchema = parsed[buildingId];
+    const schema = normalizeBuildingSchema(rawSchema);
+    return schema ? [[buildingId, schema] as const] : [];
+  });
+
+  if (resultEntries.length !== expectedBuildingIds.length) {
+    throw new Error('Building schema JSON missing one or more requested building ids.');
+  }
+
+  return Object.fromEntries(resultEntries);
+}
+
+function normalizeBuildingSchema(input: unknown): BuildingSchema | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+
+  const entries = Object.entries(input as Record<string, unknown>).flatMap(([schemaKey, definition]) => {
+    const normalized = normalizeLevelSchemaDefinition(definition);
+    return normalized ? [[schemaKey, normalized] as const] : [];
+  });
+
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
+
+function normalizeLevelSchemaDefinition(input: unknown): BuildingLevelSchemaDefinition | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+
+  const candidate = input as Record<string, unknown>;
+  const span = normalizeSpan(candidate.span);
+  const rooms = normalizeRooms(candidate.rooms);
+
+  if (!span || !rooms || Object.keys(rooms).length === 0) {
+    return null;
+  }
+
+  return {
+    span,
+    rooms,
+  };
+}
+
+function normalizeSpan(input: unknown): [number] | [number, number] | null {
+  if (!Array.isArray(input) || (input.length !== 1 && input.length !== 2)) {
+    return null;
+  }
+
+  const numeric = input.map((item) => Number(item));
+  if (!numeric.every((item) => Number.isInteger(item))) {
+    return null;
+  }
+
+  if (numeric.length === 1) {
+    return [numeric[0]];
+  }
+
+  return [numeric[0], numeric[1]];
+}
+
+function normalizeRooms(input: unknown): Record<string, BuildingSchemaRoomEntry> | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+
+  const entries = Object.entries(input as Record<string, unknown>).flatMap(([roomKey, room]) => {
+    const normalized = normalizeRoomEntry(room);
+    return normalized ? [[roomKey, normalized] as const] : [];
+  });
+
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
+
+function normalizeRoomEntry(input: unknown): BuildingSchemaRoomEntry | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+
+  const candidate = input as Record<string, unknown>;
+  const count = Number(candidate.count);
+  const desc = typeof candidate.desc === 'string' ? candidate.desc.trim() : '';
+
+  if (!Number.isFinite(count) || count <= 0 || !desc) {
+    return null;
+  }
+
+  if ('subRooms' in candidate) {
+    const subRooms = normalizeSubRooms(candidate.subRooms);
+    if (!subRooms) {
+      return null;
+    }
+
+    return {
+      count,
+      desc,
+      subRooms,
+    } satisfies BuildingSchemaSuiteRoom;
+  }
+
+  const access = normalizeAccess(candidate.access);
+  return {
+    count,
+    desc,
+    ...(access ? { access } : {}),
+  } satisfies BuildingSchemaRoom;
+}
+
+function normalizeSubRooms(input: unknown): Record<string, BuildingSchemaSubRoom> | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+
+  const entries = Object.entries(input as Record<string, unknown>).flatMap(([roomKey, room]) => {
+    if (!room || typeof room !== 'object' || Array.isArray(room)) {
+      return [];
+    }
+
+    const candidate = room as Record<string, unknown>;
+    const count = Number(candidate.count);
+    const desc = typeof candidate.desc === 'string' ? candidate.desc.trim() : '';
+    if (!Number.isFinite(count) || count <= 0 || !desc) {
+      return [];
+    }
+
+    return [[roomKey, {
+      count,
+      desc,
+    } satisfies BuildingSchemaSubRoom] as const];
+  });
+
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
+
+function normalizeAccess(input: unknown): BuildingSchemaRoom['access'] | null {
+  if (input === 'entrance' || input === 'vertical' || input === 'internal') {
+    return input;
+  }
+
+  return null;
+}
+
+function parseLooseJsonObject(input: string): Record<string, unknown> | null {
+  const start = input.indexOf('{');
+  const end = input.lastIndexOf('}');
+  if (start < 0 || end <= start) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(input.slice(start, end + 1)) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function buildLevelDescriptionKey(buildingId: string, level: number): string {
+  return `${buildingId}::${level}`;
+}
+
+function isSingleRoomEntry(room: BuildingSchemaRoomEntry): room is BuildingSchemaRoom {
+  return !('subRooms' in room);
 }

@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import type { ChatRequestMessage } from './llm.js';
 
 const DEBUG_DIRECTORY = path.resolve(process.cwd(), 'data', 'game-chat-debug');
-export type SceneSnapshotType = 'scene-large' | 'scene-small';
+export type SceneSnapshotType = 'scene-large' | 'scene-small' | 'scene-building' | 'scene-level';
 
 interface SnapshotGroup {
   timestamp: string;
@@ -139,7 +139,12 @@ function collectGameChatDerivedFiles(messages: ChatRequestMessage[]): DerivedSna
 
     if (isSceneContextSnapshotPayload(parsedContent)) {
       files.push(buildJsonDerivedFile('scene-context_snapshot', parsedContent));
-      files.push(buildMarkdownDerivedFile('scene-context_activeSummary', parsedContent.activeSummary));
+      if (typeof parsedContent.activeSummary === 'string') {
+        files.push(buildMarkdownDerivedFile('scene-context_activeSummary', parsedContent.activeSummary));
+      }
+      if (typeof parsedContent.levelDescription === 'string') {
+        files.push(buildMarkdownDerivedFile('scene-context_levelDescription', parsedContent.levelDescription));
+      }
       continue;
     }
 
@@ -212,9 +217,8 @@ function tryParseJsonObject(input: string): Record<string, unknown> | null {
   }
 }
 
-function isSceneContextSnapshotPayload(value: Record<string, unknown>): value is Record<string, unknown> & { activeSummary: string } {
-  return value.type === 'scene_context_snapshot'
-    && typeof value.activeSummary === 'string';
+function isSceneContextSnapshotPayload(value: Record<string, unknown>): value is Record<string, unknown> {
+  return value.type === 'scene_context_snapshot';
 }
 
 function isMovePlayerToolResult(value: Record<string, unknown>): boolean {
