@@ -212,6 +212,10 @@ function createSaveDocument(sessionId: string): GameSaveDocument {
   return {
     sessionId,
     playerPosition: { ...DEFAULT_START_POSITION },
+    // 室内状态由这三组字段共同表示：
+    // 1. playerIndoorLocation 表示玩家当前是否在建筑内以及所处楼层/房间
+    // 2. buildingSchemas 缓存建筑内部结构
+    // 3. levelDescriptions 缓存具体楼层的文字描述
     playerIndoorLocation: null,
     messageHistory: [],
     activeLargeDescriptionId: null,
@@ -481,6 +485,7 @@ function getCurrentBuildingSchema(
   buildingSchemas: Record<string, BuildingSchema>,
   playerIndoorLocation: PlayerIndoorLocation | null,
 ): BuildingSchema | null {
+  // snapshot/chat response 不额外存冗余“当前建筑 schema”，而是从 save 中按玩家当前室内位置即时还原。
   if (!playerIndoorLocation) {
     return null;
   }

@@ -117,6 +117,8 @@ export async function ensureBuildingSchema(
   },
   session: LoadedGameSession,
 ): Promise<Record<string, BuildingSchema>> {
+  // 建筑 schema 以 buildingId 为键缓存到存档中。
+  // 一次生成面向“当前位置命中的整组建筑”，这样同 relation 的 building parts 只触发一次 LLM。
   const buildingIds = input.currentBuildings.map((building) => building.buildingId);
   if (buildingIds.length === 0) {
     return {};
@@ -158,6 +160,8 @@ export async function ensureLevelDescription(
   },
   session: LoadedGameSession,
 ): Promise<LevelDescriptionRecord> {
+  // 楼层描述按“buildingId + level”缓存。
+  // 顶楼允许在描述里保留一些可见的外部环境暗示，其他楼层严格聚焦室内。
   const existing = session.save.levelDescriptions[buildLevelDescriptionKey(input.buildingId, input.level)];
   if (existing) {
     return existing;
@@ -314,6 +318,8 @@ export function resolveIndoorEntranceLocation(
   buildingId: string,
   buildingSchema: BuildingSchema,
 ): PlayerIndoorLocation {
+  // 入口房间选择规则：
+  // 从所有 span 展开的楼层中，寻找 access=entrance 的房间，并优先取层数最低的一处。
   let bestMatch: { level: number; roomKey: string } | null = null;
 
   for (const definition of Object.values(buildingSchema)) {
@@ -344,6 +350,7 @@ export function isTopFloorOfBuilding(
   buildingSchema: BuildingSchema,
   level: number,
 ): boolean {
+  // “顶楼”只看正楼层中的最高层；地下层不会被视作顶楼。
   const maxLevel = Object.values(buildingSchema).reduce<number | null>((currentMax, definition) => {
     const [, end = definition.span[0]] = definition.span;
     if (end <= 0) {

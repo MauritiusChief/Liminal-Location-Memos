@@ -94,13 +94,16 @@ const SYNTHETIC_SCENE_CONTEXT_TOOL_ARGUMENTS = '{}';
 const MAX_STORED_TURNS = 6;
 
 interface TurnRuntime {
+  // shared: regardless of indoor/outdoor, every turn needs session, input, sceneContext and tool-chain state.
   session: LoadedGameSession;
   inputMessage: string;
   userMessage: GameMessage;
   sceneContext: SceneContext;
+  // outdoor-only: when the player is not inside a building, these fields drive the original scene-description flow.
   activeLargeDescription: LargeDescriptionRecord | null;
   activeSmallDescription: SmallDescriptionRecord | null;
   nearbySmallDescriptions: SmallDescriptionRecord[];
+  // indoor-only: when the player is inside a building, these fields replace most outdoor scene-description state.
   currentBuildingSchema: BuildingSchema | null;
   currentLevelSchema: ActiveLevelSchema | null;
   currentLevelDescription: LevelDescriptionRecord | null;
@@ -110,6 +113,8 @@ interface TurnRuntime {
 }
 
 interface PositionContextBundle {
+  // This bundle is intentionally limited to OSM-derived positional context so callers can reuse queries
+  // without coupling runtime-preparation to unrelated state such as coverage sync flags.
   currentBuildings: BuildingSummary[];
   currentAreas: AreaSummary[];
   nearbyLines: LineSummary[];
@@ -178,7 +183,7 @@ export async function runGameChatTurn(input: Pick<GameChatRequest, 'sessionId' |
  * @param session 游戏的 session
  * @param inputMessage 玩家输入的消息
  * @param userMessage 用户端发送的消息
- * @returns 打包好的 runtime
+ * @returns 打包好的 runtime。首次进入时会根据存档中是否已有 playerIndoorLocation 自动进入室内或室外准备分支。
  */
 async function initializeTurnRuntime(
   session: LoadedGameSession,
@@ -206,18 +211,20 @@ async function initializeTurnRuntime(
 }
 
 /**
- * 根据打包好的 runtime 以及经纬度，更新 runtime 中的环境上下文以及大小环境描述
- * @param runtime
- * @param position
- * @returns
+ * 根据玩家当前坐标刷新 runtime。
+ * 统一在这里负责 coverage 补洞与 sceneContext 装载，然后再分支：
+ * 1. 室外：沿用原有的大描述/小描述缓存链路
+ * 2. 室内：改为建筑 schema + 当前楼层描述链路
+ *
+ * prefetchedContext 仅用于复用当前位置已查询出的建筑/区域/线性要素，
+ * 避免同一坐标在一个工具步骤内重复查库。
  */
 async function prepareRuntimeForPosition(
   runtime: TurnRuntime,
   position: GamePosition,
-  prefetchedContext?: PositionContextBundle & { coverageSyncTriggered?: boolean },
+  prefetchedContext?: PositionContextBundle,
 ): Promise<boolean> {
-  const coverageSyncTriggered = prefetchedContext?.coverageSyncTriggered
-    ?? await ensureCoverageForPosition(position);
+  const coverageSyncTriggered = await ensureCoverageForPosition(position);
   runtime.sceneContext = await loadSceneContext(position);
   runtime.currentBuildingSchema = null;
   runtime.currentLevelSchema = null;
@@ -347,6 +354,12 @@ async function handleMovePlayerTool(
   toolCall: { id: string; name: string; argumentsText: string },
   assistantToolCallMessage: Extract<GameMessage, { role: 'assistant'; isToolCallMessage: true }>,
 ): Promise<void> {
+  // 工具步骤顺序：
+  // 1. 按 bearing/distance 移动经纬度
+  // 2. 查询新坐标命中的建筑/区域/线性要素
+  // 3. 若命中建筑，则切换到室内入口房间
+  // 4. 统一调用 prepareRuntimeForPosition 刷新 runtime
+  // 5. 将移动结果写回 tool message，供下一轮 synthetic refresh 使用
   console.log('[DEBUG] runGameChatTurn() - toolCall - move_player');
   const toolInput = parseMovePlayerArguments(toolCall.argumentsText);
   const previousPosition = runtime.session.save.playerPosition;
@@ -356,7 +369,6 @@ async function handleMovePlayerTool(
     distanceMeters: toolInput.distanceMeters,
   });
 
-  const coverageSyncTriggered = await ensureCoverageForPosition(nextPosition);
   const context = await loadPositionContext(nextPosition);
   runtime.session.save.playerPosition = nextPosition;
 
@@ -369,17 +381,10 @@ async function handleMovePlayerTool(
     }
 
     runtime.session.save.playerIndoorLocation = resolveIndoorEntranceLocation(activeBuildingId, activeBuildingSchema);
-    await prepareRuntimeForPosition(runtime, nextPosition, {
-      ...context,
-      coverageSyncTriggered,
-    });
   } else {
     runtime.session.save.playerIndoorLocation = null;
-    await prepareRuntimeForPosition(runtime, nextPosition, {
-      ...context,
-      coverageSyncTriggered,
-    });
   }
+  const coverageSyncTriggered = await prepareRuntimeForPosition(runtime, nextPosition, context);
 
   const movementResult: MovePlayerToolResult = {
     previousPosition,
@@ -633,6 +638,8 @@ function parseMovePlayerArguments(argumentsText: string): MovePlayerToolInput {
 }
 
 async function loadPositionContext(position: GamePosition): Promise<PositionContextBundle> {
+  // 与 runtime 准备解耦的纯位置查询封装。
+  // 这里不做 coverage 判断，也不生成任何描述，只返回后续室内/室外决策会用到的原始位置上下文。
   const [currentBuildings, currentAreas, nearbyLines] = await Promise.all([
     findBuildingsAtPosition(position),
     findAreasAtPosition(position),
@@ -660,6 +667,10 @@ async function buildSceneContextSnapshotPayloadFromInput(input: {
   runtime: TurnRuntime;
   summaryMode: SceneContextSummaryMode;
 }): Promise<SceneContextSnapshotPayload> {
+  // synthetic refresh 会把“当前可用的最新场景状态”压成一个 tool 返回：
+  // - 室内非顶层：仅提供 levelSchema + levelDescription
+  // - 室内顶层：额外补充 activeSummary + largeDescription，让模型可描述从顶层看到的外部环境
+  // - 室外：保持原有 activeSummary + largeDescription 路径
   const farVisibleNotes = filterFarVisibleSmallDescriptions(input.runtime.nearbySmallDescriptions, input.runtime.sceneContext.position);
   const nearbyFarVisibleDetails = farVisibleNotes.map((record) => ({
     distanceMeters: Math.round(record.distanceMeters || 0),
