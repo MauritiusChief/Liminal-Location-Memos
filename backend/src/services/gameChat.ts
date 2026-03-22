@@ -28,7 +28,7 @@ import {
   resolveActiveLevelSchema,
   resolveIndoorEntranceLocation,
 } from './sceneDescriptionService.js';
-import { buildProjectedSceneSummary, SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE } from './sceneSummaryService.js';
+import { buildProjectedSceneSummaryByMode, SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE } from './sceneSummaryService.js';
 import { findAreasAtPosition, findBuildingsAtPosition, findNearbyLinesAtPosition } from './osmRepository.js';
 import type {
   ActiveLevelSchema,
@@ -687,7 +687,7 @@ async function buildSceneContextSnapshotPayloadFromInput(input: {
       nearbyFarVisibleDetails,
       ...(input.runtime.indoorTopFloor && input.runtime.activeLargeDescription
         ? {
-            activeSummary: await buildProjectedSceneSummary(
+            activeSummary: await buildProjectedSceneSummaryByMode(
               input.runtime.sceneContext.position,
               SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE[input.summaryMode],
               'game',
@@ -708,7 +708,7 @@ async function buildSceneContextSnapshotPayloadFromInput(input: {
     context: 'outdoor',
     summaryMode: input.summaryMode,
     largeDescription: input.runtime.activeLargeDescription.descriptionText,
-    activeSummary: await buildProjectedSceneSummary(
+    activeSummary: await buildProjectedSceneSummaryByMode(
       input.runtime.sceneContext.position,
       SCENE_CONTEXT_SUMMARY_MODE_TO_PREVIEW_MODE[input.summaryMode],
       'game',

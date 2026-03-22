@@ -20,6 +20,7 @@ export const SUMMARY_PREVIEW_MODE_CONFIG = {
 } as const satisfies Record<string, { radius: number; promptSummaryMode: PromptSummaryMode }>;
 
 export type SummaryPreviewMode = keyof typeof SUMMARY_PREVIEW_MODE_CONFIG;
+export type SummaryPreviewStyle = PromptSummaryMode;
 
 export const SUMMARY_PREVIEW_MODE_VALUES = Object.keys(SUMMARY_PREVIEW_MODE_CONFIG) as SummaryPreviewMode[];
 export const SUMMARY_PREVIEW_MODE_VALUE_LIST = SUMMARY_PREVIEW_MODE_VALUES.join(', ');
@@ -124,20 +125,35 @@ export async function loadProjectedScene(
  */
 export async function buildProjectedSceneSummary(
   position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>,
-  summaryMode: SummaryPreviewMode,
+  options: { radius: number; summaryStyle: SummaryPreviewStyle },
   profile: SceneDataProfile,
 ): Promise<string> {
-  const config = SUMMARY_PREVIEW_MODE_CONFIG[summaryMode];
   const scene = await loadProjectedScene({
     lat: position.lat,
     lon: position.lon,
-    radius: config.radius,
+    radius: options.radius,
   }, profile);
 
   return buildNormalizationPrompt({
     request: scene.request,
-    summaryMode: config.promptSummaryMode,
+    summaryMode: options.summaryStyle,
     microGrid: scene.microGrid,
     polarView: scene.polarView,
   });
+}
+
+export async function buildProjectedSceneSummaryByMode(
+  position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>,
+  summaryMode: SummaryPreviewMode,
+  profile: SceneDataProfile,
+): Promise<string> {
+  const config = SUMMARY_PREVIEW_MODE_CONFIG[summaryMode];
+  return buildProjectedSceneSummary(
+    position,
+    {
+      radius: config.radius,
+      summaryStyle: config.promptSummaryMode,
+    },
+    profile,
+  );
 }

@@ -4,7 +4,7 @@ import type {
   SceneFeatureDetail,
 } from '../services/sceneTypes.js';
 import type { NormalizedMicroGrid, NormalizedMicroGridCell } from '../services/overpassGrid.js';
-import type { SummaryPreviewMode } from '../services/sceneSummaryService.js';
+import type { SummaryPreviewStyle } from '../services/sceneSummaryService.js';
 import type {
   NormalizedPolarFeatureSummary,
   NormalizedPolarLevel,
@@ -55,11 +55,13 @@ export interface DbDebugLoadResponseBody {
 export interface SummaryPreviewRequestBody {
   lat?: number;
   lon?: number;
-  summaryMode?: SummaryPreviewMode;
+  radius?: number;
+  summaryStyle?: SummaryPreviewStyle;
 }
 
 export interface SummaryPreviewResponseBody {
-  summaryMode: SummaryPreviewMode;
+  radius: number;
+  summaryStyle: SummaryPreviewStyle;
   summaryText: string;
 }
 

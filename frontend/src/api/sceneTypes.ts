@@ -1,4 +1,5 @@
 export type SummaryPreviewMode = 'detailed_far_1000' | 'concise_far_1000' | 'concise_near_200';
+export type SummaryPreviewStyle = 'detailed' | 'concise';
 
 export interface RelationReference {
   role: string;
@@ -209,11 +210,13 @@ export interface SceneLoadResponse {
 export interface SummaryPreviewRequest {
   lat: number;
   lon: number;
-  summaryMode: SummaryPreviewMode;
+  radius: number;
+  summaryStyle: SummaryPreviewStyle;
 }
 
 export interface SummaryPreviewResponse {
-  summaryMode: SummaryPreviewMode;
+  radius: number;
+  summaryStyle: SummaryPreviewStyle;
   summaryText: string;
 }
 

@@ -1,26 +1,21 @@
 import { useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
-import type { SummaryPreviewMode } from '../api/sceneTypes';
 import {
   fetchSummaryPreview,
   selectSummaryPreviewState,
   setCoordinates,
+  setRadius,
+  setSummaryStyle,
 } from '../features/summaryPreview/summaryPreviewSlice';
-
-const SUMMARY_BUTTONS: Array<{ mode: SummaryPreviewMode; label: string }> = [
-  { mode: 'detailed_far_1000', label: 'Detailed 1000m' },
-  { mode: 'concise_far_1000', label: 'Concise 1000m' },
-  { mode: 'concise_near_200', label: 'Concise 200m' },
-];
 
 export function SummaryPreviewPage() {
   const dispatch = useAppDispatch();
-  const { form, currentMode, request } = useAppSelector(selectSummaryPreviewState);
+  const { form, currentStyle, request } = useAppSelector(selectSummaryPreviewState);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
 
-  const handleRequest = async (summaryMode: SummaryPreviewMode) => {
+  const handleRequest = async () => {
     setCopyStatus('idle');
-    await dispatch(fetchSummaryPreview({ coordinates: form.coordinates, summaryMode }));
+    await dispatch(fetchSummaryPreview(form));
   };
 
   const handleCopy = async () => {
@@ -44,22 +39,35 @@ export function SummaryPreviewPage() {
         placeholder="xx.xxxx, yy.yyyy"
       />
       <br />
+      <label htmlFor="summaryPreviewRadius">Radius (meters)</label>
       <br />
-      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-        {SUMMARY_BUTTONS.map((button) => (
-          <button
-            key={button.mode}
-            type="button"
-            onClick={() => void handleRequest(button.mode)}
-            disabled={request.status === 'loading'}
-          >
-            {request.status === 'loading' && currentMode === button.mode ? 'Loading...' : button.label}
-          </button>
-        ))}
-      </div>
+      <input
+        id="summaryPreviewRadius"
+        value={form.radius}
+        onChange={(event) => dispatch(setRadius(event.target.value))}
+      />
+      <br />
+      <label htmlFor="summaryPreviewStyle">Summary style</label>
+      <br />
+      <select
+        id="summaryPreviewStyle"
+        value={form.summaryStyle}
+        onChange={(event) => dispatch(setSummaryStyle(event.target.value as 'detailed' | 'concise'))}
+      >
+        <option value="concise">Concise</option>
+        <option value="detailed">Detailed</option>
+      </select>
+      <br />
+      <br />
+      <button type="button" onClick={() => void handleRequest()} disabled={request.status === 'loading'}>
+        {request.status === 'loading' ? 'Loading...' : 'Generate Summary'}
+      </button>
 
       <h3>Result</h3>
-      <p>Current mode: {request.result?.summaryMode || currentMode || 'n/a'}</p>
+      <p>
+        Current style: {request.result?.summaryStyle || currentStyle || 'n/a'} | Current radius:{' '}
+        {(request.result?.radius ?? form.radius) || 'n/a'}m
+      </p>
       <button type="button" onClick={() => void handleCopy()} disabled={!request.result?.summaryText}>
         {copyStatus === 'copied' ? 'Copied' : 'Copy Summary'}
       </button>

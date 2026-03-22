@@ -17,8 +17,6 @@ import { runGameChatTurn } from '../services/gameChat.js';
 import { getSessionSnapshot } from '../services/gameSessionStore.js';
 import {
   buildProjectedSceneSummary,
-  isSummaryPreviewMode,
-  SUMMARY_PREVIEW_MODE_VALUE_LIST,
 } from '../services/sceneSummaryService.js';
 import type { GameChatRequest } from '../types/game.js';
 import type { NormalizedOverpassRequestBody, SummaryPreviewRequestBody } from '../types/overpass.js';
@@ -144,12 +142,12 @@ function parsePosition(body: Pick<NormalizedOverpassRequestBody, 'lat' | 'lon'>)
   } as const;
 }
 
-function parseSummaryPreviewMode(value: unknown) {
-  if (isSummaryPreviewMode(value)) {
+function parseSummaryPreviewStyle(value: unknown) {
+  if (value === 'detailed' || value === 'concise') {
     return { value } as const;
   }
 
-  return { error: `summaryMode must be one of ${SUMMARY_PREVIEW_MODE_VALUE_LIST}.` } as const;
+  return { error: 'summaryStyle must be one of detailed, concise.' } as const;
 }
 
 apiRouter.get('/health', async (_request, response) => {
@@ -313,23 +311,38 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
 });
 
 apiRouter.post('/debug/db/summary-preview', async (request, response) => {
-  const parsedRequest = parsePosition(request.body as SummaryPreviewRequestBody);
-  const parsedSummaryMode = parseSummaryPreviewMode((request.body as SummaryPreviewRequestBody).summaryMode);
+  const body = request.body as SummaryPreviewRequestBody;
+  const parsedPosition = parsePosition(body);
+  const parsedSummaryStyle = parseSummaryPreviewStyle(body.summaryStyle);
+  const radius = body.radius;
 
-  if ('error' in parsedRequest) {
-    response.status(400).json({ error: parsedRequest.error });
+  if ('error' in parsedPosition) {
+    response.status(400).json({ error: parsedPosition.error });
     return;
   }
 
-  if ('error' in parsedSummaryMode) {
-    response.status(400).json({ error: parsedSummaryMode.error });
+  if ('error' in parsedSummaryStyle) {
+    response.status(400).json({ error: parsedSummaryStyle.error });
+    return;
+  }
+
+  if (typeof radius !== 'number' || !Number.isFinite(radius) || radius <= 0) {
+    response.status(400).json({ error: 'radius must be a finite number greater than 0.' });
     return;
   }
 
   try {
-    const summaryText = await buildProjectedSceneSummary(parsedRequest.value, parsedSummaryMode.value, 'debug');
+    const summaryText = await buildProjectedSceneSummary(
+      parsedPosition.value,
+      {
+        radius,
+        summaryStyle: parsedSummaryStyle.value,
+      },
+      'debug',
+    );
     response.json({
-      summaryMode: parsedSummaryMode.value,
+      radius,
+      summaryStyle: parsedSummaryStyle.value,
       summaryText,
     });
   } catch (error) {
