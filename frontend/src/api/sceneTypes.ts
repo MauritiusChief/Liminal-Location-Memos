@@ -118,7 +118,7 @@ export interface NormalizedFeatureProperties {
   relations: RelationReference[];
   meta: Record<string, string | number>;
   tainted: boolean;
-  containedPois?: ContainedPoi[];
+  containedPois?: ContainedPoiReference[];
 }
 
 export interface NormalizedFeature {
@@ -196,7 +196,7 @@ export interface DbFeatureSummary {
   relations: RelationReference[];
   meta: Record<string, string | number>;
   tainted: boolean;
-  containedPois?: ContainedPoi[];
+  containedPois?: ContainedPoiReference[];
 }
 
 export interface SceneLoadResponse {

@@ -1,10 +1,10 @@
 import type { DbNormalizationDiagnostics } from '../services/sceneTypes.js';
 import type { NormalizedMicroGrid } from '../services/overpassGrid.js';
 import type { NormalizedPolarView } from '../services/overpassPolar.js';
-import type { ContainedPoi, RelationReference } from '../services/overpassNormalization.js';
 import type {
   SceneContextSummaryMode,
 } from '../services/sceneSummaryService.js';
+import { ContainedPoiReference, RelationReference } from '@/services/osmNormalization/osmNormalizer.js';
 
 export type { SceneContextSummaryMode } from '../services/sceneSummaryService.js';
 
@@ -103,7 +103,7 @@ export interface BuildingSummary {
   tags: Record<string, string>;
   areaSquareMeters: number;
   relations: RelationReference[];
-  containedPois: ContainedPoi[];
+  containedPois: ContainedPoiReference[];
 }
 
 export interface AreaSummary {

@@ -2,12 +2,11 @@ import type { PoolClient } from 'pg';
 import { query, withTransaction } from '../db/client.js';
 import { loadServiceSql } from '../db/sqlLoader.js';
 import type {
+  ContainedPoiReference,
   NormalizedFeature,
-  NormalizedOverpassRequest,
-  ContainedPoi,
   OutlineReference,
   RelationReference,
-} from '@/services/overpassNormalization.js';
+} from '@/services/osmNormalization/osmNormalizer.js';
 import type {
   DbFeatureCategory,
   SceneFeatureDetail,
@@ -16,6 +15,7 @@ import type {
 } from './sceneTypes.js';
 import { getStructuredTagColumns, matchFeatureCategory } from '@/services/osmNormalization/osmFeatureConfig.js';
 import type { AreaSummary, BuildingSummary, GamePosition, LineSummary } from '../types/game.js';
+import { RangedPosition } from '@/routes/apiTypes.js';
 
 type BuildingRow = {
   feature_id: string;
@@ -27,7 +27,7 @@ type BuildingRow = {
   outline_references: OutlineReference[];
   meta: Record<string, string | number>;
   tainted: boolean;
-  contained_pois: ContainedPoi[] | null;
+  contained_pois: ContainedPoiReference[] | null;
 };
 
 type FeatureDetailRow = {
@@ -70,7 +70,7 @@ type BuildingAtPositionRow = {
   tags: Record<string, string>;
   area_square_meters: number;
   relations: RelationReference[] | null;
-  contained_pois: ContainedPoi[] | null;
+  contained_pois: ContainedPoiReference[] | null;
 };
 
 type AreaAtPositionRow = {
@@ -84,10 +84,6 @@ type LineNearPositionRow = {
   tags: Record<string, string>;
 };
 
-const BUILDING_TAG_COLUMNS = getStructuredTagColumns('building');
-const POI_TAG_COLUMNS = getStructuredTagColumns('poi');
-const ROAD_TAG_COLUMNS = getStructuredTagColumns('line');
-const AREA_TAG_COLUMNS = getStructuredTagColumns('area');
 const fetchMicroGridFromDbSqlPromise = loadServiceSql('osmRepository/fetchMicroGridFromDb.sql');
 const fetchScenePolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fetchScenePolarFeaturesFromDb.sql');
 const fetchSceneBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneBuildingDetails.sql');
@@ -95,61 +91,8 @@ const fetchSceneNonBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fet
 const findBuildingsAtPositionSqlPromise = loadServiceSql('osmRepository/findBuildingAtPosition.sql');
 const findAreasAtPositionSqlPromise = loadServiceSql('osmRepository/findAreasAtPosition.sql');
 const findNearbyLinesAtPositionSqlPromise = loadServiceSql('osmRepository/findNearbyLinesAtPosition.sql');
-const upsertBuildingFeatureSqlPromise = loadServiceSql('osmRepository/upsertBuildingFeature.sql');
-const upsertPoiFeatureSqlPromise = loadServiceSql('osmRepository/upsertPoiFeature.sql');
-const upsertLineFeatureSqlPromise = loadServiceSql('osmRepository/upsertLineFeature.sql');
-const upsertAreaFeatureSqlPromise = loadServiceSql('osmRepository/upsertAreaFeature.sql');
 
 export type SceneDataProfile = 'debug' | 'game';
-
-export async function syncNormalizedFeaturesToDb(
-  features: NormalizedFeature[],
-  coverage: { lat: number; lon: number; radius: number },
-): Promise<{ buildings: number; pois: number; lines: number; areas: number }> {
-  return withTransaction(async (client) => {
-    let buildings = 0;
-    let pois = 0;
-    let lines = 0;
-    let areas = 0;
-
-    for (const feature of features) {
-      const tempFearture = { // TODO 临时适配，以后要从根源全部把旧类型换掉
-        ...feature, properties: {...feature.properties, relationReferences: feature.properties.relations, outlineReferences: feature.properties.outlineReferences ?? []}
-      }
-      const category = matchFeatureCategory(tempFearture);
-      switch (category) {
-        case 'building':
-          await upsertBuildingFeature(client, feature);
-          buildings += 1;
-          break;
-        case 'poi':
-          await upsertPoiFeature(client, feature);
-          pois += 1;
-          break;
-        case 'line':
-          await upsertLineFeature(client, feature);
-          lines += 1;
-          break;
-        case 'area':
-          await upsertAreaFeature(client, feature);
-          areas += 1;
-          break;
-        default:
-          break;
-      }
-    }
-
-    await client.query(
-      `
-      INSERT INTO osm_sync_coverage (center, radius_m, source)
-      VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), $3, 'overpass')
-      `,
-      [coverage.lon, coverage.lat, coverage.radius],
-    );
-
-    return { buildings, pois, lines, areas };
-  });
-}
 
 /**
  * 这个函数把“后续文案与调试真正会消费的要素字段”统一取回。
@@ -159,7 +102,7 @@ export async function syncNormalizedFeaturesToDb(
  * @returns
  */
 export async function fetchSceneFeatureDetailsFromDb(
-  request: NormalizedOverpassRequest,
+  request: RangedPosition,
   _profile: SceneDataProfile = 'debug',
 ): Promise<SceneFeatureDetail[]> {
   const [buildingRows, otherRows] = await Promise.all([
@@ -203,7 +146,7 @@ export async function fetchSceneFeatureDetailsFromDb(
  * @param request
  * @returns
  */
-export async function fetchMicroGridFromDb(request: NormalizedOverpassRequest): Promise<DbMicroGridCellRecord[]> {
+export async function fetchMicroGridFromDb(request: RangedPosition): Promise<DbMicroGridCellRecord[]> {
   if (request.radius <= 50) {
     return [];
   }
@@ -233,7 +176,7 @@ export async function fetchMicroGridFromDb(request: NormalizedOverpassRequest): 
  * @returns
  */
 export async function fetchScenePolarFeaturesFromDb(
-  request: NormalizedOverpassRequest,
+  request: RangedPosition,
   _profile: SceneDataProfile = 'debug',
 ): Promise<PolarFeatureRecord[]> {
   const radiusMeters = Math.min(request.radius, 1000);
@@ -328,7 +271,7 @@ export async function findNearbyLinesAtPosition(position: GamePosition): Promise
  * @param request
  * @returns
  */
-async function fetchBuildingDetails(request: NormalizedOverpassRequest): Promise<BuildingRow[]> {
+async function fetchBuildingDetails(request: RangedPosition): Promise<BuildingRow[]> {
   const sql = await fetchSceneBuildingDetailsSqlPromise;
   const result = await query<BuildingRow>(
     sql,
@@ -344,7 +287,7 @@ async function fetchBuildingDetails(request: NormalizedOverpassRequest): Promise
  * @param request
  * @returns
  */
-async function fetchNonBuildingDetails(request: NormalizedOverpassRequest): Promise<FeatureDetailRow[]> {
+async function fetchNonBuildingDetails(request: RangedPosition): Promise<FeatureDetailRow[]> {
   const sql = await fetchSceneNonBuildingDetailsSqlPromise;
   const result = await query<FeatureDetailRow>(
     sql,
@@ -352,115 +295,4 @@ async function fetchNonBuildingDetails(request: NormalizedOverpassRequest): Prom
   );
 
   return result.rows;
-}
-
-async function upsertBuildingFeature(client: PoolClient, feature: NormalizedFeature): Promise<void> {
-  const tags = feature.properties.tags;
-  const tagsExtra = omitKeys(tags, BUILDING_TAG_COLUMNS);
-  const sql = await upsertBuildingFeatureSqlPromise;
-
-  await client.query(
-    sql,
-    [
-      feature.properties.osmType,
-      feature.properties.osmId,
-      JSON.stringify(feature.geometry),
-      tags.name || null,
-      tags.building || null,
-      tags.man_made || null,
-      tags.height || null,
-      tags.level || null,
-      tags['building:levels'] || null,
-      JSON.stringify(tagsExtra),
-      JSON.stringify(feature.properties.relations),
-      JSON.stringify(feature.properties.outlineReferences || []),
-      JSON.stringify(feature.properties.meta),
-      feature.properties.tainted,
-    ],
-  );
-}
-
-// sync 阶段仍然保留原来的“只把后续摘要会用到的对象落库”策略。
-async function upsertPoiFeature(client: PoolClient, feature: NormalizedFeature): Promise<void> {
-  const tags = feature.properties.tags;
-  const tagsExtra = omitKeys(tags, POI_TAG_COLUMNS);
-  const sql = await upsertPoiFeatureSqlPromise;
-
-  await client.query(
-    sql,
-    [
-      feature.properties.osmType,
-      feature.properties.osmId,
-      JSON.stringify(feature.geometry),
-      tags.name || null,
-      tags.brand || null,
-      tags.shop || null,
-      tags.amenity || null,
-      tags.office || null,
-      tags.tourism || null,
-      tags.leisure || null,
-      tags.craft || null,
-      tags.healthcare || null,
-      tags.natural || null,
-      tags.man_made || null,
-      JSON.stringify(tagsExtra),
-      JSON.stringify(feature.properties.relations),
-      JSON.stringify(feature.properties.meta),
-      feature.properties.tainted,
-    ],
-  );
-}
-
-async function upsertLineFeature(client: PoolClient, feature: NormalizedFeature): Promise<void> {
-  const tags = feature.properties.tags;
-  const tagsExtra = omitKeys(tags, ROAD_TAG_COLUMNS);
-  const sql = await upsertLineFeatureSqlPromise;
-
-  await client.query(
-    sql,
-    [
-      feature.properties.osmType,
-      feature.properties.osmId,
-      JSON.stringify(feature.geometry),
-      tags.name || null,
-      tags.highway || null,
-      tags.railway || null,
-      tags.waterway || null,
-      tags.man_made || null,
-      JSON.stringify(tagsExtra),
-      JSON.stringify(feature.properties.relations),
-      JSON.stringify(feature.properties.meta),
-      feature.properties.tainted,
-    ],
-  );
-}
-
-async function upsertAreaFeature(client: PoolClient, feature: NormalizedFeature): Promise<void> {
-  const tags = feature.properties.tags;
-  const tagsExtra = omitKeys(tags, AREA_TAG_COLUMNS);
-  const sql = await upsertAreaFeatureSqlPromise;
-
-  await client.query(
-    sql,
-    [
-      feature.properties.osmType,
-      feature.properties.osmId,
-      JSON.stringify(feature.geometry),
-      tags.name || null,
-      tags.landuse || null,
-      tags.natural || null,
-      tags.leisure || null,
-      tags.amenity || null,
-      JSON.stringify(tagsExtra),
-      JSON.stringify(feature.properties.relations),
-      JSON.stringify(feature.properties.meta),
-      feature.properties.tainted,
-    ],
-  );
-}
-
-function omitKeys<T extends string>(source: Record<string, string>, keys: readonly T[]): Record<string, string> {
-  // 结构化列已经单独存表字段，tags_extra 只保留剩余补充标签。
-  const keySet = new Set<string>(keys);
-  return Object.fromEntries(Object.entries(source).filter(([key]) => !keySet.has(key)));
 }

@@ -2,13 +2,13 @@ import { Feature, FeatureCollection, Geometry } from "geojson";
 import osmtogeojson from "osmtogeojson";
 import { OverpassJson } from "overpass-ts";
 
-interface RelationReference {
+export interface RelationReference {
   role: string;
   rel: number;
   reltags: Record<string, string>;
 }
 
-interface OutlineReference {
+export interface OutlineReference {
   osmType: string;
   osmId: number;
   tags: Record<string, string>;
@@ -17,7 +17,7 @@ interface OutlineReference {
   reltags: Record<string, string>;
 }
 
-interface ContainedPoiReference {
+export interface ContainedPoiReference {
   osmType: string;
   osmId: number;
   tags: Record<string, string>;

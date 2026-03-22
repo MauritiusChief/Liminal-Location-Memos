@@ -18,11 +18,10 @@ import type {
 import type {
   ContainedPoi,
   NormalizationDiagnostics,
-  NormalizedFeatureCollection,
-  NormalizedFeatureProperties,
   OutlineReference,
   RelationReference,
 } from '../services/overpassNormalization.js';
+import { NormalizedFeatureCollection } from '@/services/osmNormalization/osmNormalizer.js';
 
 export interface OverpassResponse {
   data: unknown;
@@ -69,7 +68,6 @@ export type {
   ContainedPoi,
   DbFeatureCategory,
   DbNormalizationDiagnostics,
-  NormalizedFeatureProperties,
   NormalizedMicroGrid,
   NormalizedMicroGridCell,
   NormalizedPolarFeatureSummary,

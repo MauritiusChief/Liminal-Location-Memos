@@ -1,4 +1,4 @@
-import type { ContainedPoi, OutlineReference, RelationReference } from './overpassNormalization.js';
+import { ContainedPoiReference, OutlineReference, RelationReference } from './osmNormalization/osmNormalizer.js';
 
 export type DbFeatureCategory = 'building' | 'poi' | 'line' | 'area';
 
@@ -20,7 +20,7 @@ export interface SceneFeatureDetail {
   outlineReferences?: OutlineReference[];
   meta?: Record<string, string | number>;
   tainted?: boolean;
-  containedPois?: ContainedPoiString[] | ContainedPoi[];
+  containedPois?: ContainedPoiString[] | ContainedPoiReference[];
 }
 
 // Micro grid 在 SQL 里已经完成了“这个格子命中了谁”的空间判断；
