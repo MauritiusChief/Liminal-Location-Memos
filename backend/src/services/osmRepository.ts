@@ -7,7 +7,7 @@ import type {
   ContainedPoi,
   OutlineReference,
   RelationReference,
-} from './overpassNormalization.js';
+} from '@/services/overpassNormalization.js';
 import type {
   DbFeatureCategory,
   SceneFeatureDetail,
