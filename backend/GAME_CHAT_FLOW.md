@@ -27,8 +27,6 @@
    - 在 `backend/src/services/gameScene.ts`
    - 默认先加载 `1000m` 大场景
    - 复用数据库链路生成 `diagnostics`、`microGrid`、`polarView`
-   - `SceneContext` 不再预生成三档 summary，而是通过 `getSummary(mode)` 按需生成并缓存
-   - `concise_near_200` 首次被请求时，才会额外装载 `200m` 小场景
 4. `ensureLargeDescription()`
    - 在 `backend/src/services/sceneDescriptionService.ts`
    - 先按距离和 `effectiveRadiusM` 复用已有大描述

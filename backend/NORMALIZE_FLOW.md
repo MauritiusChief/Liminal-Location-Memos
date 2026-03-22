@@ -1,4 +1,6 @@
-# Data Flow
+# Normalize Flow
+
+这个部分负责描述从 “从 overpass api” 获取数据，到 “规整化并落入数据库” 过程
 
 ## Overview
 当前项目的环境摘要主链路已经统一为数据库链路：
@@ -14,7 +16,7 @@
 处理顺序如下：
 
 1. `buildJsonSkelOverpassQuery()`
-   - 生成与旧链路相同的 Overpass QL
+   - 生成与 Overpass QL
 2. `overpassJson()`
    - 请求 Overpass API
 3. `convertOverpassToNormalizedFeatures()`
