@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && node scripts/copy-runtime-sql.mjs",
-    "start": "node dist/index.js"
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc --noEmit && node scripts/build.mjs && node scripts/copy-runtime-sql.mjs",
+    "start": "node dist/db/index.js"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
@@ -24,6 +24,7 @@
     "@types/node": "^25.5.0",
     "@types/osmtogeojson": "^2.2.34",
     "@types/pg": "^8.15.6",
+    "esbuild": "^0.27.3",
     "jest": "^30.3.0",
     "ts-jest": "^29.4.6",
     "tsx": "^4.20.6",
