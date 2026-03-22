@@ -1,7 +1,7 @@
 import {
   findNearestCoverageDistanceMeters,
 } from './osmRepository.js';
-import { syncOverpassCoverage } from './overpassSync.js';
+import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
 import {
   loadProjectedScene,
 } from './sceneSummaryService.js';

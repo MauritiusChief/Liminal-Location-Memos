@@ -16,12 +16,14 @@ import { syncNormalizedFeaturesToDb } from "./osmNormalizedToDb.js";
  * @returns debug 用的参数
  */
 export async function syncOverpassCoverage(
-  lat: number,
-  lon: number,
-  radius: number,
+  request: {
+    lat: number,
+    lon: number,
+    radius: number,
+  },
   includeRaw: boolean = false
 ): Promise<debugSyncOverpassRespond> {
-  const query = buildJsonSkelOverpassQuery(lat, lon, radius);
+  const query = buildJsonSkelOverpassQuery(request);
   const raw = (await overpassJson(query, {
     endpoint: 'https://overpass-api.de/api/interpreter',
   }));
@@ -29,9 +31,9 @@ export async function syncOverpassCoverage(
   // features: 归整化的地物，去向有两处
   // 1. 落入数据库
   // 2. 作为 debug 帮助信息返回
-  await syncNormalizedFeaturesToDb(features, lat, lon, radius);
+  await syncNormalizedFeaturesToDb(features, request);
 
-  return {}
+  return {query, features, counts: 666}
 }
 
 // #region 帮助函数
@@ -44,13 +46,15 @@ export async function syncOverpassCoverage(
  * @returns 生成的 Overpass Query
  */
 function buildJsonSkelOverpassQuery(
-  lat: number,
-  lon: number,
-  radius: number
+  para: {
+    lat: number,
+    lon: number,
+    radius: number,
+  },
 ): string {
   return [
     '[out:json][timeout:25];',
-    `nwr(around:${radius},${lat},${lon});`,
+    `nwr(around:${para.radius},${para.lat},${para.lon});`,
     'out body geom;',
     '>;', // Overpass QL 语法，取出上一个结果集中所有
     'out body geom;',

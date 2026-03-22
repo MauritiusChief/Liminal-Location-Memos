@@ -14,7 +14,7 @@ import type {
   PolarFeatureRecord,
   DbMicroGridCellRecord,
 } from './sceneTypes.js';
-import { getStructuredTagColumns, matchFeatureCategory } from './osmFeatureConfig.js';
+import { getStructuredTagColumns, matchFeatureCategory } from '@/services/osmNormalization/osmFeatureConfig.js';
 import type { AreaSummary, BuildingSummary, GamePosition, LineSummary } from '../types/game.js';
 
 type BuildingRow = {
@@ -113,7 +113,10 @@ export async function syncNormalizedFeaturesToDb(
     let areas = 0;
 
     for (const feature of features) {
-      const category = matchFeatureCategory(feature);
+      const tempFearture = { // TODO 临时适配，以后要从根源全部把旧类型换掉
+        ...feature, properties: {...feature.properties, relationReferences: feature.properties.relations, outlineReferences: feature.properties.outlineReferences ?? []}
+      }
+      const category = matchFeatureCategory(tempFearture);
       switch (category) {
         case 'building':
           await upsertBuildingFeature(client, feature);

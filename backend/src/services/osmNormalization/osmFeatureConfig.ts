@@ -17,19 +17,7 @@ export const BUILDING_PRIMARY_LABEL_KEYS = ['building', 'man_made'] as const;
 export const BUILDING_CLASSIFIER_TAG_KEYS = ['building', 'man_made'] as const;
 export const BUILDING_RETENTION_TAG_KEYS = [] as const;
 
-export const POI_STRUCTURED_TAG_KEYS = [
-  'name',
-  'brand',
-  'shop',
-  'amenity',
-  'office',
-  'tourism',
-  'leisure',
-  'craft',
-  'healthcare',
-  'natural',
-  'man_made',
-] as const;
+export const POI_STRUCTURED_TAG_KEYS = ['name', 'brand', 'shop', 'amenity', 'office', 'tourism', 'leisure', 'craft', 'healthcare', 'natural', 'man_made'] as const;
 export const POI_PRIMARY_LABEL_KEYS = ['shop', 'amenity', 'office', 'tourism', 'leisure', 'craft', 'healthcare', 'natural', 'man_made'] as const;
 export const POI_CLASSIFIER_TAG_KEYS = POI_PRIMARY_LABEL_KEYS;
 export const POI_RETENTION_TAG_KEYS = ['historic'] as const;

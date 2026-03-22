@@ -9,7 +9,7 @@ import {
   fetchSceneFeatureDetailsFromDb,
   fetchScenePolarFeaturesFromDb,
 } from '../services/osmRepository.js';
-import { syncOverpassCoverage } from '../services/overpassSync.js';
+import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
 import { buildNormalizedPolarView } from '../services/overpassPolar.js';
 import { buildDefaultDebugSystemPrompt } from '../services/overpassPrompt.js';
 import { type NormalizedOverpassRequest } from '../services/overpassNormalization.js';

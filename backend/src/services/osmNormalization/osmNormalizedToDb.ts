@@ -26,9 +26,11 @@ const upsertAreaFeatureSqlPromise = loadServiceSql('osmRepository/upsertAreaFeat
  */
 export async function syncNormalizedFeaturesToDb(
   features: NormalizedFeature[],
-  lat: number,
-  lon: number,
-  radius: number
+  para: {
+    lat: number,
+    lon: number,
+    radius: number,
+  },
 ): Promise<{ buildings: number; pois: number; lines: number; areas: number }> {
   return withTransaction(async (client) => {
     let buildings = 0;
@@ -65,7 +67,7 @@ export async function syncNormalizedFeaturesToDb(
       INSERT INTO osm_sync_coverage (center, radius_m, source)
       VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), $3, 'overpass')
       `,
-      [lon, lat, radius],
+      [para.lon, para.lat, para.radius],
     );
 
     return { buildings, pois, lines, areas };

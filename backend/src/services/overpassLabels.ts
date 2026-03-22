@@ -3,7 +3,7 @@ import {
   BUILDING_PRIMARY_LABEL_KEYS,
   LINE_PRIMARY_LABEL_KEYS,
   POI_PRIMARY_LABEL_KEYS,
-} from './osmFeatureConfig.js';
+} from '@/services/osmNormalization/osmFeatureConfig.js';
 
 export const BUILDING_TAG_KEYS = BUILDING_PRIMARY_LABEL_KEYS;
 export const POI_TAG_KEYS = POI_PRIMARY_LABEL_KEYS;

@@ -5,7 +5,7 @@ import {
   LINE_PRIMARY_LABEL_KEYS,
   POI_PRIMARY_LABEL_KEYS,
   POI_STRUCTURED_TAG_KEYS,
-} from './osmFeatureConfig.js';
+} from '@/services/osmNormalization/osmFeatureConfig.js';
 import {
   buildBuildingBaseLabel,
   getAreaDisplayLabel,
