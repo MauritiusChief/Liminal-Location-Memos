@@ -1,3 +1,5 @@
+// deprecated 已弃用
+
 import osmtogeojson from 'osmtogeojson';
 import type { Feature, FeatureCollection, Geometry } from 'geojson';
 

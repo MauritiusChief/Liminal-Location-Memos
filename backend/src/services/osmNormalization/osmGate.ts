@@ -1,6 +1,7 @@
 import { debugSyncOverpassRespond } from "@/routes/apiTypes.js";
 import { overpassJson } from "overpass-ts";
 import { convertOverpassToNormalizedFeatures, NormalizedFeature } from "./osmNormalizer.js";
+import { syncNormalizedFeaturesToDb } from "./osmNormalizedToDb.js";
 
 /**
  * `/debug/db/sync-overpass` API 负责 debug 这个部分
@@ -11,7 +12,7 @@ import { convertOverpassToNormalizedFeatures, NormalizedFeature } from "./osmNor
  * @param lat Overpass Query 中心经度
  * @param lon Overpass Query 中心维度
  * @param radius Overpass Query 半径
- * @param includeRaw 是否返回原结果
+ * @param includeRaw debug 是否返回原始的 OverpassJson
  * @returns debug 用的参数
  */
 export async function syncOverpassCoverage(
@@ -25,13 +26,18 @@ export async function syncOverpassCoverage(
     endpoint: 'https://overpass-api.de/api/interpreter',
   }));
   const features = convertOverpassToNormalizedFeatures(raw);
+  // features: 归整化的地物，去向有两处
+  // 1. 落入数据库
+  // 2. 作为 debug 帮助信息返回
+  await syncNormalizedFeaturesToDb(features, lat, lon, radius);
+
   return {}
 }
 
 // #region 帮助函数
 
 /**
- * 生成专门用于规整化函数的 Overpass Query，无任何过滤且启用 skel 参数。
+ * 生成专门用于规整化函数的 Overpass Query，无任何过滤。
  * @param lat Overpass Query 中心经度
  * @param lon Overpass Query 中心维度
  * @param radius Overpass Query 半径
@@ -46,7 +52,7 @@ function buildJsonSkelOverpassQuery(
     '[out:json][timeout:25];',
     `nwr(around:${radius},${lat},${lon});`,
     'out body geom;',
-    '>;',
-    'out skel geom;',
+    '>;', // Overpass QL 语法，取出上一个结果集中所有
+    'out body geom;',
   ].join('\n');
 }
