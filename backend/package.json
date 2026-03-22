@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "build": "tsc --noEmit && node scripts/build.mjs && node scripts/copy-runtime-sql.mjs",
-    "start": "node dist/db/index.js"
+    "build": "tsc -p tsconfig.src.json --noEmit && node scripts/build.mjs && node scripts/copy-runtime-sql.mjs",
+    "start": "node dist/db/index.js",
+    "test": "jest",
+    "test:osm-compat": "jest tests/osmNormalizer.compat.test.ts"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
@@ -21,6 +23,7 @@
     "@types/express": "^5.0.3",
     "@types/geojson": "^7946.0.16",
     "@types/jest": "^30.0.0",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^25.5.0",
     "@types/osmtogeojson": "^2.2.34",
     "@types/pg": "^8.15.6",

@@ -141,7 +141,7 @@ function finalizeFeature(
   buildingRelationIndex: Map<number, BuildingRelationInfo>,
 ): NormalizedFeature {
   const filteredRelations = feature.properties.relationReferences.filter( relation => {
-    return relationLineIds.has(relation.rel);
+    return !relationLineIds.has(relation.rel);
   });
   const outlineReferences = isBuildingRelationFeature(feature, buildingRelationIndex) || isBuildingPartPolygonFeature(feature, buildingRelationIndex)
     ? buildingRelationIndex.get(feature.properties.osmId)?.outlineReferences || []
