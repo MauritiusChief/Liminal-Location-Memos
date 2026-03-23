@@ -15,13 +15,15 @@ interface LabelContainedPoi {
   tags: Record<string, string>;
 }
 
-export interface BuildingLabelSource {
+interface BuildingLabelSource {
   tags: Record<string, string>;
   containedPois?: LabelContainedPoi[];
 }
 
 // 这个文件专门承接“如何把 normalized feature 压成短标签”这类规则。
 // 这样 grid 和 polar 可以共享同一套文本风格，而不用各自维护一份相似但逐渐分叉的逻辑。
+
+//#region 共享辅助填标签函数
 
 // 这里顺手把空字符串也视为“没有值”，避免 label 里出现视觉上为空的噪音。
 export function trimTagValue(value: string | undefined): string | null {

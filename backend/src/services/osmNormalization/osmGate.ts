@@ -4,10 +4,6 @@ import { convertOverpassToNormalizedFeatures } from "./osmNormalizer.js";
 import { syncNormalizedFeaturesToDb } from "./osmNormalizedToDb.js";
 
 /**
- * `/debug/db/sync-overpass` API 负责 debug 这个部分
- */
-
-/**
  *
  * @param lat Overpass Query 中心经度
  * @param lon Overpass Query 中心维度

@@ -1,7 +1,7 @@
 import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { RangedPosition } from "@/routes/apiTypes.js";
-import { SceneFeatureDetail } from "./sceneObject.js";
+import { SceneFeatureDetail } from "./sceneUtilFeatureDetail.js";
 
 /**
  * 与 SQL 查询结果表一致的扁平类型

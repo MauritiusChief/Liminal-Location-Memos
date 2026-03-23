@@ -10,8 +10,8 @@ import type {
   DbNormalizationDiagnostics,
   SceneFeatureDetail,
 } from './sceneTypes.js';
-import { buildLabeledMicroGrid } from './scene/microGridPrompt.js';
-import { fetchSceneFeatureDetailsFromDb } from './scene/sceneObject.js';
+import { buildLabeledMicroGrid } from './scene/microGridLabeled.js';
+import { fetchSceneFeatureDetailsFromDb } from './scene/sceneUtilFeatureDetail.js';
 import { buildMicroGrid, fetchMicroGridFromDb } from './scene/microGridObject.js';
 
 export const SUMMARY_PREVIEW_MODE_CONFIG = {

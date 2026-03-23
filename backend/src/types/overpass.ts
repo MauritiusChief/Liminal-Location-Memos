@@ -21,7 +21,7 @@ import type {
   RelationReference,
 } from '../services/overpassNormalization.js';
 import { NormalizedFeatureCollection } from '@/services/osmNormalization/osmNormalizer.js';
-import { LabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
+import { LabeledMicroGrid } from '@/services/scene/microGridLabeled.js';
 
 export interface OverpassResponse {
   data: unknown;
