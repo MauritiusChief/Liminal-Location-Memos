@@ -4,21 +4,14 @@ import {
   LINE_PRIMARY_LABEL_KEYS,
   POI_PRIMARY_LABEL_KEYS,
 } from '@/services/osmNormalization/osmFeatureConfig.js';
+import { SceneFeatureDetail } from './sceneUtilFeatureDetail.js';
+import { ContainedPoiReference } from '@/services/osmNormalization/osmNormalizer.js';
 
 export const BUILDING_TAG_KEYS = BUILDING_PRIMARY_LABEL_KEYS;
 export const POI_TAG_KEYS = POI_PRIMARY_LABEL_KEYS;
 export const AREA_TAG_KEYS = AREA_PRIMARY_LABEL_KEYS;
 export const ROAD_TAG_KEYS = LINE_PRIMARY_LABEL_KEYS;
 const BUILDING_POI_LABEL_LIMIT = 1;
-
-interface LabelContainedPoi {
-  tags: Record<string, string>;
-}
-
-interface BuildingLabelSource {
-  tags: Record<string, string>;
-  containedPois?: LabelContainedPoi[];
-}
 
 // 这个文件专门承接“如何把 normalized feature 压成短标签”这类规则。
 // 这样 grid 和 polar 可以共享同一套文本风格，而不用各自维护一份相似但逐渐分叉的逻辑。
@@ -35,8 +28,14 @@ export function trimTagValue(value: string | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-// 共用的依照 XX_TAG_KEYS 产出主分类标签的函数。
-// 返回值保留 key:value 形式，避免调用方只看到裸值却不知道语义来源。
+/**
+ * 共用的依照 XX_TAG_KEYS 产出主分类标签的函数。
+ * 返回值保留 key:value 形式，避免调用方只看到裸值却不知道语义来源。
+ * 作用是提供最基础的分类参考
+ * @param keys
+ * @param tags
+ * @returns
+ */
 export function getPrimaryLabel(keys: readonly string[], tags: Record<string, string>): string | null {
   for (const key of keys) {
     const value = trimTagValue(tags[key]);
@@ -48,24 +47,28 @@ export function getPrimaryLabel(keys: readonly string[], tags: Record<string, st
   return null;
 }
 
-export function getFallbackBuildingLabel(buildingTagValue: string | undefined): string {
-  const buildingValue = trimTagValue(buildingTagValue);
+/**
+ * 根据标签决定最基础的建筑标签
+ * @param tags
+ * @returns 'man_made:xxx' 或者 'building:xxx' 或者 'building
+ */
+export function getFallbackBuildingLabel(tags: Record<string, string>): string {
+  const manMadeValue = trimTagValue(tags.man_made);
+  if (manMadeValue) {
+    return `man_made:${manMadeValue}`;
+  }
+
+  const buildingValue = trimTagValue(tags.building);
   return buildingValue && buildingValue !== 'yes' ? `building:${buildingValue}` : 'building';
 }
 
-export function getFallbackBuildingLikeLabel(tags: Record<string, string>): string {
-  const buildingValue = trimTagValue(tags.building);
-  if (buildingValue) {
-    return getFallbackBuildingLabel(buildingValue);
-  }
-
-  const manMadeValue = trimTagValue(tags.man_made);
-  return manMadeValue ? `man_made:${manMadeValue}` : 'building';
-}
-
-// 当前建筑标签规则只在“内部正好有 1 个可展示 contained POI”时借用它。
-// 这是复用现有 overpassGrid 行为，而不是恢复到更早的“前两个 POI 拼接”版本。
-export function getDisplayableContainedPois(containedPois: LabelContainedPoi[] | undefined): LabelContainedPoi | null {
+/**
+ * 在所含 POI 刚好为 1 个时，取出这个 POI；
+ * 太多或太少都不取出
+ * @param containedPois
+ * @returns
+ */
+export function getDisplayableContainedPois(containedPois: ContainedPoiReference[] | undefined): ContainedPoiReference | null {
   if (!containedPois || containedPois.length === 0 || containedPois.length > BUILDING_POI_LABEL_LIMIT) {
     return null;
   }
@@ -73,32 +76,65 @@ export function getDisplayableContainedPois(containedPois: LabelContainedPoi[] |
   return containedPois[0];
 }
 
+/**
+ * 如有正式名称或品牌则作为主体名称，基本分类作为辅助；
+ * 若没有则使用基本分类作为标签
+ * @param tags
+ * @returns
+ */
 export function getPoiDisplayLabel(tags: Record<string, string>): string {
-  const label = getPrimaryLabel(POI_TAG_KEYS, tags) || 'poi';
+  const label = getPoiPrimaryLabel(tags);
   const name = trimTagValue(tags.name) || trimTagValue(tags.brand);
   return name ? `${name} - ${label}` : label;
 }
+export function getPoiPrimaryLabel(tags: Record<string, string>): string {
+  return getPrimaryLabel(POI_TAG_KEYS, tags) || 'poi';
+}
 
+/**
+ * 如有正式名称则作为主体名称，基本分类作为辅助；
+ * 若没有则使用基本分类作为标签
+ * @param tags
+ * @returns
+ */
 export function getRoadDisplayLabel(tags: Record<string, string>): string {
-  const label = getPrimaryLabel(ROAD_TAG_KEYS, tags) || 'way';
+  const label = getRoadPrimaryLabel(tags);
   const name = trimTagValue(tags.name);
   return name ? `${name} - ${label}` : label;
 }
+export function getRoadPrimaryLabel(tags: Record<string, string>): string {
+  return getPrimaryLabel(ROAD_TAG_KEYS, tags) || 'line';
+}
 
+/**
+ * 如有正式名称则作为主体名称，基本分类作为辅助；
+ * 若没有则使用基本分类作为标签
+ * @param tags
+ * @returns
+ */
 export function getAreaDisplayLabel(tags: Record<string, string>): string {
-  const label = getPrimaryLabel(AREA_TAG_KEYS, tags) || 'area';
+  const label = getAreaPrimaryLabel(tags);
   const name = trimTagValue(tags.name);
   return name ? `${name} - ${label}` : label;
 }
+export function getAreaPrimaryLabel(tags: Record<string, string>): string {
+  return getPrimaryLabel(AREA_TAG_KEYS, tags) || 'area';
+}
 
-// 建筑标签只负责回答“这个建筑本身该怎么称呼”，
-// POI / ROAD 的重叠显示由 grid 之类的上层结构再做额外拼接。
+/**
+ * 拼接字符串形式的标签，规则：
+ * 1. 标签分主体部分与提示部分
+ * 2. 主体部分，优先使用建筑名字，其次使用所含POI名字
+ * 3. 提示部分，优先使用所含POI名字，其次使用
+ * @param feature
+ * @returns 字符串标签
+ */
 export function buildBuildingBaseLabel(
-  feature: BuildingLabelSource,
+  feature: SceneFeatureDetail,
 ): string {
   const buildingName = trimTagValue(feature.tags.name);
-  const fallbackBuildingLabel = getFallbackBuildingLikeLabel(feature.tags);
-  const containedPoi = getDisplayableContainedPois(feature.containedPois);
+  const fallbackBuildingLabel = getFallbackBuildingLabel(feature.tags);
+  const containedPoi = getDisplayableContainedPois(feature.containedPoisReferences);
   const containedPoiLabel = containedPoi ? getPoiDisplayLabel(containedPoi.tags) : null;
 
   if (buildingName) {

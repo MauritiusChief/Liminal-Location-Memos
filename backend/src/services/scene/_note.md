@@ -29,8 +29,8 @@
 ## Polar View Object
 
 组装 Polar View OBject 的工具流程是
-1. 组装扁平结构
-2. 在扁平结构上打上 marker（cluster marker 和 level marker）
+1. 组装扁平结构（理论上最完整的信息，但暂时没有归类）
+2. 初步打上标签，然后再 marker（cluster marker 和 level marker）
 3. 按照 marker 标记组装分为不同 level，level 内部又包含单个 feature 或者多个 feature 组成的 cluster，得到最完整版 Polar View Object
 4. 按照不同的配置，对最完整版进行过滤筛选
 

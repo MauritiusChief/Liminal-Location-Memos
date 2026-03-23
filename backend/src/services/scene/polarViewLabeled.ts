@@ -1,10 +1,13 @@
 import { RangedPosition } from "@/routes/apiTypes.js";
 import { PolarViewFeature } from "./polarViewObject.js";
 import { computeCircularMeanDegrees } from "../geometry.js";
+import { buildBuildingBaseLabel, getAreaDisplayLabel, getAreaPrimaryLabel, getFallbackBuildingLabel, getPoiDisplayLabel, getPoiPrimaryLabel, getRoadDisplayLabel, getRoadPrimaryLabel } from "./sceneUtilLabel.js";
+import { SceneFeatureDetail } from "./sceneUtilFeatureDetail.js";
 
 export interface MarkedPolarViewFeature extends PolarViewFeature {
   clusterMarker: string;
   levelMarker: 1 | 2 | 3;
+  baseLabel: string;
 }
 
 export interface PolarViewCluster {
@@ -21,7 +24,8 @@ export interface PolarViewLevel {
 }
 
 /**
- * 最正宗的 Polar View Object
+ * 最正宗的 Polar View Object：
+ * 同时包含 level，cluster 与 label 三重信息/结构
  */
 export interface PolarView {
   center: {
@@ -51,15 +55,13 @@ const DIRECTION_CLUSTER_THRESHOLD_COUNT: Record<1 | 2 | 3, number> = {
 };
 
 /**
- * 同时打上 level 标签与 cluster 标签的函数
- * @param polarViewFeature
+ * 先打上 level 标记
+ * @param polarViewFeatures
+ * @returns label 与 clusterMarker 都是占位符状态的 MarkedPolarViewFeature
  */
-export function applyPolarViewFeatureMarkder(
-  polarViewFeatures: PolarViewFeature[],
-): MarkedPolarViewFeature[] {
-  const groupedByLevelAndCategory = new Map<string, MarkedPolarViewFeature[]>();
+export function applyLevelMarker(polarViewFeatures: PolarViewFeature[]): MarkedPolarViewFeature[] {
+  const levelMarked: MarkedPolarViewFeature[] = []
 
-  // 打 level 标签
   for (const polarViewFeature of polarViewFeatures) {
     const distanceMeters = polarViewFeature.nearestPoint.distanceMeters
     const levelMarker = typeof distanceMeters === "number" ? classifyPolarLevel(distanceMeters) : null;
@@ -69,19 +71,105 @@ export function applyPolarViewFeatureMarkder(
     }
     const levelMarkedPolarViewFeature = {
       ...polarViewFeature,
-      levelMarker, clusterMarker: "PLACE_HOLDER" // 先把 clusterMarker 空着，等会状态
+      levelMarker,
+      clusterMarker: "PLACE_HOLDER", // 先把 clusterMarker 空着，等会状态
+      baseLabel: "PLACE_HOLDER"
     }
+    levelMarked.push(levelMarkedPolarViewFeature)
+  }
 
-    // key是 level + 种类，因为不同 level、不同种类的地物是肯定不可能聚类到一起的
-    const groupKey = `L${levelMarker}:${polarViewFeature.category}`;
+  return levelMarked
+}
+
+/**
+ * 根据已经打上的 levelMarker，决定 label 的形式
+ * @param polarViewFeatures 已经打上 level marker 的地物列
+ */
+export function attachLabelBasedOnLevel(
+  polarViewFeatures: MarkedPolarViewFeature[],
+  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
+): MarkedPolarViewFeature[] {
+  const labeled: MarkedPolarViewFeature[] = []
+
+  for (const polarViewFeature of polarViewFeatures) {
+    const detail = featureDetails.get(polarViewFeature.featureId)
+    if (!detail) continue
+    // 这里已初步应用不同类型地物在不同 level 的呈现机制
+    // 但仅限于 Prompt 中的固定规则
+    let label = ""
+    switch (polarViewFeature.category) {
+      case "building":
+        // 建筑在 level 3 时只有基础细节，level 1~2 全名称
+        switch (polarViewFeature.levelMarker) {
+          case 1:
+          case 2:
+            label = buildBuildingBaseLabel(detail)
+            break
+          case 3:
+            label = getFallbackBuildingLabel(detail.tags)
+            break
+        }
+        break
+      case "poi":
+        // POI在 level 3 时不显示，level 2 透露基础标签，level 1 全名称
+        switch (polarViewFeature.levelMarker) {
+          case 1:
+            label = getPoiDisplayLabel(detail.tags)
+            break
+          case 2:
+            label = getPoiPrimaryLabel(detail.tags)
+            break
+          case 3:
+            label = "NOT_DISPLAY"
+            break
+        }
+        break
+      case "area":
+      case "line":
+        // 线与区域在 level 2~3 时只有基础细节，level 1 全名称
+        switch (polarViewFeature.levelMarker) {
+          case 1:
+            label = polarViewFeature.category === "line"
+              ? getRoadDisplayLabel(detail.tags)
+              : getAreaDisplayLabel(detail.tags)
+            break
+          case 2:
+          case 3:
+            label = polarViewFeature.category === "line"
+              ? getRoadPrimaryLabel(detail.tags)
+              : getAreaPrimaryLabel(detail.tags)
+            break
+        }
+        break
+    }
+    polarViewFeature.baseLabel = label
+    labeled.push(polarViewFeature)
+  }
+
+  return labeled
+}
+
+/**
+ * 根据 label 打上 cluster 标签的函数
+ * @param polarViewFeature 已经打上 base label 的地物列
+ */
+export function applyClusterMarkder(
+  polarViewFeatures: MarkedPolarViewFeature[],
+): MarkedPolarViewFeature[] {
+  const groupedByLevelAndCategory = new Map<string, MarkedPolarViewFeature[]>();
+
+  // 先根据 base label 分类
+  for (const polarViewFeature of polarViewFeatures) {
+    // key是 level + base label
+    const groupKey = `L${polarViewFeature.levelMarker}:${polarViewFeature.baseLabel}`;
     const entries = groupedByLevelAndCategory.get(groupKey) || [];
-    entries.push(levelMarkedPolarViewFeature);
+    entries.push(polarViewFeature);
     groupedByLevelAndCategory.set(groupKey, entries);
   }
 
   let markedFeatures: MarkedPolarViewFeature[] = []
 
-  // 从打好 level 标签的 map 当中
+  // 在各个分类下进行聚类
   for (const entries of groupedByLevelAndCategory.values()) {
     const levelMarker = entries[0].levelMarker // 可以保证 levelMarker 全都一致，所以直接 [0] 就行
 
@@ -193,7 +281,7 @@ function splitEntriesIntoDirectionClusters(
     }
 
     // 创建新簇
-    currentEntry.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.category}:C${clusterId}`
+    currentEntry.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.baseLabel}:C${clusterId}`
     const seedSet = [...neighborFeatureIds];
 
     for (let j = 0; j < seedSet.length; j++) {
@@ -202,12 +290,12 @@ function splitEntriesIntoDirectionClusters(
       if (!neighborFeature) return
       // 如果之前是噪声，现在可归入当前簇
       if(neighborFeature.clusterMarker === neighborFeature?.featureId) {
-        neighborFeature.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.category}:C${clusterId}`
+        neighborFeature.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.baseLabel}:C${clusterId}`
       }
 
       // 如果尚未访问，加入当前簇
       if (neighborFeature.clusterMarker === "PLACE_HOLDER") {
-        neighborFeature.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.category}:C${clusterId}`
+        neighborFeature.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.baseLabel}:C${clusterId}`
 
         const neighborFeatureIds = regionQuery(entries, neighborFeature.featureId, degreesThreshold)
 

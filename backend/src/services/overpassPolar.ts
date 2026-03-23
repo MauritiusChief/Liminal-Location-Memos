@@ -15,7 +15,7 @@ import {
   circularAngleDeltaDegrees,
   distanceBetweenCoordinates,
 } from './geometry.js';
-import { buildBuildingBaseLabel, getFallbackBuildingLikeLabel, getPrimaryLabel, trimTagValue } from './scene/sceneUtilLabel.js';
+import { buildBuildingBaseLabel, getFallbackBuildingLabel, getPrimaryLabel, trimTagValue } from './scene/sceneUtilLabel.js';
 
 export type PolarFeatureCategory = 'building' | 'poi' | 'line' | 'area';
 
@@ -504,7 +504,7 @@ function applyLevel3Filter(
     case 'building': {
       return {
         shouldInclude: true,
-        baseLabel: getFallbackBuildingLikeLabel(detail.tags),
+        baseLabel: getFallbackBuildingLabel(detail.tags),
         visibleTags: collectVisibleTags(detail.tags, BUILDING_STRUCTURED_TAG_KEYS),
       };
     }
