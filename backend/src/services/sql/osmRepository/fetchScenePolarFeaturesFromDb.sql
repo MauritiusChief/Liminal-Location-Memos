@@ -71,8 +71,6 @@ line_features AS (
     lp.geometry_type,
     jsonb_agg(jsonb_build_array(ST_X(lp.point_geom), ST_Y(lp.point_geom)) ORDER BY lp.point_path) AS sample_coordinates,
     jsonb_build_array(MIN(ST_X(lp.center_geom)), MIN(ST_Y(lp.center_geom))) AS center_coordinate,
-    jsonb_agg(jsonb_build_array(ST_X(lp.point_geom), ST_Y(lp.point_geom)) ORDER BY lp.point_path) AS line_path_coordinates,
-    jsonb_agg(jsonb_build_array(ST_X(lp.point_geom), ST_Y(lp.point_geom)) ORDER BY lp.point_path) AS line_vertex_coordinates
   FROM line_points lp
   GROUP BY lp.feature_id, lp.osm_type, lp.osm_id, lp.category, lp.geometry_type
 ),
@@ -100,8 +98,6 @@ non_line_features AS (
     p.geometry_type,
     jsonb_agg(jsonb_build_array(ST_X(p.point_geom), ST_Y(p.point_geom)) ORDER BY p.point_path) AS sample_coordinates,
     jsonb_build_array(MIN(ST_X(p.center_geom)), MIN(ST_Y(p.center_geom))) AS center_coordinate,
-    NULL::jsonb AS line_path_coordinates,
-    NULL::jsonb AS line_vertex_coordinates
   FROM non_line_points p
   GROUP BY p.feature_id, p.osm_type, p.osm_id, p.category, p.geometry_type
 )

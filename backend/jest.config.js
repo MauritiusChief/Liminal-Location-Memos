@@ -5,6 +5,7 @@ export default {
     "^.+\\.tsx?$": ["ts-jest", { tsconfig: "<rootDir>/tests/tsconfig.test.json" }],
   },
   moduleNameMapper: {
-    "^@/(.*)$": "<rootDir>/src/$1",
+    "^\\.\\./overpassGeometry\\.js$": "<rootDir>/src/services/overpassGeometry.ts",
+    "^@/(.*)\\.js$": "<rootDir>/src/$1.ts",
   },
 };

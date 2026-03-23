@@ -18,8 +18,6 @@ type DbPolarViewFeatureTabelRow = {
   geometry_type: string;
   sample_coordinates: Array<[number, number]> | null;
   center_coordinate: [number, number] | null;
-  line_path_coordinates: Array<[number, number]> | null;
-  line_vertex_coordinates: Array<[number, number]> | null;
 };
 
 /**
@@ -33,15 +31,10 @@ export interface SampledPolarViewFeature {
   geometryType: string;
   osmType?: string;
   // 该地物所有的坐标点
+  // 如果是 line，这个也 sampleCoordinates 也负责计算线类专属属性
   sampleCoordinates: [number, number][];
   // 该地物的中心坐标点
   centerCoordinate: [number, number] | null;
-  // line 会额外带一条“按可见顺序排列”的路径，
-  // 供前端 SVG 直接画折线，不再把线硬压成扇区。
-  linePathCoordinates?: [number, number][];
-  // line 顶点序列和 centerPoint 分离：
-  // 后续 4 点抽样与回归都只从这组顶点里挑。
-  lineVertexCoordinates?: [number, number][];
 }
 
 interface PolarCoordinateSample {
@@ -153,17 +146,12 @@ export async function fetchScenePolarFeaturesFromDb(
     centerCoordinate: row.center_coordinate
       ? [Number(row.center_coordinate[0]), Number(row.center_coordinate[1])]
       : null,
-    linePathCoordinates: row.line_path_coordinates
-      ? row.line_path_coordinates.map((pair) => [Number(pair[0]), Number(pair[1])])
-      : undefined,
-    lineVertexCoordinates: row.line_vertex_coordinates
-      ? row.line_vertex_coordinates.map((pair) => [Number(pair[0]), Number(pair[1])])
-      : undefined,
   }));
 }
 
 /**
- * 组装可用来打标签的扁平结构
+ * 组装可用来打标签的扁平结构，精炼 Samples Coordinates 为真正所需要的数据：
+ * 最远点、最近点、视角宽度等等
  * @param request
  * @param polarViewFeature
  */
@@ -174,11 +162,51 @@ export function buildMatricedPolarViewFeature(
   const origin: [number, number] = [request.lon, request.lat];
 
   return polarViewFeatures.flatMap((polarViewFeature) => {
-    const metricedFeature = polarViewFeature.category === "line"
-      ? buildLineMetricedPolarViewFeature(origin, polarViewFeature)
-      : buildNoLineMetricedPolarViewFeature(origin, polarViewFeature);
+    const samples = dedupeConsecutiveCoordinates(polarViewFeature.sampleCoordinates);
+    const centerCoordinate = polarViewFeature.centerCoordinate || samples[0] || null;
+    if (samples.length === 0 || !centerCoordinate) {
+      return [];
+    }
 
-    return metricedFeature ? [metricedFeature] : [];
+    const commonMetrics = buildCommonMetricedPolarViewFeature(
+      origin,
+      polarViewFeature,
+      samples,
+      centerCoordinate,
+    );
+
+    if (!commonMetrics) {
+      return [];
+    }
+
+    if (polarViewFeature.category !== "line") {
+      return [commonMetrics];
+    }
+
+    if (samples.length < 2) {
+      return [];
+    }
+
+    const representativeCoordinates = selectRepresentativeLineCoordinates(samples, 4);
+    const linePoints = representativeCoordinates.map((coordinate) => toPolarCoordinateSample(origin, coordinate));
+    const orientationDegrees = computeLineOrientationDegrees(representativeCoordinates);
+    if (linePoints.length < 4 || orientationDegrees === null) {
+      return [];
+    }
+
+    const startPoint = linePoints[0]!;
+    const endPoint = linePoints[linePoints.length - 1]!;
+    const linePath = samples.map((coordinate) => toPolarCoordinateSample(origin, coordinate));
+
+    return [
+      {
+        ...commonMetrics,
+        widestSpan: computeLineEndpointSpan(startPoint, endPoint),
+        linePoints,
+        linePath,
+        orientationDegrees,
+      },
+    ];
   });
 }
 
@@ -288,6 +316,20 @@ export function buildPolarView(
   };
 }
 
+
+//#region 帮助函数
+
+function toPolarCoordinateSample(
+  origin: [number, number],
+  coordinate: [number, number],
+): PolarCoordinateSample {
+  return {
+    coordinate,
+    distanceMeters: distanceBetweenCoordinates(origin, coordinate),
+    bearingDegrees: bearingBetweenCoordinates(origin, coordinate),
+  };
+}
+
 /**
  * 精炼 Samples Coordinates 为真正所需要的数据：
  * 最远点、最近点、视角宽度等等
@@ -295,20 +337,21 @@ export function buildPolarView(
  * @param polarViewFeature
  * @returns
  */
-function buildNoLineMetricedPolarViewFeature(
+function buildCommonMetricedPolarViewFeature(
   origin: [number, number],
   polarViewFeature: SampledPolarViewFeature,
+  coordinates: [number, number][],
+  centerCoordinate: [number, number],
 ): MetricedPolarViewFeature | null {
-  if (polarViewFeature.sampleCoordinates.length === 0) {
+  if (coordinates.length === 0) {
     return null;
   }
 
-  const samples = polarViewFeature.sampleCoordinates.map((coordinate) => toPolarCoordinateSample(origin, coordinate));
+  const samples = coordinates.map((coordinate) => toPolarCoordinateSample(origin, coordinate));
   const nearestPoint = selectNearestSample(samples);
   const farthestPoint = selectFarthestSample(samples);
-  const centerCoordinate = polarViewFeature.centerCoordinate || polarViewFeature.sampleCoordinates[0] || null;
 
-  if (!nearestPoint || !farthestPoint || !centerCoordinate) {
+  if (!nearestPoint || !farthestPoint) {
     return null;
   }
 
@@ -322,77 +365,6 @@ function buildNoLineMetricedPolarViewFeature(
     widestSpan: computeWidestSpan(polarViewFeature.geometryType, samples),
     nearestPoint,
     farthestPoint,
-  };
-}
-
-/**
- * 精炼 Samples Coordinates 为真正所需要的数据：
- * 最远点、最近点、视角宽度等等
- * @param origin
- * @param polarViewFeature
- * @returns
- */
-function buildLineMetricedPolarViewFeature(
-  origin: [number, number],
-  polarViewFeature: SampledPolarViewFeature,
-): MetricedPolarViewFeature | null {
-  const linePathCoordinates = dedupeConsecutiveCoordinates(
-    polarViewFeature.linePathCoordinates || polarViewFeature.sampleCoordinates,
-  );
-  const lineVertexCoordinates = dedupeConsecutiveCoordinates(
-    polarViewFeature.lineVertexCoordinates || linePathCoordinates,
-  );
-  const centerCoordinate = polarViewFeature.centerCoordinate || linePathCoordinates[0] || null;
-
-  if (linePathCoordinates.length < 2 || lineVertexCoordinates.length < 2 || !centerCoordinate) {
-    return null;
-  }
-
-  const linePath = linePathCoordinates.map((coordinate) => toPolarCoordinateSample(origin, coordinate));
-  const nearestPoint = selectNearestSample(linePath);
-  const farthestPoint = selectFarthestSample(linePath);
-  if (!nearestPoint || !farthestPoint) {
-    return null;
-  }
-
-  // linePoints 是给回归和 debug 的代表顶点，
-  // centerPoint 则单独承担“整条线大致在哪”的职责。
-  const representativeCoordinates = selectRepresentativeLineCoordinates(lineVertexCoordinates, 4);
-  const linePoints = representativeCoordinates.map((coordinate) => toPolarCoordinateSample(origin, coordinate));
-  const orientationDegrees = computeLineOrientationDegrees(representativeCoordinates);
-  if (linePoints.length < 4 || orientationDegrees === null) {
-    return null;
-  }
-
-  const startPoint = linePoints[0]!;
-  const endPoint = linePoints[linePoints.length - 1]!;
-
-  return {
-    featureId: polarViewFeature.featureId,
-    osmId: polarViewFeature.osmId,
-    category: polarViewFeature.category,
-    geometryType: polarViewFeature.geometryType,
-    osmType: polarViewFeature.osmType,
-    centerPoint: toPolarCoordinateSample(origin, centerCoordinate),
-    widestSpan: computeLineEndpointSpan(startPoint, endPoint),
-    linePoints,
-    linePath,
-    orientationDegrees,
-    nearestPoint,
-    farthestPoint,
-  };
-}
-
-//#region 帮助函数
-
-function toPolarCoordinateSample(
-  origin: [number, number],
-  coordinate: [number, number],
-): PolarCoordinateSample {
-  return {
-    coordinate,
-    distanceMeters: distanceBetweenCoordinates(origin, coordinate),
-    bearingDegrees: bearingBetweenCoordinates(origin, coordinate),
   };
 }
 
