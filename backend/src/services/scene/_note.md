@@ -34,6 +34,8 @@
 3. 按照 marker 标记组装分为不同 level，level 内部又包含单个 feature 或者多个 feature 组成的 cluster，得到最完整版 Polar View Object
 4. 按照不同的配置，对最完整版进行过滤筛选
 
+`polarViewObject.ts` 出口的工具可以直接给定经纬度、范围与分档好的配置名，自动读取 relational DB 数据以及存储的配置，输出一个 FilteredPolarView
+
 ## DEBUG API
 
 - `POST /api/debug/db/normalized-load`
