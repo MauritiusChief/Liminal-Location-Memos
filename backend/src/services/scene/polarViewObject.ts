@@ -316,20 +316,6 @@ export function buildPolarView(
   };
 }
 
-
-//#region 帮助函数
-
-function toPolarCoordinateSample(
-  origin: [number, number],
-  coordinate: [number, number],
-): PolarCoordinateSample {
-  return {
-    coordinate,
-    distanceMeters: distanceBetweenCoordinates(origin, coordinate),
-    bearingDegrees: bearingBetweenCoordinates(origin, coordinate),
-  };
-}
-
 /**
  * 精炼 Samples Coordinates 为真正所需要的数据：
  * 最远点、最近点、视角宽度等等
@@ -365,6 +351,115 @@ function buildCommonMetricedPolarViewFeature(
     widestSpan: computeWidestSpan(polarViewFeature.geometryType, samples),
     nearestPoint,
     farthestPoint,
+  };
+}
+
+//#region DBSCAN 聚类
+
+/**
+ * 用简易版 DBSCAN 打上 cluster 标签
+ * @param entries
+ * @param degreesThreshold
+ * @param clusterCntThrehold
+ * @returns 打好标签的 entries
+ */
+function splitEntriesIntoDirectionClusters(
+  entries: MarkedPolarViewFeature[],
+  degreesThreshold: number,
+  clusterCntThrehold: number,
+): MarkedPolarViewFeature[] {
+  if (entries.length <= 1) {
+    return entries;
+  }
+
+  const sortedEntries = [...entries].sort(
+    (left, right) => left.centerPoint.bearingDegrees - right.centerPoint.bearingDegrees,
+  );
+  let clusterId = 0
+  const clusteredPolarViewFeatures: MarkedPolarViewFeature[] = [];
+
+  sortedEntries.forEach( currentEntry => {
+    // 已访问就跳过
+    if (currentEntry.clusterMarker !== "PLACE_HOLDER") return
+
+    const neighborFeatureIds = regionQuery(entries, currentEntry.featureId, degreesThreshold)
+    // 如果邻居不足，先标记噪声
+    if (neighborFeatureIds.length < clusterCntThrehold) {
+      currentEntry.clusterMarker = currentEntry.featureId
+      clusteredPolarViewFeatures.push(currentEntry)
+      return;
+    }
+
+    // 创建新簇
+    currentEntry.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.category}:C${clusterId}`
+    const seedSet = [...neighborFeatureIds];
+
+    for (let j = 0; j < seedSet.length; j++) {
+      const featureId = seedSet[j];
+      const neighborFeature = clusteredPolarViewFeatures.find( f => f.featureId === featureId)
+      if (!neighborFeature) return
+      // 如果之前是噪声，现在可归入当前簇
+      if(neighborFeature.clusterMarker === neighborFeature?.featureId) {
+        neighborFeature.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.category}:C${clusterId}`
+      }
+
+      // 如果尚未访问，加入当前簇
+      if (neighborFeature.clusterMarker === "PLACE_HOLDER") {
+        neighborFeature.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.category}:C${clusterId}`
+
+        const neighborFeatureIds = regionQuery(entries, neighborFeature.featureId, degreesThreshold)
+
+        // 若它也是核心点，则继续扩展
+        if (neighborFeatureIds.length >= clusterCntThrehold) {
+          for (const n of neighborFeatureIds) {
+            if (!seedSet.includes(n)) {
+              seedSet.push(n);
+            }
+          }
+        }
+      }
+    }
+
+    clusterId++;
+
+  })
+
+  return clusteredPolarViewFeatures;
+}
+
+/**
+ * 找到 featureId 所指向的 feature 的邻居内所有点的 featureId
+ * @param entries
+ * @param featureId
+ * @param degreesThreshold
+ * @returns
+ */
+function regionQuery(
+  entries: MarkedPolarViewFeature[],
+  featureId: string,
+  degreesThreshold: number,
+): string[] {
+  const feature =  entries.find( e => e.featureId === featureId)
+  if (!feature) return []
+  return entries.filter(e => {
+    return (
+      Math.abs(e.centerPoint.bearingDegrees - feature.centerPoint.bearingDegrees) < degreesThreshold ||
+      Math.abs(e.centerPoint.bearingDegrees - 360 - feature.centerPoint.bearingDegrees) < degreesThreshold ||
+      Math.abs(e.centerPoint.bearingDegrees + 360 - feature.centerPoint.bearingDegrees) < degreesThreshold
+    )
+  }).map(e => e.featureId)
+}
+
+//#region 帮助函数
+
+function toPolarCoordinateSample(
+  origin: [number, number],
+  coordinate: [number, number],
+): PolarCoordinateSample {
+  return {
+    coordinate,
+    distanceMeters: distanceBetweenCoordinates(origin, coordinate),
+    bearingDegrees: bearingBetweenCoordinates(origin, coordinate),
   };
 }
 
@@ -623,100 +718,6 @@ function projectCoordinateToMeters(coordinate: [number, number]): { x: number; y
     x: lon * metersPerDegreeLon,
     y: lat * metersPerDegreeLat,
   };
-}
-
-/**
- * 用简易版 DBSCAN 打上 cluster 标签
- * @param entries
- * @param degreesThreshold
- * @param clusterCntThrehold
- * @returns 打好标签的 entries
- */
-function splitEntriesIntoDirectionClusters(
-  entries: MarkedPolarViewFeature[],
-  degreesThreshold: number,
-  clusterCntThrehold: number,
-): MarkedPolarViewFeature[] {
-  if (entries.length <= 1) {
-    return entries;
-  }
-
-  const sortedEntries = [...entries].sort(
-    (left, right) => left.centerPoint.bearingDegrees - right.centerPoint.bearingDegrees,
-  );
-  let clusterId = 0
-  const clusteredPolarViewFeatures: MarkedPolarViewFeature[] = [];
-
-  sortedEntries.forEach( currentEntry => {
-    // 已访问就跳过
-    if (currentEntry.clusterMarker !== "PLACE_HOLDER") return
-
-    const neighborFeatureIds = regionQuery(entries, currentEntry.featureId, degreesThreshold)
-    // 如果邻居不足，先标记噪声
-    if (neighborFeatureIds.length < clusterCntThrehold) {
-      currentEntry.clusterMarker = currentEntry.featureId
-      clusteredPolarViewFeatures.push(currentEntry)
-      return;
-    }
-
-    // 创建新簇
-    currentEntry.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.category}:C${clusterId}`
-    const seedSet = [...neighborFeatureIds];
-
-    for (let j = 0; j < seedSet.length; j++) {
-      const featureId = seedSet[j];
-      const neighborFeature = clusteredPolarViewFeatures.find( f => f.featureId === featureId)
-      if (!neighborFeature) return
-      // 如果之前是噪声，现在可归入当前簇
-      if(neighborFeature.clusterMarker === neighborFeature?.featureId) {
-        neighborFeature.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.category}:C${clusterId}`
-      }
-
-      // 如果尚未访问，加入当前簇
-      if (neighborFeature.clusterMarker === "PLACE_HOLDER") {
-        neighborFeature.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.category}:C${clusterId}`
-
-        const neighborFeatureIds = regionQuery(entries, neighborFeature.featureId, degreesThreshold)
-
-        // 若它也是核心点，则继续扩展
-        if (neighborFeatureIds.length >= clusterCntThrehold) {
-          for (const n of neighborFeatureIds) {
-            if (!seedSet.includes(n)) {
-              seedSet.push(n);
-            }
-          }
-        }
-      }
-    }
-
-    clusterId++;
-
-  })
-
-  return clusteredPolarViewFeatures;
-}
-
-/**
- * 找到 featureId 所指向的 feature 的邻居内所有点的 featureId
- * @param entries
- * @param featureId
- * @param degreesThreshold
- * @returns
- */
-function regionQuery(
-  entries: MarkedPolarViewFeature[],
-  featureId: string,
-  degreesThreshold: number,
-): string[] {
-  const feature =  entries.find( e => e.featureId === featureId)
-  if (!feature) return []
-  return entries.filter(e => {
-    return (
-      Math.abs(e.centerPoint.bearingDegrees - feature.centerPoint.bearingDegrees) < degreesThreshold ||
-      Math.abs(e.centerPoint.bearingDegrees - 360 - feature.centerPoint.bearingDegrees) < degreesThreshold ||
-      Math.abs(e.centerPoint.bearingDegrees + 360 - feature.centerPoint.bearingDegrees) < degreesThreshold
-    )
-  }).map(e => e.featureId)
 }
 
 function computeCircularMeanDegrees(values: number[]): number {
