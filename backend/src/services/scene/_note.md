@@ -36,6 +36,15 @@
 
 `polarViewObject.ts` 出口的工具可以直接给定经纬度、范围与分档好的配置名，自动读取 relational DB 数据以及存储的配置，输出一个 FilteredPolarView
 
+## Polar View Filter
+
+这是加在 Polar View Object 上的的过滤器，来模拟视野看不到的情况。一共有两层
+1. 视野细节看不清的情况，靠望远镜等缓解
+2. 视野遮挡的情况，靠站在高处缓解
+
+遮挡情况是决定性的，如果被遮挡那么即使细节辨别能力极强也无法看到。
+此处假定如果一个地物非常高，不用站在高处也能看到，那么这个地物一定是显著的
+
 ## DEBUG API
 
 - `POST /api/debug/db/normalized-load`

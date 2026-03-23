@@ -69,6 +69,7 @@ const fetchMicroGridFromDbSqlPromise = loadServiceSql('osmRepository/fetchMicroG
  * 1. 生成 12x12 固定网格
  * 2. 用 cell center 判定 building/area 基底
  * 3. 用 cell bbox 收集 poi / road 叠加层
+ * TODO: 未来可能要添加根据视野朝向不同而转向的内容
  * @param request
  * @returns
  */

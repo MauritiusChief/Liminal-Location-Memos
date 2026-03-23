@@ -45,8 +45,8 @@ const POLAR_LEVELS: Array<{ level: 1 | 2 | 3; minExclusive: number; maxInclusive
 ];
 const DIRECTION_CLUSTER_THRESHOLD_DEGREES: Record<1 | 2 | 3, number> = {
   1: 5,
-  2: 10,
-  3: 15,
+  2: 5,
+  3: 5,
 };
 const DIRECTION_CLUSTER_THRESHOLD_COUNT: Record<1 | 2 | 3, number> = {
   1: 3,
@@ -87,12 +87,11 @@ export function applyLevelMarker(polarViewFeatures: PolarViewFeature[]): MarkedP
  */
 export function attachLabelBasedOnLevel(
   polarViewFeatures: MarkedPolarViewFeature[],
-  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
 ): MarkedPolarViewFeature[] {
   const labeled: MarkedPolarViewFeature[] = []
 
   for (const polarViewFeature of polarViewFeatures) {
-    const detail = featureDetails.get(polarViewFeature.featureId)
+    const detail = polarViewFeature.featureDetail
     if (!detail) continue
     // 这里已初步应用不同类型地物在不同 level 的呈现机制
     // 但仅限于 Prompt 中的固定规则

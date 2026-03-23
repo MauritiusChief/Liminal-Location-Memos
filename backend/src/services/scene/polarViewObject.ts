@@ -7,6 +7,7 @@ import {
   distanceBetweenCoordinates,
   normalizeBearingDegrees,
 } from "../geometry.js";
+import { SceneFeatureDetail } from "./sceneUtilFeatureDetail.js";
 
 /**
  * 与 SQL 查询结果表一致的扁平类型
@@ -43,7 +44,7 @@ interface PolarCoordinateSample {
   distanceMeters: number;
   bearingDegrees: number;
 }
-interface PolarAngularSpan {
+export interface PolarAngularSpan {
   clockwiseEarlyPoint: PolarCoordinateSample;
   clockwiseLatePoint: PolarCoordinateSample;
   angleWidthDegrees: number;
@@ -58,6 +59,7 @@ export interface PolarViewFeature {
   category: "building" | "area" | "poi" | "line";
   geometryType: string;
   osmType?: string;
+  featureDetail: SceneFeatureDetail;
   centerPoint: PolarCoordinateSample;
   widestSpan: PolarAngularSpan;
   nearestPoint: PolarCoordinateSample;
@@ -113,6 +115,7 @@ export async function fetchScenePolarFeaturesFromDb(
 export function buildPolarViewFeature(
   request: RangedPosition,
   polarViewFeatures: SampledPolarViewFeature[],
+  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
 ): PolarViewFeature[] {
   const origin: [number, number] = [request.lon, request.lat];
 
@@ -128,6 +131,7 @@ export function buildPolarViewFeature(
       polarViewFeature,
       samples,
       centerCoordinate,
+      featureDetails
     );
 
     if (!commonMetrics) {
@@ -177,6 +181,7 @@ function buildCommonPolarViewFeature(
   polarViewFeature: SampledPolarViewFeature,
   coordinates: [number, number][],
   centerCoordinate: [number, number],
+  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
 ): PolarViewFeature | null {
   if (coordinates.length === 0) {
     return null;
@@ -190,12 +195,19 @@ function buildCommonPolarViewFeature(
     return null;
   }
 
+  const id = polarViewFeature.featureId
+  const detail = featureDetails.get(id)
+  if (!detail) {
+    return null
+  }
+
   return {
-    featureId: polarViewFeature.featureId,
+    featureId: id,
     osmId: polarViewFeature.osmId,
     category: polarViewFeature.category,
     geometryType: polarViewFeature.geometryType,
     osmType: polarViewFeature.osmType,
+    featureDetail: detail,
     centerPoint: toPolarCoordinateSample(origin, centerCoordinate),
     widestSpan: computeWidestSpan(polarViewFeature.geometryType, samples),
     nearestPoint,
