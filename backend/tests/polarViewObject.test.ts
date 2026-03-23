@@ -11,11 +11,13 @@ jest.mock("@/db/sqlLoader.js", () => ({
 jest.mock("@/routes/apiTypes.js", () => ({}), { virtual: true });
 
 import {
-  applyPolarViewFeatureMarkder,
-  buildMatricedPolarViewFeature,
-  buildPolarView,
   type SampledPolarViewFeature,
+  buildPolarViewFeature
 } from "../src/services/scene/polarViewObject";
+import {
+  applyPolarViewFeatureMarkder,
+  buildPolarView,
+} from "../src/services/scene/polarViewLabeled";
 
 function buildTestRequest() {
   return {
@@ -64,7 +66,7 @@ describe("polarViewObject metrics", () => {
       },
     ];
 
-    const metriced = buildMatricedPolarViewFeature(buildTestRequest(), features);
+    const metriced = buildPolarViewFeature(buildTestRequest(), features);
 
     expect(metriced).toHaveLength(2);
 
@@ -97,7 +99,7 @@ describe("polarViewObject metrics", () => {
   });
 
   it("keeps level and cluster assembly stable for mixed feature categories", () => {
-    const metriced = buildMatricedPolarViewFeature(buildTestRequest(), [
+    const metriced = buildPolarViewFeature(buildTestRequest(), [
       {
         featureId: "building/2",
         osmId: 4,
@@ -138,7 +140,7 @@ describe("polarViewObject metrics", () => {
   });
 
   it("builds line metrics from sampleCoordinates after deduping consecutive points", () => {
-    const metriced = buildMatricedPolarViewFeature(buildTestRequest(), [
+    const metriced = buildPolarViewFeature(buildTestRequest(), [
       {
         featureId: "line/3",
         osmId: 6,

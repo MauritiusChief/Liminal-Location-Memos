@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildDescriptionIndex } from './gameDescriptionIndex.js';
-import { distanceBetweenCoordinates } from './overpassGeometry.js';
+import { distanceBetweenCoordinates } from './geometry.js';
 import type {
   ActiveLevelSchema,
   BuildingSchema,

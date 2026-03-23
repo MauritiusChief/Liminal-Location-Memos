@@ -55,3 +55,18 @@ function degreesToRadians(degrees: number): number {
 function radiansToDegrees(radians: number): number {
   return (radians * 180) / Math.PI;
 }
+
+export function computeCircularMeanDegrees(values: number[]): number {
+  const { sinSum, cosSum } = values.reduce(
+    (accumulator, value) => {
+      const radians = (value * Math.PI) / 180;
+      return {
+        sinSum: accumulator.sinSum + Math.sin(radians),
+        cosSum: accumulator.cosSum + Math.cos(radians),
+      };
+    },
+    { sinSum: 0, cosSum: 0 },
+  );
+  const radians = Math.atan2(sinSum, cosSum);
+  return normalizeBearingDegrees((radians * 180) / Math.PI);
+}
