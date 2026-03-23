@@ -1,4 +1,4 @@
-import { AREA_PRIMARY_LABEL_KEYS, BUILDING_PRIMARY_LABEL_KEYS, LINE_PRIMARY_LABEL_KEYS, POI_PRIMARY_LABEL_KEYS, POI_STRUCTURED_TAG_KEYS } from "@/services/osmNormalization/osmFeatureConfig.js";
+import { AREA_PRIMARY_LABEL_KEYS, BUILDING_PRIMARY_LABEL_KEYS, LINE_PRIMARY_LABEL_KEYS, POI_PRIMARY_LABEL_KEYS } from "@/services/osmNormalization/osmFeatureConfig.js";
 import { MicroGrid, MicroGridCell } from "./microGridObject.js";
 import { SceneFeatureDetail } from "./sceneUtilFeatureDetail.js";
 import { buildBuildingBaseLabel, getAreaDisplayLabel, getPoiDisplayLabel, getRoadDisplayLabel, trimTagValue } from "./sceneUtilLabel.js";
@@ -131,7 +131,10 @@ function buildGridDetailEntries(cells: MicroGridCell[][]): string[] {
 
 
 function buildFeatureDetailEntry(feature: SceneFeatureDetail): string {
-  const detailTags = collectImportantTags(feature);
+  const detailTags = Object.keys(feature.tags).map( key => {
+    const value = trimTagValue(feature.tags[key]);
+    return `${key}: ${value}`}
+  );
   const lines = [`${getFeatureDisplayTitle(feature)} (id=${feature.featureId}):`];
 
   if (detailTags.length > 0) {
@@ -144,10 +147,6 @@ function buildFeatureDetailEntry(feature: SceneFeatureDetail): string {
 }
 
 //#region 辅助填标签函数
-
-const BUILDING_AND_POI_TAG_KEYS = ['name', 'brand', ...POI_STRUCTURED_TAG_KEYS, ...BUILDING_PRIMARY_LABEL_KEYS] as const;
-const LINE_DETAIL_TAG_KEYS = ['name', ...LINE_PRIMARY_LABEL_KEYS] as const;
-const AREA_DETAIL_TAG_KEYS = ['name', ...AREA_PRIMARY_LABEL_KEYS] as const;
 
 function getFeatureDisplayTitle(feature: SceneFeatureDetail): string {
   const name = trimTagValue(feature.tags.name);
@@ -169,18 +168,4 @@ function getFeatureDisplayTitle(feature: SceneFeatureDetail): string {
   }
 
   return feature.featureId;
-}
-
-function collectImportantTags(feature: SceneFeatureDetail): string[] {
-  const keys =
-    feature.category === 'building' || feature.category === 'poi'
-      ? BUILDING_AND_POI_TAG_KEYS
-      : feature.category === 'line'
-        ? LINE_DETAIL_TAG_KEYS
-        : AREA_DETAIL_TAG_KEYS;
-
-  return keys.flatMap((key) => {
-    const value = trimTagValue(feature.tags[key]);
-    return value ? [`${key}: ${value}`] : [];
-  });
 }
