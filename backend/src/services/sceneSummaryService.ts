@@ -3,7 +3,6 @@ import { type NormalizedOverpassRequest } from './overpassNormalization.js';
 import { buildNormalizedPolarView } from './overpassPolar.js';
 import { buildNormalizationPrompt, type PromptSummaryMode } from './overpassPrompt.js';
 import {
-  fetchScenePolarFeaturesFromDb,
   type SceneDataProfile,
 } from './osmRepository.js';
 import type {
@@ -13,6 +12,7 @@ import type {
 import { buildLabeledMicroGrid } from './scene/microGridPrompt.js';
 import { fetchSceneFeatureDetailsFromDb } from './scene/sceneUtilFeatureDetail.js';
 import { buildMicroGrid, fetchMicroGridFromDb } from './scene/microGridObject.js';
+import { fetchScenePolarFeaturesFromDb } from './scene/polarViewObject.js';
 
 export const SUMMARY_PREVIEW_MODE_CONFIG = {
   detailed_far_1000: { radius: 1000, promptSummaryMode: 'detailed' },
