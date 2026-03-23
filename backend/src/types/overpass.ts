@@ -3,7 +3,6 @@ import type {
   DbNormalizationDiagnostics,
   SceneFeatureDetail,
 } from '../services/sceneTypes.js';
-import type { NormalizedMicroGrid, NormalizedMicroGridCell } from '../services/overpassGrid.js';
 import type { SummaryPreviewStyle } from '../services/sceneSummaryService.js';
 import type {
   NormalizedPolarFeatureSummary,
@@ -22,6 +21,7 @@ import type {
   RelationReference,
 } from '../services/overpassNormalization.js';
 import { NormalizedFeatureCollection } from '@/services/osmNormalization/osmNormalizer.js';
+import { LabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
 
 export interface OverpassResponse {
   data: unknown;
@@ -38,7 +38,7 @@ export interface NormalizedOverpassResponseBody {
   query: string;
   geojson: NormalizedFeatureCollection;
   diagnostics: NormalizationDiagnostics;
-  microGrid?: NormalizedMicroGrid;
+  microGrid?: LabeledMicroGrid;
   polarView?: NormalizedPolarView;
   raw?: unknown;
 }
@@ -47,7 +47,7 @@ export interface DbDebugLoadResponseBody {
   query: string;
   diagnostics: DbNormalizationDiagnostics;
   featureSummary: SceneFeatureDetail[];
-  microGrid?: NormalizedMicroGrid;
+  microGrid?: LabeledMicroGrid;
   polarView?: NormalizedPolarView;
 }
 
@@ -68,8 +68,6 @@ export type {
   ContainedPoi,
   DbFeatureCategory,
   DbNormalizationDiagnostics,
-  NormalizedMicroGrid,
-  NormalizedMicroGridCell,
   NormalizedPolarFeatureSummary,
   NormalizedPolarLevel,
   NormalizedPolarView,

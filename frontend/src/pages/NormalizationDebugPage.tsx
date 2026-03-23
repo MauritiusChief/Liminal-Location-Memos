@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { PolarFanChart } from '../components/PolarFanChart';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
 import type {
-  NormalizedMicroGridCell,
+  LabeledMicroGridCell,
   PolarFeatureCategory,
   NormalizedPolarFeatureSummary,
   NormalizedPolarLevel,
@@ -29,7 +29,7 @@ type PolarDisplayRange = 1000 | 300 | 100;
 export function NormalizationDebugPage() {
   const dispatch = useAppDispatch();
   const { form, syncRequest, dbLoadRequest } = useAppSelector(selectNormalizationDebugState);
-  const [selectedGridCell, setSelectedGridCell] = useState<NormalizedMicroGridCell | null>(null);
+  const [selectedGridCell, setSelectedGridCell] = useState<LabeledMicroGridCell | null>(null);
   const [selectedPolarFeature, setSelectedPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
   const [hoveredPolarFeature, setHoveredPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
   const [selectedPolarLevel, setSelectedPolarLevel] = useState<'all' | 1 | 2 | 3>('all');

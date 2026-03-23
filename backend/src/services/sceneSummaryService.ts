@@ -1,10 +1,8 @@
-import { buildNormalizedMicroGrid } from './overpassGrid.js';
+
 import { type NormalizedOverpassRequest } from './overpassNormalization.js';
 import { buildNormalizedPolarView } from './overpassPolar.js';
 import { buildNormalizationPrompt, type PromptSummaryMode } from './overpassPrompt.js';
 import {
-  fetchSceneFeatureDetailsFromDb,
-  fetchMicroGridFromDb,
   fetchScenePolarFeaturesFromDb,
   type SceneDataProfile,
 } from './osmRepository.js';
@@ -12,6 +10,9 @@ import type {
   DbNormalizationDiagnostics,
   SceneFeatureDetail,
 } from './sceneTypes.js';
+import { buildLabeledMicroGrid } from './scene/microGridPrompt.js';
+import { fetchSceneFeatureDetailsFromDb } from './scene/sceneObject.js';
+import { buildMicroGrid, fetchMicroGridFromDb } from './scene/microGridObject.js';
 
 export const SUMMARY_PREVIEW_MODE_CONFIG = {
   detailed_far_1000: { radius: 1000, promptSummaryMode: 'detailed' },
@@ -41,7 +42,7 @@ export interface ProjectedScene<TFeatureDetail extends SceneFeatureDetail> {
   diagnostics: DbNormalizationDiagnostics;
   featureDetails: TFeatureDetail[];
   featureDetailIndex: Map<string, TFeatureDetail>;
-  microGrid: ReturnType<typeof buildNormalizedMicroGrid>;
+  microGrid: ReturnType<typeof buildLabeledMicroGrid>;
   polarView: ReturnType<typeof buildNormalizedPolarView>;
 }
 
@@ -56,7 +57,7 @@ function buildFeatureDetailIndex<TFeatureDetail extends SceneFeatureDetail>(feat
 
 function buildDbDiagnostics(input: {
   featureDetails: SceneFeatureDetail[];
-  microGrid: ReturnType<typeof buildNormalizedMicroGrid>;
+  microGrid: ReturnType<typeof buildLabeledMicroGrid>;
   polarView: ReturnType<typeof buildNormalizedPolarView>;
 }): DbNormalizationDiagnostics {
   const featureCountsByCategory = input.featureDetails.reduce<Record<'building' | 'poi' | 'line' | 'area', number>>(
@@ -70,7 +71,7 @@ function buildDbDiagnostics(input: {
   return {
     featureCountsByCategory,
     totalFeatures: input.featureDetails.length,
-    populatedMicroGridCellCount: input.microGrid.enabled
+    populatedMicroGridCellCount: true // TODO 兼容性填充虚拟值
       ? input.microGrid.cells.flat().filter((cell) => cell.sourceFeatureIds.length > 0).length
       : 0,
     polarFeatureCount: input.polarView.levels.reduce((count, level) => count + level.features.length, 0),
@@ -91,11 +92,11 @@ export async function loadProjectedScene(
     fetchScenePolarFeaturesFromDb(request, profile),
   ]);
   const featureDetailIndex = buildFeatureDetailIndex(featureDetails);
-  const microGrid = buildNormalizedMicroGrid({
+  const microGrid = buildLabeledMicroGrid(buildMicroGrid(
     request,
-    cells: microGridRecords,
-    featureDetails: featureDetailIndex,
-  });
+    microGridRecords,
+    featureDetailIndex,
+  ));
   const polarView = buildNormalizedPolarView({
     records: polarRecords,
     featureDetails: featureDetailIndex,

@@ -23,18 +23,6 @@ export interface SceneFeatureDetail {
   containedPois?: ContainedPoiString[] | ContainedPoiReference[];
 }
 
-// Micro grid 在 SQL 里已经完成了“这个格子命中了谁”的空间判断；
-// TS 这里只负责把记录格式化成最终展示结构。
-export interface DbMicroGridCellRecord {
-  row: number;
-  col: number;
-  center: [number, number];
-  baseKind: 'building' | 'area' | 'empty';
-  baseFeatureId: string | null;
-  poiFeatureIds: string[];
-  roadFeatureIds: string[];
-}
-
 // Polar 记录保留“用于叙述的坐标样本”和一个中心候选点，
 // bearing / widest span / 方向聚类仍在 TS 中完成。
 export interface PolarFeatureRecord {

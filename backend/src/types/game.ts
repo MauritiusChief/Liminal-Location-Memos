@@ -1,10 +1,10 @@
 import type { DbNormalizationDiagnostics } from '../services/sceneTypes.js';
-import type { NormalizedMicroGrid } from '../services/overpassGrid.js';
 import type { NormalizedPolarView } from '../services/overpassPolar.js';
 import type {
   SceneContextSummaryMode,
 } from '../services/sceneSummaryService.js';
 import { ContainedPoiReference, RelationReference } from '@/services/osmNormalization/osmNormalizer.js';
+import { LabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
 
 export type { SceneContextSummaryMode } from '../services/sceneSummaryService.js';
 
@@ -171,7 +171,7 @@ export interface SceneContext {
   position: GamePosition;
   radius: number;
   diagnostics: DbNormalizationDiagnostics;
-  microGrid?: NormalizedMicroGrid;
+  microGrid?: LabeledMicroGrid;
   polarView?: NormalizedPolarView;
 }
 

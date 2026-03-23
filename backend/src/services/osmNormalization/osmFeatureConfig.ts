@@ -77,13 +77,22 @@ export const OSM_FEATURE_CATEGORY_CONFIG: Record<OsmFeatureCategory, CategoryCon
   },
 };
 
-// 给入库层提供“结构化 tag 列白名单”，剩余字段会落入 tags_extra。
+/**
+ * 给入库层提供“结构化 tag 列白名单”，剩余字段会落入 tags_extra。
+ * @param category OSM 地物四大类别之一
+ * @returns
+ */
 export function getStructuredTagColumns(category: OsmFeatureCategory): readonly string[] {
   return OSM_FEATURE_CATEGORY_CONFIG[category].structuredTagKeys;
 }
 
-// 分类命中规则：先过几何族（点/线/面），再检查分类相关 tag 是否存在字符串值。
-// 该函数被 matchFeatureCategory 调用，最终用于 syncNormalizedFeaturesToDb 的分表 upsert。
+/**
+ * 分类命中规则：先过几何族（点/线/面），再检查分类相关 tag 是否存在字符串值。
+ * 该函数被 matchFeatureCategory 调用，最终用于 syncNormalizedFeaturesToDb 的分表 upsert。
+ * @param category
+ * @param feature
+ * @returns
+ */
 export function categoryMatchesFeature(
   category: OsmFeatureCategory,
   feature: Pick<NormalizedFeature, 'geometry' | 'properties'>,
@@ -100,7 +109,11 @@ export function categoryMatchesFeature(
   return relevantKeys.some((key) => typeof feature.properties.tags[key] === 'string');
 }
 
-// 对单个规整化地物做类别决策；返回 null 表示当前规则无法归类（将被上游忽略）。
+/**
+ * 对单个规整化地物做类别决策；返回 null 表示当前规则无法归类（将被上游忽略）。
+ * @param feature
+ * @returns
+ */
 export function matchFeatureCategory(feature: NormalizedFeature): OsmFeatureCategory | null {
   return OSM_DB_CATEGORY_PRIORITY.find((category) => categoryMatchesFeature(category, feature)) || null;
 }

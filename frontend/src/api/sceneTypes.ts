@@ -20,7 +20,7 @@ export interface ContainedPoi {
 
 export type MicroGridCellKind = 'building' | 'area' | 'empty';
 
-export interface NormalizedMicroGridCell {
+export interface LabeledMicroGridCell {
   row: number;
   col: number;
   center: [number, number];
@@ -32,7 +32,7 @@ export interface NormalizedMicroGridCell {
   sourceFeatureIds: string[];
 }
 
-export interface NormalizedMicroGrid {
+export interface LabeledMicroGrid {
   enabled: boolean;
   reason?: 'radius_too_small';
   center: {
@@ -43,7 +43,7 @@ export interface NormalizedMicroGrid {
   cellSizeMeters: 5;
   rows: 12;
   cols: 12;
-  cells: NormalizedMicroGridCell[][];
+  cells: LabeledMicroGridCell[][];
 }
 
 export interface PolarCoordinateSample {
@@ -169,7 +169,7 @@ export interface NormalizedOverpassResponse {
   query: string;
   geojson: NormalizedFeatureCollection;
   diagnostics: NormalizationDiagnostics;
-  microGrid?: NormalizedMicroGrid;
+  microGrid?: LabeledMicroGrid;
   polarView?: NormalizedPolarView;
   raw?: unknown;
 }
@@ -203,7 +203,7 @@ export interface SceneLoadResponse {
   query: string;
   diagnostics: DbNormalizationDiagnostics;
   featureSummary: DbFeatureSummary[];
-  microGrid?: NormalizedMicroGrid;
+  microGrid?: LabeledMicroGrid;
   polarView?: NormalizedPolarView;
 }
 

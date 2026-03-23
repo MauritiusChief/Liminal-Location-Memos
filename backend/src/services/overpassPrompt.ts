@@ -1,5 +1,5 @@
-import type { NormalizedMicroGrid } from './overpassGrid.js';
 import type { NormalizedPolarFeatureSummary, NormalizedPolarView } from './overpassPolar.js';
+import { LabeledMicroGrid } from './scene/microGridPrompt.js';
 
 export type PromptSummaryMode = 'detailed' | 'concise';
 
@@ -47,7 +47,7 @@ const CONCISE_DENSE_MEMBER_COUNT_BY_CATEGORY_AND_LEVEL: Record<
 export function buildNormalizationPrompt(input: {
   request: { lat: number; lon: number; radius: number };
   summaryMode?: PromptSummaryMode;
-  microGrid?: NormalizedMicroGrid;
+  microGrid?: LabeledMicroGrid;
   polarView?: NormalizedPolarView;
 }): string {
   const sections = [
@@ -76,8 +76,8 @@ function buildPromptIntro(request: { lat: number; lon: number; radius: number })
   ].join('\n');
 }
 
-function buildGridSection(microGrid: NormalizedMicroGrid | undefined): string {
-  if (!microGrid || !microGrid.enabled) {
+function buildGridSection(microGrid: LabeledMicroGrid | undefined): string {
+  if (!microGrid) {
     return '## 等级0（30米内微网格）：半径不足，未生成微网格。';
   }
 

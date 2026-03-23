@@ -3,10 +3,7 @@ import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
 import type { SceneFeatureDetail } from '../services/sceneTypes.js';
 import { generateReplyWithSystemPrompt } from '../services/llm.js';
-import { buildNormalizedMicroGrid } from '../services/overpassGrid.js';
 import {
-  fetchMicroGridFromDb,
-  fetchSceneFeatureDetailsFromDb,
   fetchScenePolarFeaturesFromDb,
 } from '../services/osmRepository.js';
 import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
@@ -20,6 +17,9 @@ import {
 } from '../services/sceneSummaryService.js';
 import type { GameChatRequest } from '../types/game.js';
 import type { NormalizedOverpassRequestBody, SummaryPreviewRequestBody } from '../types/overpass.js';
+import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
+import { buildLabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
+import { fetchSceneFeatureDetailsFromDb } from '@/services/scene/sceneObject.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -34,7 +34,7 @@ export const apiRouter = Router();
 
 function buildDbDiagnostics(input: {
   featureDetails: SceneFeatureDetail[];
-  microGrid: ReturnType<typeof buildNormalizedMicroGrid>;
+  microGrid: ReturnType<typeof buildLabeledMicroGrid>;
   polarView: ReturnType<typeof buildNormalizedPolarView>;
 }) {
   // 新 diagnostics 改为围绕“DB-native 投影结果”统计，
@@ -50,7 +50,7 @@ function buildDbDiagnostics(input: {
   return {
     featureCountsByCategory,
     totalFeatures: input.featureDetails.length,
-    populatedMicroGridCellCount: input.microGrid.enabled
+    populatedMicroGridCellCount: true // TODO 为了兼容性填充虚拟值
       ? input.microGrid.cells.flat().filter((cell) => cell.sourceFeatureIds.length > 0).length
       : 0,
     polarFeatureCount: input.polarView.levels.reduce((count, level) => count + level.features.length, 0),
@@ -71,11 +71,11 @@ function buildNormalizationDebugPayload(input: {
   const featureDetailIndex = buildDebugSceneFeatureDetailIndex(input.featureDetails);
   // 这里是 DB-native 调试链路的汇合点：
   // repository 提供三份投影原料，service 层再分别拼出 grid / polar / prompt。
-  const microGrid = buildNormalizedMicroGrid({
-    request: input.normalizedRequest,
-    cells: input.microGridRecords,
-    featureDetails: featureDetailIndex,
-  });
+  const microGrid = buildLabeledMicroGrid(buildMicroGrid(
+    input.normalizedRequest,
+    input.microGridRecords,
+    featureDetailIndex,
+  ));
   const polarView = buildNormalizedPolarView({
     records: input.polarRecords,
     featureDetails: featureDetailIndex,

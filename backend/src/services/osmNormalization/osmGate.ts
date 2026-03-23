@@ -1,6 +1,6 @@
 import { debugSyncOverpassRespond } from "@/routes/apiTypes.js";
 import { overpassJson } from "overpass-ts";
-import { convertOverpassToNormalizedFeatures, NormalizedFeature } from "./osmNormalizer.js";
+import { convertOverpassToNormalizedFeatures } from "./osmNormalizer.js";
 import { syncNormalizedFeaturesToDb } from "./osmNormalizedToDb.js";
 
 /**

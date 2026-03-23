@@ -11,7 +11,6 @@ import type {
   DbFeatureCategory,
   SceneFeatureDetail,
   PolarFeatureRecord,
-  DbMicroGridCellRecord,
 } from './sceneTypes.js';
 import { getStructuredTagColumns, matchFeatureCategory } from '@/services/osmNormalization/osmFeatureConfig.js';
 import type { AreaSummary, BuildingSummary, GamePosition, LineSummary } from '../types/game.js';
@@ -30,28 +29,7 @@ type BuildingRow = {
   contained_pois: ContainedPoiReference[] | null;
 };
 
-type FeatureDetailRow = {
-  feature_id: string;
-  osm_type: string;
-  osm_id: number;
-  category: DbFeatureCategory;
-  geometry_type: string;
-  tags: Record<string, string>;
-  relations: RelationReference[];
-  meta: Record<string, string | number>;
-  tainted: boolean;
-};
 
-type MicroGridCellRow = {
-  row: number;
-  col: number;
-  center_lon: number;
-  center_lat: number;
-  base_kind: 'building' | 'area' | 'empty';
-  base_feature_id: string | null;
-  poi_feature_ids: string[] | null;
-  road_feature_ids: string[] | null;
-};
 
 type PolarFeatureRow = {
   feature_id: string;
@@ -84,89 +62,17 @@ type LineNearPositionRow = {
   tags: Record<string, string>;
 };
 
-const fetchMicroGridFromDbSqlPromise = loadServiceSql('osmRepository/fetchMicroGridFromDb.sql');
 const fetchScenePolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fetchScenePolarFeaturesFromDb.sql');
-const fetchSceneBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneBuildingDetails.sql');
-const fetchSceneNonBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneNonBuildingDetails.sql');
+
 const findBuildingsAtPositionSqlPromise = loadServiceSql('osmRepository/findBuildingAtPosition.sql');
 const findAreasAtPositionSqlPromise = loadServiceSql('osmRepository/findAreasAtPosition.sql');
 const findNearbyLinesAtPositionSqlPromise = loadServiceSql('osmRepository/findNearbyLinesAtPosition.sql');
 
 export type SceneDataProfile = 'debug' | 'game';
 
-/**
- * 这个函数把“后续文案与调试真正会消费的要素字段”统一取回。
- * 建筑单独走一条查询，是为了顺手把 containedPois 一并在 SQL 里算好。
- * @param request
- * @param _profile 暂时没用，未来可区分 debug 模式和常规模式的 SQL
- * @returns
- */
-export async function fetchSceneFeatureDetailsFromDb(
-  request: RangedPosition,
-  _profile: SceneDataProfile = 'debug',
-): Promise<SceneFeatureDetail[]> {
-  const [buildingRows, otherRows] = await Promise.all([
-    fetchBuildingDetails(request),
-    fetchNonBuildingDetails(request),
-  ]);
 
-  return [
-    ...buildingRows.map((row) => ({
-      featureId: row.feature_id,
-      osmType: row.osm_type,
-      osmId: row.osm_id,
-      category: 'building' as const,
-      geometryType: row.geometry_type,
-      tags: row.tags || {},
-      relations: row.relations || [],
-      outlineReferences: row.outline_references || [],
-      meta: row.meta || {},
-      tainted: row.tainted ?? false,
-      containedPois: row.contained_pois && row.contained_pois.length > 0 ? row.contained_pois : undefined,
-    })),
-    ...otherRows.map((row) => ({
-      featureId: row.feature_id,
-      osmType: row.osm_type,
-      osmId: row.osm_id,
-      category: row.category,
-      geometryType: row.geometry_type,
-      tags: row.tags || {},
-      relations: row.relations || [],
-      meta: row.meta || {},
-      tainted: row.tainted ?? false,
-    })),
-  ];
-}
 
-/**
- * grid 的空间命中全部下沉到 PostGIS：
- * 1. 生成 12x12 固定网格
- * 2. 用 cell center 判定 building/area 基底
- * 3. 用 cell bbox 收集 poi / road 叠加层
- * @param request
- * @returns
- */
-export async function fetchMicroGridFromDb(request: RangedPosition): Promise<DbMicroGridCellRecord[]> {
-  if (request.radius <= 50) {
-    return [];
-  }
 
-  const sql = await fetchMicroGridFromDbSqlPromise;
-  const result = await query<MicroGridCellRow>(
-    sql,
-    [request.lon, request.lat],
-  );
-
-  return result.rows.map((row) => ({
-    row: row.row,
-    col: row.col,
-    center: [row.center_lon, row.center_lat],
-    baseKind: row.base_kind,
-    baseFeatureId: row.base_feature_id,
-    poiFeatureIds: row.poi_feature_ids || [],
-    roadFeatureIds: row.road_feature_ids || [],
-  }));
-}
 
 /**
  * polar 的 DB 查询只做“取候选 + 裁剪几何 + 导出坐标样本”。
@@ -263,36 +169,4 @@ export async function findNearbyLinesAtPosition(position: GamePosition): Promise
     lineId: row.line_id,
     tags: row.tags || {},
   }));
-}
-
-/**
- * 这里取的是“建筑详情 + 建筑内 POI”，供标签、grid 补充细节、prompt 共用。
- * 注：为了兼容 debug 模式，SQL 所取的信息是超量的。
- * @param request
- * @returns
- */
-async function fetchBuildingDetails(request: RangedPosition): Promise<BuildingRow[]> {
-  const sql = await fetchSceneBuildingDetailsSqlPromise;
-  const result = await query<BuildingRow>(
-    sql,
-    [request.lon, request.lat, request.radius],
-  );
-
-  return result.rows;
-}
-
-/**
- *  非 building 的详情直接从调试视图取，避免在 TS 里重复拼 tags。
- * 注：为了兼容 debug 模式，SQL 所取的信息是超量的。
- * @param request
- * @returns
- */
-async function fetchNonBuildingDetails(request: RangedPosition): Promise<FeatureDetailRow[]> {
-  const sql = await fetchSceneNonBuildingDetailsSqlPromise;
-  const result = await query<FeatureDetailRow>(
-    sql,
-    [request.lon, request.lat, request.radius],
-  );
-
-  return result.rows;
 }
