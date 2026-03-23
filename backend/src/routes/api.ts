@@ -18,7 +18,7 @@ import {
 import type { GameChatRequest } from '../types/game.js';
 import type { NormalizedOverpassRequestBody, SummaryPreviewRequestBody } from '../types/overpass.js';
 import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
-import { buildLabeledMicroGrid } from '@/services/scene/microGridLabeled.js';
+import { buildLabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
 import { fetchSceneFeatureDetailsFromDb } from '@/services/scene/sceneUtilFeatureDetail.js';
 
 interface DebugLlmRequestBody {

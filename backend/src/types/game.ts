@@ -4,7 +4,7 @@ import type {
   SceneContextSummaryMode,
 } from '../services/sceneSummaryService.js';
 import { ContainedPoiReference, RelationReference } from '@/services/osmNormalization/osmNormalizer.js';
-import { LabeledMicroGrid } from '@/services/scene/microGridLabeled.js';
+import { LabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
 
 export type { SceneContextSummaryMode } from '../services/sceneSummaryService.js';
 

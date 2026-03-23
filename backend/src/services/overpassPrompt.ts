@@ -1,5 +1,5 @@
 import type { NormalizedPolarFeatureSummary, NormalizedPolarView } from './overpassPolar.js';
-import { LabeledMicroGrid } from './scene/microGridLabeled.js';
+import { LabeledMicroGrid } from './scene/microGridPrompt.js';
 
 export type PromptSummaryMode = 'detailed' | 'concise';
 
