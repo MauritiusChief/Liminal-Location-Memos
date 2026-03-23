@@ -62,8 +62,6 @@ type LineNearPositionRow = {
   tags: Record<string, string>;
 };
 
-const fetchScenePolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fetchScenePolarFeaturesFromDb.sql');
-
 const findBuildingsAtPositionSqlPromise = loadServiceSql('osmRepository/findBuildingAtPosition.sql');
 const findAreasAtPositionSqlPromise = loadServiceSql('osmRepository/findAreasAtPosition.sql');
 const findNearbyLinesAtPositionSqlPromise = loadServiceSql('osmRepository/findNearbyLinesAtPosition.sql');
@@ -74,46 +72,7 @@ export type SceneDataProfile = 'debug' | 'game';
 
 
 
-/**
- * polar 的 DB 查询只做“取候选 + 裁剪几何 + 导出坐标样本”。
- * bearing、群聚、视野角宽这类叙述性压缩继续保留在 TS，便于调参和阅读。
- * @param request
- * @param _profile 暂时没用，未来可区分 debug 模式和常规模式的 SQL
- * @returns
- */
-export async function fetchScenePolarFeaturesFromDb(
-  request: RangedPosition,
-  _profile: SceneDataProfile = 'debug',
-): Promise<PolarFeatureRecord[]> {
-  const radiusMeters = Math.min(request.radius, 1000);
-  if (radiusMeters <= 30) {
-    return [];
-  }
 
-  const sql = await fetchScenePolarFeaturesFromDbSqlPromise;
-  const result = await query<PolarFeatureRow>(
-    sql,
-    [request.lon, request.lat, radiusMeters],
-  );
-
-  return result.rows.map((row) => ({
-    featureId: row.feature_id,
-    osmType: row.osm_type || undefined,
-    osmId: row.osm_id,
-    category: row.category,
-    geometryType: row.geometry_type,
-    sampleCoordinates: (row.sample_coordinates || []).map((pair) => [Number(pair[0]), Number(pair[1])]),
-    centerCoordinate: row.center_coordinate
-      ? [Number(row.center_coordinate[0]), Number(row.center_coordinate[1])]
-      : null,
-    linePathCoordinates: row.line_path_coordinates
-      ? row.line_path_coordinates.map((pair) => [Number(pair[0]), Number(pair[1])])
-      : undefined,
-    lineVertexCoordinates: row.line_vertex_coordinates
-      ? row.line_vertex_coordinates.map((pair) => [Number(pair[0]), Number(pair[1])])
-      : undefined,
-  }));
-}
 
 export async function findNearestCoverageDistanceMeters(position: GamePosition): Promise<number | null> {
   const result = await query<{ distance_meters: number | null }>(

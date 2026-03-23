@@ -15,12 +15,7 @@ import {
   circularAngleDeltaDegrees,
   distanceBetweenCoordinates,
 } from './overpassGeometry.js';
-import {
-  buildBuildingBaseLabel,
-  getFallbackBuildingLikeLabel,
-  getPrimaryLabel,
-  trimTagValue,
-} from './overpassLabels.js';
+import { buildBuildingBaseLabel, getFallbackBuildingLikeLabel, getPrimaryLabel, trimTagValue } from './scene/sceneUtilLabel.js';
 
 export type PolarFeatureCategory = 'building' | 'poi' | 'line' | 'area';
 

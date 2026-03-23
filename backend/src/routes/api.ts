@@ -3,9 +3,6 @@ import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
 import type { SceneFeatureDetail } from '../services/sceneTypes.js';
 import { generateReplyWithSystemPrompt } from '../services/llm.js';
-import {
-  fetchScenePolarFeaturesFromDb,
-} from '../services/osmRepository.js';
 import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
 import { buildNormalizedPolarView } from '../services/overpassPolar.js';
 import { buildDefaultDebugSystemPrompt } from '../services/overpassPrompt.js';
@@ -20,6 +17,7 @@ import type { NormalizedOverpassRequestBody, SummaryPreviewRequestBody } from '.
 import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
 import { buildLabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
 import { fetchSceneFeatureDetailsFromDb } from '@/services/scene/sceneUtilFeatureDetail.js';
+import { fetchScenePolarFeaturesFromDb } from '@/services/scene/polarViewObject.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
