@@ -117,16 +117,17 @@ function buildCellLabel(
 }
 
 function buildGridDetailEntries(cells: MicroGridCell[][]): string[] {
-  const flatFeatureDetails: (SceneFeatureDetail|null)[] = []
+  const featureDetailIndex = new Map<string, SceneFeatureDetail | null>()
   cells.forEach( row  => row.forEach(
     cell => {
-      cell.poiFeatureDetails.forEach( d => flatFeatureDetails.push(d))
-      cell.roadFeatureDetails.forEach( d => flatFeatureDetails.push(d))
-      flatFeatureDetails.push(cell.baseFeatureDetail)
+      cell.poiFeatureDetails.forEach( d => featureDetailIndex.set(d.featureId, d))
+      cell.roadFeatureDetails.forEach( d => featureDetailIndex.set(d.featureId, d))
+      if (!cell.baseFeatureDetail) return
+      featureDetailIndex.set(cell.baseFeatureDetail.featureId, cell.baseFeatureDetail)
     }
   ))
 
-  return flatFeatureDetails.filter(d => d !== null).map(detail => buildFeatureDetailEntry(detail))
+  return [...featureDetailIndex.values()].filter(d => d !== null).map(detail => buildFeatureDetailEntry(detail))
 }
 
 
@@ -139,8 +140,6 @@ function buildFeatureDetailEntry(feature: SceneFeatureDetail): string {
 
   if (detailTags.length > 0) {
     lines.push(...detailTags.map((tag) => `* ${tag}`));
-  } else {
-    lines.push('* 无可展示细节');
   }
 
   return lines.join('\n');
