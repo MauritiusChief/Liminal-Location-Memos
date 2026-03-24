@@ -1,10 +1,15 @@
+import { normalizeBearingDegrees } from "../geometry.js";
 import { PolarView } from "./polarViewLabeled.js";
-import { PolarAngularSpan } from "./polarViewObject.js"
 
 interface AngularSpan {
   clockwiseEarlyDegree: number;
   clockwiseLateDegree: number;
   angleWidthDegrees: number;
+}
+
+interface DegreeInterval {
+  startDegree: number;
+  endDegree: number;
 }
 
 /**
@@ -135,6 +140,9 @@ export function applyVisualFilter(id: string = "naked_eye", polarView: PolarView
   const selectedFilter = POLAR_VIEW_FILTERS[id] || nakedEyeFilter;
   const keptFeatureIds = new Set<string>();
   const keptClusterMarkers = new Set<string>();
+  const levelByMarker = new Map(polarView.levels.map((level) => [level.level, level]));
+  const level1VisibleIntervals = buildVisibleIntervals(levelByMarker.get(1)?.clusters || []);
+  const level2VisibleIntervals = buildVisibleIntervals(levelByMarker.get(2)?.clusters || []);
 
   // 1. 先构造一个完全空的 Polar View，进行转移式移除。
   const filteredPolarView: PolarView = {
@@ -147,42 +155,88 @@ export function applyVisualFilter(id: string = "naked_eye", polarView: PolarView
     })),
   };
 
-  for (const level of polarView.levels) {
-    const levelOutput = filteredPolarView.levels.find((entry) => entry.level === level.level);
-    if (!levelOutput) {
-      continue;
-    }
+  const level1 = levelByMarker.get(1);
+  const level2 = levelByMarker.get(2);
+  const level3 = levelByMarker.get(3);
 
-    // 2. 先转移因高度而显著的所有地物。
-    transferMatchingFeatures(level.clusters, keptFeatureIds, keptClusterMarkers, levelOutput.clusters, (feature) =>
-      isSignificantFeature(feature),
+  if (level1) {
+    applyLevelTransfers(
+      level1.clusters,
+      filteredPolarView.levels.find((entry) => entry.level === 1)?.clusters || [],
+      keptFeatureIds,
+      keptClusterMarkers,
+      selectedFilter,
+      () => true,
     );
+  }
 
-    // 3. 再转移因视角宽度而显著的地物/地物簇。对于地物簇而言，其中任一地物达到了显著宽度则被转移。
-    transferMatchingFeatures(level.clusters, keptFeatureIds, keptClusterMarkers, levelOutput.clusters, (feature, cluster) =>
-      cluster.features.length === 1 && isFeatureIncludedByDegree(feature, selectedFilter)
+  if (level2) {
+    applyLevelTransfers(
+      level2.clusters,
+      filteredPolarView.levels.find((entry) => entry.level === 2)?.clusters || [],
+      keptFeatureIds,
+      keptClusterMarkers,
+      selectedFilter,
+      (feature) => isFeatureVisibleInIntervals(feature, level1VisibleIntervals),
     );
-    transferMatchingClusters(level.clusters, keptFeatureIds, keptClusterMarkers, levelOutput.clusters, (cluster) =>
-      cluster.features.length > 1 && cluster.features.some((feature) => isFeatureIncludedByDegree(feature, selectedFilter))
-    );
+  }
 
-    // 4. 再转移因数量多而显著的地物簇。
-    transferMatchingClusters(level.clusters, keptFeatureIds, keptClusterMarkers, levelOutput.clusters, (cluster) =>
-      cluster.features.length > 1 && isClusterIncludedByCount(cluster, selectedFilter)
-    );
-
-    // 5. 再按概率转移单个地物，单个地物看其视角宽度，达不到下限则放弃，否则概率转移。
-    transferMatchingFeatures(level.clusters, keptFeatureIds, keptClusterMarkers, levelOutput.clusters, (feature, cluster) =>
-      cluster.features.length === 1 && shouldKeepSingleFeatureByChance(feature, selectedFilter)
-    );
-
-    // 6. 最后按概率转移地物簇，不看其中最宽地物的宽度，只看这个簇的数量，达不到下限则放弃，否则概率转移。
-    transferMatchingClusters(level.clusters, keptFeatureIds, keptClusterMarkers, levelOutput.clusters, (cluster) =>
-      cluster.features.length > 1 && shouldKeepClusterByChance(cluster, selectedFilter)
+  if (level3) {
+    applyLevelTransfers(
+      level3.clusters,
+      filteredPolarView.levels.find((entry) => entry.level === 3)?.clusters || [],
+      keptFeatureIds,
+      keptClusterMarkers,
+      selectedFilter,
+      (feature) =>
+        isFeatureVisibleInIntervals(feature, level1VisibleIntervals) &&
+        isFeatureVisibleInIntervals(feature, level2VisibleIntervals),
     );
   }
 
   return filteredPolarView
+}
+
+function applyLevelTransfers(
+  sourceClusters: PolarViewCluster[],
+  targetClusters: PolarViewCluster[],
+  keptFeatureIds: Set<string>,
+  keptClusterMarkers: Set<string>,
+  filter: PolarViewFilter,
+  isVisible: (feature: MarkedPolarViewFeature) => boolean,
+): void {
+  // 2. 先转移因高度而显著的所有地物。
+  transferMatchingFeatures(sourceClusters, keptFeatureIds, keptClusterMarkers, targetClusters, (feature) =>
+    isSignificantFeature(feature),
+  );
+
+  // 3. 再转移因视角宽度而显著的地物/地物簇。对于地物簇而言，其中任一地物达到了显著宽度则被转移。
+  transferMatchingFeatures(sourceClusters, keptFeatureIds, keptClusterMarkers, targetClusters, (feature, cluster) =>
+    cluster.features.length === 1 && isVisible(feature) && isFeatureIncludedByDegree(feature, filter)
+  );
+  transferMatchingClusters(sourceClusters, keptFeatureIds, keptClusterMarkers, targetClusters, (cluster) =>
+    cluster.features.length > 1 &&
+    cluster.features.some((feature) => isVisible(feature) && isFeatureIncludedByDegree(feature, filter))
+  );
+
+  // 4. 再转移因数量多而显著的地物簇。
+  transferMatchingClusters(sourceClusters, keptFeatureIds, keptClusterMarkers, targetClusters, (cluster) =>
+    cluster.features.length > 1 &&
+    cluster.features.some((feature) => isVisible(feature)) &&
+    isClusterIncludedByCount(cluster, filter)
+  );
+
+  // 5. 再按概率转移单个地物，单个地物看其视角宽度，达不到下限则放弃，否则概率转移。
+  transferMatchingFeatures(sourceClusters, keptFeatureIds, keptClusterMarkers, targetClusters, (feature, cluster) =>
+    cluster.features.length === 1 && isVisible(feature) && shouldKeepSingleFeatureByChance(feature, filter)
+  );
+
+  // 6. 最后按概率转移地物簇，不看其中最宽地物的宽度，只看这个簇的数量，达不到下限则放弃，否则概率转移。
+  transferMatchingClusters(sourceClusters, keptFeatureIds, keptClusterMarkers, targetClusters, (cluster) =>
+    cluster.features.length > 1 &&
+    cluster.features.some((feature) => isVisible(feature)) &&
+    shouldKeepClusterByChance(cluster, filter)
+  );
 }
 
 //#region 转移函数
@@ -333,6 +387,111 @@ function shouldKeepClusterByChance(cluster: PolarViewCluster, filter: PolarViewF
 }
 
 //#region 帮助函数
+
+function isFeatureVisibleInIntervals(
+  feature: MarkedPolarViewFeature,
+  visibleIntervals: DegreeInterval[],
+): boolean {
+  if (visibleIntervals.length === 0) {
+    return false;
+  }
+
+  const featureIntervals = expandAngularSpan(feature.widestSpan);
+  return featureIntervals.some((featureInterval) =>
+    visibleIntervals.some((visibleInterval) => intervalsOverlap(featureInterval, visibleInterval))
+  );
+}
+
+function buildVisibleIntervals(clusters: PolarViewCluster[]): DegreeInterval[] {
+  const occlusionIntervals = mergeIntervals(
+    clusters.flatMap((cluster) => cluster.features.flatMap((feature) => expandAngularSpan(feature.widestSpan))),
+  );
+
+  if (occlusionIntervals.length === 0) {
+    return [{ startDegree: 0, endDegree: 360 }];
+  }
+
+  const visibleIntervals: DegreeInterval[] = [];
+  let currentDegree = 0;
+
+  for (const interval of occlusionIntervals) {
+    if (interval.startDegree > currentDegree) {
+      visibleIntervals.push({ startDegree: currentDegree, endDegree: interval.startDegree });
+    }
+    currentDegree = Math.max(currentDegree, interval.endDegree);
+  }
+
+  if (currentDegree < 360) {
+    visibleIntervals.push({ startDegree: currentDegree, endDegree: 360 });
+  }
+
+  return visibleIntervals;
+}
+
+function expandAngularSpan(
+  span: AngularSpan | MarkedPolarViewFeature["widestSpan"],
+): DegreeInterval[] {
+  const normalizedSpan = toAngularSpan(span);
+  if (normalizedSpan.angleWidthDegrees <= 0) {
+    return [];
+  }
+
+  if (normalizedSpan.angleWidthDegrees >= 360) {
+    return [{ startDegree: 0, endDegree: 360 }];
+  }
+
+  const startDegree = normalizeBearingDegrees(normalizedSpan.clockwiseEarlyDegree);
+  const endDegree = startDegree + normalizedSpan.angleWidthDegrees;
+  if (endDegree <= 360) {
+    return [{ startDegree, endDegree }];
+  }
+
+  return [
+    { startDegree, endDegree: 360 },
+    { startDegree: 0, endDegree: endDegree - 360 },
+  ];
+}
+
+function mergeIntervals(intervals: DegreeInterval[]): DegreeInterval[] {
+  if (intervals.length === 0) {
+    return [];
+  }
+
+  const sortedIntervals = [...intervals].sort(
+    (left, right) => left.startDegree - right.startDegree || left.endDegree - right.endDegree,
+  );
+  const mergedIntervals: DegreeInterval[] = [{ ...sortedIntervals[0]! }];
+
+  for (let index = 1; index < sortedIntervals.length; index += 1) {
+    const interval = sortedIntervals[index]!;
+    const previousInterval = mergedIntervals[mergedIntervals.length - 1]!;
+    if (interval.startDegree <= previousInterval.endDegree) {
+      previousInterval.endDegree = Math.max(previousInterval.endDegree, interval.endDegree);
+      continue;
+    }
+    mergedIntervals.push({ ...interval });
+  }
+
+  return mergedIntervals;
+}
+
+function intervalsOverlap(left: DegreeInterval, right: DegreeInterval): boolean {
+  return left.startDegree < right.endDegree && right.startDegree < left.endDegree;
+}
+
+function toAngularSpan(
+  span: AngularSpan | MarkedPolarViewFeature["widestSpan"],
+): AngularSpan {
+  if ("clockwiseEarlyDegree" in span) {
+    return span;
+  }
+
+  return {
+    clockwiseEarlyDegree: span.clockwiseEarlyPoint.bearingDegrees,
+    clockwiseLateDegree: span.clockwiseLatePoint.bearingDegrees,
+    angleWidthDegrees: span.angleWidthDegrees,
+  };
+}
 
 function getLevelFilter(
   feature: MarkedPolarViewFeature,

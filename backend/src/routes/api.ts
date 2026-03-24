@@ -23,6 +23,7 @@ import {
   buildPolarView,
   type PolarView,
 } from '@/services/scene/polarViewLabeled.js';
+import { applyVisualFilter } from '@/services/scene/polarViewFilter.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -78,7 +79,7 @@ function buildDebugPolarView(
   const levelMarked = applyLevelMarker(polarFeatures);
   const labeled = attachLabelBasedOnLevel(levelMarked);
   const clusterMarked = applyClusterMarkder(labeled);
-  return buildPolarView(request, clusterMarked);
+  return applyVisualFilter('naked_eye', buildPolarView(request, clusterMarked));
 }
 
 function buildNormalizationDebugPayload(input: {
