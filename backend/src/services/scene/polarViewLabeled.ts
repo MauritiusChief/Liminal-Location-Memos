@@ -263,51 +263,57 @@ export function buildPolarView(
 function splitEntriesIntoDirectionClusters(
   entries: MarkedPolarViewFeature[],
   degreesThreshold: number,
-  clusterCntThrehold: number,
+  clusterCntThreshold: number,
 ): MarkedPolarViewFeature[] {
-  if (entries.length <= 1) {
+  if (entries.length === 0) {
+    return entries;
+  }
+
+  if (entries.length === 1) {
+    // 单点直接视为独立项，避免 clusterMarker 保留为占位符
+    entries[0]!.clusterMarker = entries[0]!.featureId
     return entries;
   }
 
   const sortedEntries = [...entries].sort(
     (left, right) => left.centerPoint.bearingDegrees - right.centerPoint.bearingDegrees,
   );
+  const featureById = new Map(entries.map((entry) => [entry.featureId, entry]));
   let clusterId = 0
-  const clusteredPolarViewFeatures: MarkedPolarViewFeature[] = [];
 
-  sortedEntries.forEach( currentEntry => {
+  sortedEntries.forEach(currentEntry => {
     // 已访问就跳过
     if (currentEntry.clusterMarker !== "PLACE_HOLDER") return
 
     const neighborFeatureIds = regionQuery(entries, currentEntry.featureId, degreesThreshold)
     // 如果邻居不足，先标记噪声
-    if (neighborFeatureIds.length < clusterCntThrehold) {
+    if (neighborFeatureIds.length < clusterCntThreshold) {
       currentEntry.clusterMarker = currentEntry.featureId
-      clusteredPolarViewFeatures.push(currentEntry)
       return;
     }
 
     // 创建新簇
-    currentEntry.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.baseLabel}:C${clusterId}`
+    const clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.baseLabel}:C${clusterId}`
+    currentEntry.clusterMarker = clusterMarker
     const seedSet = [...neighborFeatureIds];
 
     for (let j = 0; j < seedSet.length; j++) {
       const featureId = seedSet[j];
-      const neighborFeature = clusteredPolarViewFeatures.find( f => f.featureId === featureId)
-      if (!neighborFeature) return
+      const neighborFeature = featureById.get(featureId)
+      if (!neighborFeature) continue
       // 如果之前是噪声，现在可归入当前簇
-      if(neighborFeature.clusterMarker === neighborFeature?.featureId) {
-        neighborFeature.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.baseLabel}:C${clusterId}`
+      if (neighborFeature.clusterMarker === neighborFeature.featureId) {
+        neighborFeature.clusterMarker = clusterMarker
       }
 
       // 如果尚未访问，加入当前簇
       if (neighborFeature.clusterMarker === "PLACE_HOLDER") {
-        neighborFeature.clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.baseLabel}:C${clusterId}`
+        neighborFeature.clusterMarker = clusterMarker
 
         const neighborFeatureIds = regionQuery(entries, neighborFeature.featureId, degreesThreshold)
 
         // 若它也是核心点，则继续扩展
-        if (neighborFeatureIds.length >= clusterCntThrehold) {
+        if (neighborFeatureIds.length >= clusterCntThreshold) {
           for (const n of neighborFeatureIds) {
             if (!seedSet.includes(n)) {
               seedSet.push(n);
@@ -321,7 +327,7 @@ function splitEntriesIntoDirectionClusters(
 
   })
 
-  return clusteredPolarViewFeatures;
+  return entries;
 }
 
 /**
