@@ -1,6 +1,6 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { loadSummaryPreview } from '../../api/sceneDebugApi';
-import type { SummaryPreviewResponse, SummaryPreviewStyle } from '../../api/sceneTypes';
+import type { SummaryPreviewResponse } from '../../api/sceneTypes';
 import type { RootState } from '../../app/store';
 
 type RequestStatus = 'idle' | 'loading' | 'succeeded' | 'failed';
@@ -8,7 +8,6 @@ type RequestStatus = 'idle' | 'loading' | 'succeeded' | 'failed';
 interface SummaryPreviewFormState {
   coordinates: string;
   radius: string;
-  summaryStyle: SummaryPreviewStyle;
 }
 
 interface AsyncRequestState<T> {
@@ -19,7 +18,6 @@ interface AsyncRequestState<T> {
 
 interface SummaryPreviewState {
   form: SummaryPreviewFormState;
-  currentStyle: SummaryPreviewStyle | null;
   request: AsyncRequestState<SummaryPreviewResponse>;
 }
 
@@ -27,9 +25,7 @@ const initialState: SummaryPreviewState = {
   form: {
     coordinates: '39.99952202640245, -83.01270469750418',
     radius: '',
-    summaryStyle: 'concise',
   },
-  currentStyle: null,
   request: {
     status: 'idle',
     error: null,
@@ -59,7 +55,7 @@ function parseCoordinates(coordinates: string): { lat: number; lon: number } | {
 
 export const fetchSummaryPreview = createAsyncThunk<SummaryPreviewResponse, SummaryPreviewFormState, { rejectValue: string }>(
   'summaryPreview/fetchSummaryPreview',
-  async ({ coordinates, radius, summaryStyle }, { rejectWithValue }) => {
+  async ({ coordinates, radius }, { rejectWithValue }) => {
     const parsed = parseCoordinates(coordinates);
     if ('error' in parsed) {
       return rejectWithValue(parsed.error);
@@ -78,7 +74,6 @@ export const fetchSummaryPreview = createAsyncThunk<SummaryPreviewResponse, Summ
       return await loadSummaryPreview({
         ...parsed,
         radius: parsedRadius,
-        summaryStyle,
       });
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
@@ -96,16 +91,12 @@ const summaryPreviewSlice = createSlice({
     setRadius(state, action: PayloadAction<string>) {
       state.form.radius = action.payload;
     },
-    setSummaryStyle(state, action: PayloadAction<SummaryPreviewStyle>) {
-      state.form.summaryStyle = action.payload;
-    },
   },
   extraReducers: (builder) => {
     builder
-      .addCase(fetchSummaryPreview.pending, (state, action) => {
+      .addCase(fetchSummaryPreview.pending, (state) => {
         state.request.status = 'loading';
         state.request.error = null;
-        state.currentStyle = action.meta.arg.summaryStyle;
       })
       .addCase(fetchSummaryPreview.fulfilled, (state, action) => {
         state.request.status = 'succeeded';
@@ -120,5 +111,5 @@ const summaryPreviewSlice = createSlice({
 
 export const selectSummaryPreviewState = (state: RootState) => state.summaryPreview;
 
-export const { setCoordinates, setRadius, setSummaryStyle } = summaryPreviewSlice.actions;
+export const { setCoordinates, setRadius } = summaryPreviewSlice.actions;
 export default summaryPreviewSlice.reducer;

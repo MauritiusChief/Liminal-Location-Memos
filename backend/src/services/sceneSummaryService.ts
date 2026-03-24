@@ -1,7 +1,4 @@
-
-import { type NormalizedOverpassRequest } from './overpassNormalization.js';
-import { buildNormalizedPolarView } from './overpassPolar.js';
-import { buildNormalizationPrompt, type PromptSummaryMode } from './overpassPrompt.js';
+import type { RangedPosition } from '../routes/apiTypes.js';
 import {
   type SceneDataProfile,
 } from './osmRepository.js';
@@ -10,18 +7,25 @@ import type {
   SceneFeatureDetail,
 } from './sceneTypes.js';
 import { buildLabeledMicroGrid } from './scene/microGridPrompt.js';
+import { buildScenePrompt } from './scene/scenePrompt.js';
 import { fetchSceneFeatureDetailsFromDb } from './scene/sceneUtilFeatureDetail.js';
 import { buildMicroGrid, fetchMicroGridFromDb } from './scene/microGridObject.js';
-import { fetchScenePolarFeaturesFromDb } from './scene/polarViewObject.js';
+import { buildPolarViewFeature, fetchScenePolarFeaturesFromDb } from './scene/polarViewObject.js';
+import {
+  applyClusterMarkder,
+  applyLevelMarker,
+  attachLabelBasedOnLevel,
+  buildPolarView,
+  type PolarView,
+} from './scene/polarViewLabeled.js';
 
 export const SUMMARY_PREVIEW_MODE_CONFIG = {
-  detailed_far_1000: { radius: 1000, promptSummaryMode: 'detailed' },
-  concise_far_1000: { radius: 1000, promptSummaryMode: 'concise' },
-  concise_near_200: { radius: 200, promptSummaryMode: 'concise' },
-} as const satisfies Record<string, { radius: number; promptSummaryMode: PromptSummaryMode }>;
+  detailed_far_1000: { radius: 1000 },
+  concise_far_1000: { radius: 1000 },
+  concise_near_200: { radius: 200 },
+} as const satisfies Record<string, { radius: number }>;
 
 export type SummaryPreviewMode = keyof typeof SUMMARY_PREVIEW_MODE_CONFIG;
-export type SummaryPreviewStyle = PromptSummaryMode;
 
 export const SUMMARY_PREVIEW_MODE_VALUES = Object.keys(SUMMARY_PREVIEW_MODE_CONFIG) as SummaryPreviewMode[];
 export const SUMMARY_PREVIEW_MODE_VALUE_LIST = SUMMARY_PREVIEW_MODE_VALUES.join(', ');
@@ -38,27 +42,29 @@ export const DEFAULT_LARGE_DESCRIPTION_SUMMARY_MODE: SummaryPreviewMode = 'conci
 export const DEFAULT_SMALL_DESCRIPTION_SUMMARY_MODE: SummaryPreviewMode = 'concise_near_200';
 
 export interface ProjectedScene<TFeatureDetail extends SceneFeatureDetail> {
-  request: NormalizedOverpassRequest;
+  request: RangedPosition;
   diagnostics: DbNormalizationDiagnostics;
   featureDetails: TFeatureDetail[];
   featureDetailIndex: Map<string, TFeatureDetail>;
   microGrid: ReturnType<typeof buildLabeledMicroGrid>;
-  polarView: ReturnType<typeof buildNormalizedPolarView>;
+  polarView: PolarView;
 }
 
-/**
- * TODO 搞清楚具体用处
- * @param featureDetails
- * @returns
- */
 function buildFeatureDetailIndex<TFeatureDetail extends SceneFeatureDetail>(featureDetails: TFeatureDetail[]): Map<string, TFeatureDetail> {
   return new Map(featureDetails.map((feature) => [feature.featureId, feature]));
+}
+
+function countPolarFeatures(polarView: PolarView): number {
+  return polarView.levels.reduce(
+    (count, level) => count + level.clusters.reduce((clusterCount, cluster) => clusterCount + cluster.features.length, 0),
+    0,
+  );
 }
 
 function buildDbDiagnostics(input: {
   featureDetails: SceneFeatureDetail[];
   microGrid: ReturnType<typeof buildLabeledMicroGrid>;
-  polarView: ReturnType<typeof buildNormalizedPolarView>;
+  polarView: PolarView;
 }): DbNormalizationDiagnostics {
   const featureCountsByCategory = input.featureDetails.reduce<Record<'building' | 'poi' | 'line' | 'area', number>>(
     (counts, feature) => {
@@ -71,11 +77,21 @@ function buildDbDiagnostics(input: {
   return {
     featureCountsByCategory,
     totalFeatures: input.featureDetails.length,
-    populatedMicroGridCellCount: true // TODO 兼容性填充虚拟值
-      ? input.microGrid.cells.flat().filter((cell) => cell.sourceFeatureIds.length > 0).length
-      : 0,
-    polarFeatureCount: input.polarView.levels.reduce((count, level) => count + level.features.length, 0),
+    populatedMicroGridCellCount: input.microGrid.cells.flat().filter((cell) => cell.sourceFeatureIds.length > 0).length,
+    polarFeatureCount: countPolarFeatures(input.polarView),
   };
+}
+
+function buildScenePolarView(
+  request: RangedPosition,
+  featureDetailIndex: ReadonlyMap<string, SceneFeatureDetail>,
+  polarRecords: Awaited<ReturnType<typeof fetchScenePolarFeaturesFromDb>>,
+): PolarView {
+  const polarFeatures = buildPolarViewFeature(request, polarRecords, featureDetailIndex);
+  const levelMarked = applyLevelMarker(polarFeatures);
+  const labeled = attachLabelBasedOnLevel(levelMarked);
+  const clusterMarked = applyClusterMarkder(labeled);
+  return buildPolarView(request, clusterMarked);
 }
 
 export function isSummaryPreviewMode(value: unknown): value is SummaryPreviewMode {
@@ -83,7 +99,7 @@ export function isSummaryPreviewMode(value: unknown): value is SummaryPreviewMod
 }
 
 export async function loadProjectedScene(
-  request: NormalizedOverpassRequest,
+  request: RangedPosition,
   profile: SceneDataProfile,
 ): Promise<ProjectedScene<SceneFeatureDetail>> {
   const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
@@ -97,11 +113,7 @@ export async function loadProjectedScene(
     microGridRecords,
     featureDetailIndex,
   ));
-  const polarView = buildNormalizedPolarView({
-    records: polarRecords,
-    featureDetails: featureDetailIndex,
-    request,
-  });
+  const polarView = buildScenePolarView(request, featureDetailIndex, polarRecords);
 
   return {
     request,
@@ -117,16 +129,9 @@ export async function loadProjectedScene(
   };
 }
 
-/**
- * 通过经纬度参数和其他参数，返回完整的提示词
- * @param position
- * @param summaryMode
- * @param profile 暂时没用，未来会决定 SQL 的查询精细度
- * @returns
- */
 export async function buildProjectedSceneSummary(
-  position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>,
-  options: { radius: number; summaryStyle: SummaryPreviewStyle },
+  position: Pick<RangedPosition, 'lat' | 'lon'>,
+  options: { radius: number },
   profile: SceneDataProfile,
 ): Promise<string> {
   const scene = await loadProjectedScene({
@@ -135,16 +140,15 @@ export async function buildProjectedSceneSummary(
     radius: options.radius,
   }, profile);
 
-  return buildNormalizationPrompt({
-    request: scene.request,
-    summaryMode: options.summaryStyle,
-    microGrid: scene.microGrid,
-    polarView: scene.polarView,
-  });
+  return buildScenePrompt(
+    scene.request,
+    scene.microGrid,
+    scene.polarView,
+  );
 }
 
 export async function buildProjectedSceneSummaryByMode(
-  position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>,
+  position: Pick<RangedPosition, 'lat' | 'lon'>,
   summaryMode: SummaryPreviewMode,
   profile: SceneDataProfile,
 ): Promise<string> {
@@ -153,7 +157,6 @@ export async function buildProjectedSceneSummaryByMode(
     position,
     {
       radius: config.radius,
-      summaryStyle: config.promptSummaryMode,
     },
     profile,
   );

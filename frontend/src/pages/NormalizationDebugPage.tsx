@@ -3,10 +3,10 @@ import { PolarFanChart } from '../components/PolarFanChart';
 import { useAppDispatch, useAppSelector } from '../app/hooks';
 import type {
   LabeledMicroGridCell,
+  MarkedPolarViewFeature,
   PolarFeatureCategory,
-  NormalizedPolarFeatureSummary,
-  NormalizedPolarLevel,
-  NormalizedPolarView,
+  PolarView,
+  PolarViewCluster,
 } from '../api/sceneTypes';
 import {
   loadScene,
@@ -30,8 +30,8 @@ export function NormalizationDebugPage() {
   const dispatch = useAppDispatch();
   const { form, syncRequest, dbLoadRequest } = useAppSelector(selectNormalizationDebugState);
   const [selectedGridCell, setSelectedGridCell] = useState<LabeledMicroGridCell | null>(null);
-  const [selectedPolarFeature, setSelectedPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
-  const [hoveredPolarFeature, setHoveredPolarFeature] = useState<NormalizedPolarFeatureSummary | null>(null);
+  const [selectedPolarFeature, setSelectedPolarFeature] = useState<MarkedPolarViewFeature | null>(null);
+  const [hoveredPolarFeature, setHoveredPolarFeature] = useState<MarkedPolarViewFeature | null>(null);
   const [selectedPolarLevel, setSelectedPolarLevel] = useState<'all' | 1 | 2 | 3>('all');
   const [selectedPolarDisplayRange, setSelectedPolarDisplayRange] = useState<PolarDisplayRange>(DEFAULT_POLAR_DISPLAY_RANGE);
   const [visiblePolarCategories, setVisiblePolarCategories] = useState(DEFAULT_VISIBLE_POLAR_CATEGORIES);
@@ -41,7 +41,7 @@ export function NormalizationDebugPage() {
   const syncResult = syncRequest.result;
 
   useEffect(() => {
-    setSelectedGridCell(normalizedResult?.microGrid?.enabled ? normalizedResult.microGrid.cells[0]?.[0] || null : null);
+    setSelectedGridCell(normalizedResult?.microGrid?.cells[0]?.[0] || null);
   }, [normalizedResult]);
 
   useEffect(() => {
@@ -89,14 +89,17 @@ export function NormalizationDebugPage() {
   }, [chartPolarView]);
 
   useEffect(() => {
+    console.log('chartPolarView:', chartPolarView);
     if (!chartPolarView) {
       setSelectedPolarFeature(null);
       setHoveredPolarFeature(null);
       return;
     }
 
+    console.log('chartPolarView:', chartPolarView.levels[0].clusters);
+
     const visibleFeatureIds = new Set(
-      chartPolarView.levels.flatMap((level) => level.features.map((feature) => feature.featureId)),
+      chartPolarView.levels.flatMap((level) => level.clusters.flatMap((cluster) => cluster.features.map((feature) => feature.featureId))),
     );
 
     setSelectedPolarFeature((current) => (current && visibleFeatureIds.has(current.featureId) ? current : null));
@@ -185,7 +188,7 @@ export function NormalizationDebugPage() {
       </pre> */}
 
       <h3>Micro Grid Debug</h3>
-      {normalizedResult?.microGrid?.enabled ? (
+      {normalizedResult?.microGrid ? (
         <>
           <p>
             {normalizedResult.microGrid.rows}x{normalizedResult.microGrid.cols} cells, {normalizedResult.microGrid.cellSizeMeters}m each,
@@ -227,8 +230,6 @@ export function NormalizationDebugPage() {
             </pre>
           </div>
         </>
-      ) : normalizedResult?.microGrid?.reason === 'radius_too_small' ? (
-        <p>Micro grid is skipped because radius must be greater than 50 meters.</p>
       ) : (
         <p>No micro grid yet.</p>
       )}
@@ -345,7 +346,7 @@ export function NormalizationDebugPage() {
                 Level {level.level} ({level.distanceRangeMeters[0]}m, {level.distanceRangeMeters[1]}m]
               </h4>
               <pre style={{ border: '1px solid', maxHeight: '320px', overflowY: 'auto' }}>
-                {JSON.stringify(level.features, null, 2)}
+                {JSON.stringify(level.clusters, null, 2)}
               </pre>
             </section>
           ))} */}
@@ -371,12 +372,12 @@ export function NormalizationDebugPage() {
 }
 
 function filterPolarViewForChart(
-  polarView: NormalizedPolarView,
+  polarView: PolarView,
   selectedLevel: 'all' | 1 | 2 | 3,
   limit: number,
   visibleCategories: Record<PolarFeatureCategory, boolean>,
   displayRangeMeters: PolarDisplayRange,
-): NormalizedPolarView {
+): PolarView {
   let remaining = limit;
 
   return {
@@ -385,35 +386,43 @@ function filterPolarViewForChart(
       if (selectedLevel !== 'all' && level.level !== selectedLevel) {
         return {
           ...level,
-          features: [],
+          clusters: [],
         };
       }
 
-      const filteredFeatures = level.features
-        .filter((feature) => visibleCategories[feature.category])
-        .map((feature) => clipPolarFeatureToDisplayRange(feature, displayRangeMeters))
-        .filter((feature): feature is NormalizedPolarFeatureSummary => feature !== null);
+      const nextClusters: PolarViewCluster[] = [];
+      for (const cluster of level.clusters) {
+        if (remaining <= 0) {
+          break;
+        }
 
-      if (remaining <= 0) {
-        return {
-          ...level,
-          features: [],
-        };
+        const filteredFeatures = cluster.features
+          .filter((feature) => visibleCategories[feature.category])
+          .map((feature) => clipPolarFeatureToDisplayRange(feature, displayRangeMeters))
+          .filter((feature): feature is MarkedPolarViewFeature => feature !== null)
+          .slice(0, remaining);
+
+        remaining -= filteredFeatures.length;
+
+        if (filteredFeatures.length > 0) {
+          nextClusters.push({
+            ...cluster,
+            memberCount: filteredFeatures.length,
+            features: filteredFeatures,
+          });
+        }
       }
-
-      const nextFeatures = filteredFeatures.slice(0, remaining);
-      remaining -= nextFeatures.length;
 
       return {
         ...level,
-        features: nextFeatures,
+        clusters: nextClusters,
       };
     }),
   };
 }
 
 function getVisiblePolarFeatureCount(
-  polarView: NormalizedPolarView,
+  polarView: PolarView,
   selectedLevel: 'all' | 1 | 2 | 3,
   visibleCategories: Record<PolarFeatureCategory, boolean>,
   displayRangeMeters: PolarDisplayRange,
@@ -423,19 +432,21 @@ function getVisiblePolarFeatureCount(
       return count;
     }
 
-    const filteredFeatures = level.features
-      .filter((feature) => visibleCategories[feature.category])
-      .map((feature) => clipPolarFeatureToDisplayRange(feature, displayRangeMeters))
-      .filter((feature): feature is NormalizedPolarFeatureSummary => feature !== null);
+    return count + level.clusters.reduce((clusterCount, cluster) => {
+      const filteredFeatures = cluster.features
+        .filter((feature) => visibleCategories[feature.category])
+        .map((feature) => clipPolarFeatureToDisplayRange(feature, displayRangeMeters))
+        .filter((feature): feature is MarkedPolarViewFeature => feature !== null);
 
-    return count + filteredFeatures.length;
+      return clusterCount + filteredFeatures.length;
+    }, 0);
   }, 0);
 }
 
 function clipPolarFeatureToDisplayRange(
-  feature: NormalizedPolarFeatureSummary,
+  feature: MarkedPolarViewFeature,
   displayRangeMeters: PolarDisplayRange,
-): NormalizedPolarFeatureSummary | null {
+): MarkedPolarViewFeature | null {
   if (feature.nearestPoint.distanceMeters > displayRangeMeters) {
     return null;
   }

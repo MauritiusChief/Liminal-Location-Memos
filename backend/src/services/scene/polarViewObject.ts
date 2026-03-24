@@ -39,7 +39,7 @@ export interface SampledPolarViewFeature {
   centerCoordinate: [number, number] | null;
 }
 
-interface PolarCoordinateSample {
+export interface PolarCoordinateSample {
   coordinate: [number, number];
   distanceMeters: number;
   bearingDegrees: number;

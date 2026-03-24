@@ -3,25 +3,20 @@ import type {
   DbNormalizationDiagnostics,
   SceneFeatureDetail,
 } from '../services/sceneTypes.js';
-import type { SummaryPreviewStyle } from '../services/sceneSummaryService.js';
 import type {
-  NormalizedPolarFeatureSummary,
-  NormalizedPolarLevel,
-  NormalizedPolarView,
-  PolarFeatureCategory,
-  PolarVisibleTag,
-  PolarAngularSpan,
-  PolarCoordinateSample,
-  PolarDirectionCluster,
-} from '../services/overpassPolar.js';
-import type {
-  ContainedPoi,
-  NormalizationDiagnostics,
+  ContainedPoiReference,
+  NormalizedFeatureCollection,
   OutlineReference,
   RelationReference,
-} from '../services/overpassNormalization.js';
-import { NormalizedFeatureCollection } from '@/services/osmNormalization/osmNormalizer.js';
-import { LabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
+} from '../services/osmNormalization/osmNormalizer.js';
+import type { LabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
+import type { PolarAngularSpan, PolarCoordinateSample, PolarViewFeature } from '@/services/scene/polarViewObject.js';
+import type {
+  MarkedPolarViewFeature,
+  PolarView,
+  PolarViewCluster,
+  PolarViewLevel,
+} from '@/services/scene/polarViewLabeled.js';
 
 export interface OverpassResponse {
   data: unknown;
@@ -37,10 +32,6 @@ export interface NormalizedOverpassRequestBody {
 export interface NormalizedOverpassResponseBody {
   query: string;
   geojson: NormalizedFeatureCollection;
-  diagnostics: NormalizationDiagnostics;
-  microGrid?: LabeledMicroGrid;
-  polarView?: NormalizedPolarView;
-  raw?: unknown;
 }
 
 export interface DbDebugLoadResponseBody {
@@ -48,35 +39,34 @@ export interface DbDebugLoadResponseBody {
   diagnostics: DbNormalizationDiagnostics;
   featureSummary: SceneFeatureDetail[];
   microGrid?: LabeledMicroGrid;
-  polarView?: NormalizedPolarView;
+  polarView?: PolarView;
 }
 
 export interface SummaryPreviewRequestBody {
   lat?: number;
   lon?: number;
   radius?: number;
-  summaryStyle?: SummaryPreviewStyle;
 }
 
 export interface SummaryPreviewResponseBody {
   radius: number;
-  summaryStyle: SummaryPreviewStyle;
   summaryText: string;
 }
 
 export type {
-  ContainedPoi,
+  ContainedPoiReference,
   DbFeatureCategory,
   DbNormalizationDiagnostics,
-  NormalizedPolarFeatureSummary,
-  NormalizedPolarLevel,
-  NormalizedPolarView,
-  PolarFeatureCategory,
-  PolarVisibleTag,
+  LabeledMicroGrid,
+  MarkedPolarViewFeature,
+  NormalizedFeatureCollection,
+  OutlineReference,
   PolarAngularSpan,
   PolarCoordinateSample,
-  PolarDirectionCluster,
-  OutlineReference,
+  PolarView,
+  PolarViewCluster,
+  PolarViewFeature,
+  PolarViewLevel,
   RelationReference,
   SceneFeatureDetail,
 };

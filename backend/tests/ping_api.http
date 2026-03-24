@@ -1,0 +1,72 @@
+@host = http://localhost:3001
+@contentType = application/json
+@lat = 39.99952202640245
+@lon = -83.01270469750418
+@radius = 30
+
+###
+# 1. 先确认你点到的是哪一个后端实例
+GET {{host}}/api/health
+Accept: application/json
+
+###
+# 2. 复现 NormalizationDebugPage 的核心请求
+#    重点看响应里的 polarView.levels[*] 到底是:
+#    - 新结构: { level, distanceRangeMeters, clusters: [...] }
+#    - 旧结构: { level, distanceRangeMeters, features: [...] }
+# @name normalizedLoad
+POST {{host}}/api/debug/db/normalized-load
+Content-Type: {{contentType}}
+Accept: application/json
+
+{
+  "lat": {{lat}},
+  "lon": {{lon}},
+  "radius": {{radius}}
+}
+
+###
+# 3. 同一套坐标，测试 summary-preview
+#    这个接口现在只应接受 lat/lon/radius
+POST {{host}}/api/debug/db/summary-preview
+Content-Type: {{contentType}}
+Accept: application/json
+
+{
+  "lat": {{lat}},
+  "lon": {{lon}},
+  "radius": {{radius}}
+}
+
+###
+# 4. 测试 /debug/llm 的当前默认占位 system prompt 路径
+#    如果想测自定义 prompt，把 systemPrompt 改成你自己的文本
+POST {{host}}/api/debug/llm
+Content-Type: {{contentType}}
+Accept: application/json
+
+{
+  "message": "Ping from REST Client. Reply with one short sentence."
+}
+
+###
+# 5. 如需验证从 Overpass 同步到 DB 的链路，可点这个
+POST {{host}}/api/debug/db/sync-overpass
+Content-Type: {{contentType}}
+Accept: application/json
+
+{
+  "lat": {{lat}},
+  "lon": {{lon}},
+  "radius": {{radius}}
+}
+
+###
+# 6. 原始 Overpass 调试入口
+POST {{host}}/api/debug/overpass
+Content-Type: {{contentType}}
+Accept: application/json
+
+{
+  "query": "[out:json][timeout:25];node(around:100,{{lat}},{{lon}});out body;"
+}

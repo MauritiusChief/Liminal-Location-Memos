@@ -5,12 +5,11 @@ import {
   selectSummaryPreviewState,
   setCoordinates,
   setRadius,
-  setSummaryStyle,
 } from '../features/summaryPreview/summaryPreviewSlice';
 
 export function SummaryPreviewPage() {
   const dispatch = useAppDispatch();
-  const { form, currentStyle, request } = useAppSelector(selectSummaryPreviewState);
+  const { form, request } = useAppSelector(selectSummaryPreviewState);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
 
   const handleRequest = async () => {
@@ -47,17 +46,6 @@ export function SummaryPreviewPage() {
         onChange={(event) => dispatch(setRadius(event.target.value))}
       />
       <br />
-      <label htmlFor="summaryPreviewStyle">Summary style</label>
-      <br />
-      <select
-        id="summaryPreviewStyle"
-        value={form.summaryStyle}
-        onChange={(event) => dispatch(setSummaryStyle(event.target.value as 'detailed' | 'concise'))}
-      >
-        <option value="concise">Concise</option>
-        <option value="detailed">Detailed</option>
-      </select>
-      <br />
       <br />
       <button type="button" onClick={() => void handleRequest()} disabled={request.status === 'loading'}>
         {request.status === 'loading' ? 'Loading...' : 'Generate Summary'}
@@ -65,8 +53,7 @@ export function SummaryPreviewPage() {
 
       <h3>Result</h3>
       <p>
-        Current style: {request.result?.summaryStyle || currentStyle || 'n/a'} | Current radius:{' '}
-        {(request.result?.radius ?? form.radius) || 'n/a'}m
+        Current radius: {(request.result?.radius ?? form.radius) || 'n/a'}m
       </p>
       <button type="button" onClick={() => void handleCopy()} disabled={!request.result?.summaryText}>
         {copyStatus === 'copied' ? 'Copied' : 'Copy Summary'}

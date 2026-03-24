@@ -1,12 +1,10 @@
 import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
+import type { RangedPosition } from './apiTypes.js';
 import type { SceneFeatureDetail } from '../services/sceneTypes.js';
 import { generateReplyWithSystemPrompt } from '../services/llm.js';
 import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
-import { buildNormalizedPolarView } from '../services/overpassPolar.js';
-import { buildDefaultDebugSystemPrompt } from '../services/overpassPrompt.js';
-import { type NormalizedOverpassRequest } from '../services/overpassNormalization.js';
 import { runGameChatTurn } from '../services/gameChat.js';
 import { getSessionSnapshot } from '../services/gameSessionStore.js';
 import {
@@ -17,7 +15,14 @@ import type { NormalizedOverpassRequestBody, SummaryPreviewRequestBody } from '.
 import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
 import { buildLabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
 import { fetchSceneFeatureDetailsFromDb } from '@/services/scene/sceneUtilFeatureDetail.js';
-import { fetchScenePolarFeaturesFromDb } from '@/services/scene/polarViewObject.js';
+import { buildPolarViewFeature, fetchScenePolarFeaturesFromDb } from '@/services/scene/polarViewObject.js';
+import {
+  applyClusterMarkder,
+  applyLevelMarker,
+  attachLabelBasedOnLevel,
+  buildPolarView,
+  type PolarView,
+} from '@/services/scene/polarViewLabeled.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -28,15 +33,22 @@ interface OverpassRequestBody {
   query?: string;
 }
 
+const DEBUG_LLM_SYSTEM_PROMPT_PLACEHOLDER = '[debug system prompt placeholder]';
+
 export const apiRouter = Router();
+
+function countPolarFeatures(polarView: PolarView) {
+  return polarView.levels.reduce(
+    (count, level) => count + level.clusters.reduce((clusterCount, cluster) => clusterCount + cluster.features.length, 0),
+    0,
+  );
+}
 
 function buildDbDiagnostics(input: {
   featureDetails: SceneFeatureDetail[];
   microGrid: ReturnType<typeof buildLabeledMicroGrid>;
-  polarView: ReturnType<typeof buildNormalizedPolarView>;
+  polarView: PolarView;
 }) {
-  // 新 diagnostics 改为围绕“DB-native 投影结果”统计，
-  // 这样前端看到的数字就直接对应 grid / polar / prompt 的真实输入。
   const featureCountsByCategory = input.featureDetails.reduce<Record<'building' | 'poi' | 'line' | 'area', number>>(
     (counts, feature) => {
       counts[feature.category] += 1;
@@ -48,37 +60,44 @@ function buildDbDiagnostics(input: {
   return {
     featureCountsByCategory,
     totalFeatures: input.featureDetails.length,
-    populatedMicroGridCellCount: true // TODO 为了兼容性填充虚拟值
-      ? input.microGrid.cells.flat().filter((cell) => cell.sourceFeatureIds.length > 0).length
-      : 0,
-    polarFeatureCount: input.polarView.levels.reduce((count, level) => count + level.features.length, 0),
+    populatedMicroGridCellCount: input.microGrid.cells.flat().filter((cell) => cell.sourceFeatureIds.length > 0).length,
+    polarFeatureCount: countPolarFeatures(input.polarView),
   };
 }
 
 function buildDebugSceneFeatureDetailIndex(featureDetails: SceneFeatureDetail[]): Map<string, SceneFeatureDetail> {
-  // 统一做成 featureId -> detail 索引，避免 grid/polar/prompt 各自重复扫描数组。
   return new Map(featureDetails.map((feature) => [feature.featureId, feature]));
 }
 
+function buildDebugPolarView(
+  request: RangedPosition,
+  polarRecords: Awaited<ReturnType<typeof fetchScenePolarFeaturesFromDb>>,
+  featureDetailIndex: ReadonlyMap<string, SceneFeatureDetail>,
+): PolarView {
+  const polarFeatures = buildPolarViewFeature(request, polarRecords, featureDetailIndex);
+  const levelMarked = applyLevelMarker(polarFeatures);
+  const labeled = attachLabelBasedOnLevel(levelMarked);
+  const clusterMarked = applyClusterMarkder(labeled);
+  return buildPolarView(request, clusterMarked);
+}
+
 function buildNormalizationDebugPayload(input: {
-  normalizedRequest: NormalizedOverpassRequest;
+  normalizedRequest: RangedPosition;
   featureDetails: SceneFeatureDetail[];
   microGridRecords: Awaited<ReturnType<typeof fetchMicroGridFromDb>>;
   polarRecords: Awaited<ReturnType<typeof fetchScenePolarFeaturesFromDb>>;
 }) {
   const featureDetailIndex = buildDebugSceneFeatureDetailIndex(input.featureDetails);
-  // 这里是 DB-native 调试链路的汇合点：
-  // repository 提供三份投影原料，service 层再分别拼出 grid / polar / prompt。
   const microGrid = buildLabeledMicroGrid(buildMicroGrid(
     input.normalizedRequest,
     input.microGridRecords,
     featureDetailIndex,
   ));
-  const polarView = buildNormalizedPolarView({
-    records: input.polarRecords,
-    featureDetails: featureDetailIndex,
-    request: input.normalizedRequest,
-  });
+  const polarView = buildDebugPolarView(
+    input.normalizedRequest,
+    input.polarRecords,
+    featureDetailIndex,
+  );
   const diagnostics = buildDbDiagnostics({
     featureDetails: input.featureDetails,
     microGrid,
@@ -120,7 +139,7 @@ function parseNormalizedRequest(body: NormalizedOverpassRequestBody) {
   } as const;
 }
 
-function parsePosition(body: Pick<NormalizedOverpassRequestBody, 'lat' | 'lon'>) {
+function parsePosition(body: Pick<SummaryPreviewRequestBody, 'lat' | 'lon'>) {
   const { lat, lon } = body;
 
   if (
@@ -140,16 +159,9 @@ function parsePosition(body: Pick<NormalizedOverpassRequestBody, 'lat' | 'lon'>)
   } as const;
 }
 
-function parseSummaryPreviewStyle(value: unknown) {
-  if (value === 'detailed' || value === 'concise') {
-    return { value } as const;
-  }
-
-  return { error: 'summaryStyle must be one of detailed, concise.' } as const;
-}
-
 apiRouter.get('/health', async (_request, response) => {
   const database = await checkDatabaseHealth();
+  console.log("BE: health");
   response.json({
     ok: database.enabled ? database.ok : true,
     service: 'backend',
@@ -167,7 +179,7 @@ apiRouter.post('/debug/llm', async (request, response) => {
 
   try {
     const result = await generateReplyWithSystemPrompt(
-      typeof systemPrompt === 'string' ? systemPrompt : buildDefaultDebugSystemPrompt(),
+      typeof systemPrompt === 'string' ? systemPrompt : DEBUG_LLM_SYSTEM_PROMPT_PLACEHOLDER,
       message.trim(),
     );
     response.json(result);
@@ -187,8 +199,6 @@ apiRouter.post('/game/chat', async (request, response) => {
   }
 
   try {
-    // /game/chat 是首页正式入口。
-    // 路由层只做参数校验和错误包装，真正的回合编排在 gameChat service 里。
     const result = await runGameChatTurn({
       sessionId: typeof sessionId === 'string' ? sessionId : undefined,
       message: message.trim(),
@@ -274,6 +284,7 @@ apiRouter.post('/debug/db/sync-overpass', async (request, response) => {
 
 apiRouter.post('/debug/db/normalized-load', async (request, response) => {
   const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
+  console.log("BE: normalized-load", parsed);
 
   if ('error' in parsed) {
     response.status(400).json({ error: parsed.error });
@@ -288,7 +299,6 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
       fetchMicroGridFromDb(normalizedRequest),
       fetchScenePolarFeaturesFromDb(normalizedRequest, 'debug'),
     ]);
-    // console.log(polarRecords.filter(r => r.osmId == 547336301));
 
     const debugPayload = buildNormalizationDebugPayload({
       normalizedRequest,
@@ -311,16 +321,10 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
 apiRouter.post('/debug/db/summary-preview', async (request, response) => {
   const body = request.body as SummaryPreviewRequestBody;
   const parsedPosition = parsePosition(body);
-  const parsedSummaryStyle = parseSummaryPreviewStyle(body.summaryStyle);
   const radius = body.radius;
 
   if ('error' in parsedPosition) {
     response.status(400).json({ error: parsedPosition.error });
-    return;
-  }
-
-  if ('error' in parsedSummaryStyle) {
-    response.status(400).json({ error: parsedSummaryStyle.error });
     return;
   }
 
@@ -332,15 +336,11 @@ apiRouter.post('/debug/db/summary-preview', async (request, response) => {
   try {
     const summaryText = await buildProjectedSceneSummary(
       parsedPosition.value,
-      {
-        radius,
-        summaryStyle: parsedSummaryStyle.value,
-      },
+      { radius },
       'debug',
     );
     response.json({
       radius,
-      summaryStyle: parsedSummaryStyle.value,
       summaryText,
     });
   } catch (error) {

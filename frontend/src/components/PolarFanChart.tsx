@@ -1,12 +1,12 @@
-import type { NormalizedPolarFeatureSummary, NormalizedPolarView } from '../api/sceneTypes';
+import type { MarkedPolarViewFeature, PolarView } from '../api/sceneTypes';
 
 interface PolarFanChartProps {
-  polarView: NormalizedPolarView;
+  polarView: PolarView;
   displayRadiusMeters: 1000 | 300 | 100;
   selectedLevel: 'all' | 1 | 2 | 3;
   selectedFeatureId: string | null;
-  onFeatureHover: (feature: NormalizedPolarFeatureSummary | null) => void;
-  onFeatureSelect: (feature: NormalizedPolarFeatureSummary | null) => void;
+  onFeatureHover: (feature: MarkedPolarViewFeature | null) => void;
+  onFeatureSelect: (feature: MarkedPolarViewFeature | null) => void;
 }
 
 const CHART_SIZE = 520;
@@ -31,8 +31,13 @@ export function PolarFanChart({
   onFeatureHover,
   onFeatureSelect,
 }: PolarFanChartProps) {
+
+  console.log('PolarFanChart:', polarView.levels[0].clusters);
+
   const visibleFeatures = polarView.levels.flatMap((level) =>
-    selectedLevel === 'all' || level.level === selectedLevel ? level.features : [],
+    selectedLevel === 'all' || level.level === selectedLevel
+      ? level.clusters.flatMap((cluster) => cluster.features)
+      : [],
   );
 
   return (
@@ -94,7 +99,7 @@ export function PolarFanChart({
 
       {visibleFeatures.map((feature) => {
         const isSelected = feature.featureId === selectedFeatureId;
-        const fill = LEVEL_COLORS[feature.level];
+        const fill = LEVEL_COLORS[feature.levelMarker];
         const linePoints =
           feature.linePath?.map((point) =>
             polarToCartesian(point.distanceMeters, point.bearingDegrees, displayRadiusMeters),
@@ -130,7 +135,7 @@ export function PolarFanChart({
                 pointerEvents="none"
               >
                 <title>
-                  {feature.displayLabel} ({Math.round(feature.centerPoint.distanceMeters)}m /{' '}
+                  {feature.baseLabel} ({Math.round(feature.centerPoint.distanceMeters)}m /{' '}
                   {Math.round(feature.centerPoint.bearingDegrees)}deg)
                 </title>
               </polyline>
@@ -172,7 +177,7 @@ export function PolarFanChart({
                 style={{ cursor: 'pointer' }}
               >
                 <title>
-                  {feature.displayLabel} ({Math.round(feature.centerPoint.distanceMeters)}m /{' '}
+                  {feature.baseLabel} ({Math.round(feature.centerPoint.distanceMeters)}m /{' '}
                   {Math.round(feature.centerPoint.bearingDegrees)}deg)
                 </title>
               </circle>
@@ -192,7 +197,7 @@ export function PolarFanChart({
                 style={{ cursor: 'pointer' }}
               >
                 <title>
-                  {feature.displayLabel} ({Math.round(feature.centerPoint.distanceMeters)}m /{' '}
+                  {feature.baseLabel} ({Math.round(feature.centerPoint.distanceMeters)}m /{' '}
                   {Math.round(feature.centerPoint.bearingDegrees)}deg)
                 </title>
               </path>

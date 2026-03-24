@@ -1,5 +1,5 @@
 import type { DbNormalizationDiagnostics } from '../services/sceneTypes.js';
-import type { NormalizedPolarView } from '../services/overpassPolar.js';
+import type { PolarView } from '../services/scene/polarViewLabeled.js';
 import type {
   SceneContextSummaryMode,
 } from '../services/sceneSummaryService.js';
@@ -8,8 +8,6 @@ import { LabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
 
 export type { SceneContextSummaryMode } from '../services/sceneSummaryService.js';
 
-// 这一组类型描述“正式游戏链路”里前后端共享的核心状态：
-// 玩家坐标、会话历史、工具调用结果，以及后端返回给首页 debug 面板的数据。
 export interface GamePosition {
   lat: number;
   lon: number;
@@ -166,17 +164,14 @@ export type SceneContextSnapshotPayload =
 export type LookFarToolResult = SceneContextSnapshotPayload;
 
 export interface SceneContext {
-  // SceneContext 只表示一次“当前位置场景装载”的结果。
-  // 它不再负责 summary 生成或缓存。
   position: GamePosition;
   radius: number;
   diagnostics: DbNormalizationDiagnostics;
   microGrid?: LabeledMicroGrid;
-  polarView?: NormalizedPolarView;
+  polarView?: PolarView;
 }
 
 export interface LargeDescriptionRecord {
-  // 大描述覆盖 1km 场景，并在当前位置附近一段范围内复用。
   id: string;
   center: GamePosition;
   sourceRadiusM: number;
@@ -187,7 +182,6 @@ export interface LargeDescriptionRecord {
 }
 
 export interface SmallDescriptionRecord {
-  // 小描述覆盖 200m 局部环境，farVisibleNotes 只保留可供其他小描述复用的远距细节。
   id: string;
   center: GamePosition;
   sourceRadiusM: number;
@@ -204,7 +198,6 @@ export interface LastSceneContextMeta {
 }
 
 export interface GameSaveDocument {
-  // 这是单会话单 JSON 文件的落盘格式。
   sessionId: string;
   playerPosition: GamePosition;
   playerIndoorLocation: PlayerIndoorLocation | null;
@@ -226,8 +219,6 @@ export interface DescriptionIndexPoint<TRecord extends LargeDescriptionRecord | 
 }
 
 export interface DescriptionIndexBundle {
-  // 实际的 kdbush 实例由运行时服务管理；
-  // 这里保留 points 结果，便于其他模块理解当前索引覆盖了哪些记录。
   largePoints: DescriptionIndexPoint<LargeDescriptionRecord>[];
   smallPoints: DescriptionIndexPoint<SmallDescriptionRecord>[];
 }
@@ -276,7 +267,6 @@ export interface GameClientLevelDescription {
 }
 
 export interface GameChatResponse {
-  // 首页每次发送消息后，都会拿到最新位置和必要的展示数据。
   sessionId: string;
   messages: GameClientMessage[];
   playerPosition: GamePosition;
@@ -289,7 +279,6 @@ export interface GameChatResponse {
 }
 
 export interface GameSessionSnapshotResponse {
-  // 这是“恢复旧存档”专用的只读快照，不会产生新消息。
   sessionId: string;
   hasStarted: boolean;
   messages: GameClientMessage[];

@@ -17,6 +17,8 @@ export function syncSceneFromOverpass(request: SceneQuery): Promise<SceneSyncRes
 }
 
 export function loadSceneFromDb(request: SceneQuery): Promise<SceneLoadResponse> {
+  console.log("FE: loadSceneFromDb", request);
+
   return postJson<SceneLoadResponse, SceneQuery>('/api/debug/db/normalized-load', request);
 }
 
