@@ -1,5 +1,4 @@
 export type SummaryPreviewMode = 'detailed_far_1000' | 'concise_far_1000' | 'concise_near_200';
-export type SummaryPreviewStyle = 'detailed' | 'concise';
 
 export interface RelationReference {
   role: string;
@@ -7,15 +6,24 @@ export interface RelationReference {
   reltags: Record<string, string>;
 }
 
-export interface ContainedPoi {
+export interface OutlineReference {
   osmType: string;
   osmId: number;
   tags: Record<string, string>;
-  relations: RelationReference[];
+  role: string;
+  rel: number;
+  reltags: Record<string, string>;
+}
+
+export interface ContainedPoiReference {
+  osmType: string;
+  osmId: number;
+  tags: Record<string, string>;
   meta: Record<string, string | number>;
   tainted: boolean;
   coordinate: [number, number];
   sourceFeatureId: string;
+  relationReferences?: RelationReference[];
 }
 
 export type MicroGridCellKind = 'building' | 'area' | 'empty';
@@ -33,8 +41,6 @@ export interface LabeledMicroGridCell {
 }
 
 export interface LabeledMicroGrid {
-  enabled: boolean;
-  reason?: 'radius_too_small';
   center: {
     lat: number;
     lon: number;
@@ -44,6 +50,7 @@ export interface LabeledMicroGrid {
   rows: 12;
   cols: 12;
   cells: LabeledMicroGridCell[][];
+  detailEntries: string[];
 }
 
 export interface PolarCoordinateSample {
@@ -58,67 +65,75 @@ export interface PolarAngularSpan {
   angleWidthDegrees: number;
 }
 
-export interface PolarDirectionCluster {
-  clusterId: string;
-  centerBearingDegrees: number;
-  memberCount: number;
-}
-
 export type PolarFeatureCategory = 'building' | 'poi' | 'line' | 'area';
 
-export interface PolarVisibleTag {
-  key: string;
-  value: string;
+export interface DbFeatureSummary {
+  featureId: string;
+  osmType?: string;
+  osmId: number;
+  category: PolarFeatureCategory;
+  geometryType: string;
+  tags: Record<string, string>;
+  relations?: RelationReference[];
+  outlineReferences?: OutlineReference[];
+  meta?: Record<string, string | number>;
+  tainted?: boolean;
+  containedPois?: Array<{ tags: Record<string, string> } | ContainedPoiReference>;
 }
 
-export interface NormalizedPolarFeatureSummary {
+export interface PolarViewFeature {
   featureId: string;
-  osmType: string;
   osmId: number;
-  geometryType: string;
   category: PolarFeatureCategory;
-  baseLabel: string;
-  clusterLabel: string;
-  directionCluster: PolarDirectionCluster;
-  displayLabel: string;
-  visibleTags: PolarVisibleTag[];
-  level: 1 | 2 | 3;
-  nearestPoint: PolarCoordinateSample;
-  farthestPoint: PolarCoordinateSample;
+  geometryType: string;
+  osmType?: string;
+  featureDetail: DbFeatureSummary;
   centerPoint: PolarCoordinateSample;
   widestSpan: PolarAngularSpan;
-  // 线类会额外暴露 4 个代表顶点；
-  // 它们与 centerPoint 分离，供回归和 debug 展示使用。
+  nearestPoint: PolarCoordinateSample;
+  farthestPoint: PolarCoordinateSample;
   linePoints?: PolarCoordinateSample[];
-  // 线类的 SVG 走完整可见路径，而不是把 centerPoint 混进路径里。
   linePath?: PolarCoordinateSample[];
   orientationDegrees?: number;
-  lineLengthMeters?: number;
 }
 
-export interface NormalizedPolarLevel {
+export interface MarkedPolarViewFeature extends PolarViewFeature {
+  clusterMarker: string;
+  levelMarker: 1 | 2 | 3;
+  baseLabel: string;
+}
+
+export interface PolarViewCluster {
+  clusterMarker: string;
+  memberCount: number;
+  centerBearingDegrees: number;
+  features: MarkedPolarViewFeature[];
+}
+
+export interface PolarViewLevel {
   level: 1 | 2 | 3;
   distanceRangeMeters: [number, number];
-  features: NormalizedPolarFeatureSummary[];
+  clusters: PolarViewCluster[];
 }
 
-export interface NormalizedPolarView {
+export interface PolarView {
   center: {
     lat: number;
     lon: number;
   };
-  maxRadiusMeters: 1000;
-  levels: NormalizedPolarLevel[];
+  maxRadiusMeters: number;
+  levels: PolarViewLevel[];
 }
 
 export interface NormalizedFeatureProperties {
   osmType: string;
   osmId: number;
   tags: Record<string, string>;
-  relations: RelationReference[];
+  relationReferences: RelationReference[];
+  outlineReferences: OutlineReference[];
   meta: Record<string, string | number>;
   tainted: boolean;
-  containedPois?: ContainedPoiReference[];
+  containedPoiReferences?: ContainedPoiReference[];
 }
 
 export interface NormalizedFeature {
@@ -146,32 +161,11 @@ export interface DbNormalizationDiagnostics {
   polarFeatureCount: number;
 }
 
-export interface NormalizationDiagnostics {
-  rawElementCounts: Record<string, number>;
-  totalRawElements: number;
-  totalConvertedFeatures: number;
-  totalNormalizedFeatures: number;
-  featureCountsByGeometryType: Record<string, number>;
-  taintedFeatures: number;
-  skippedFeaturesWithoutGeometry: number;
-  filteredRelationOutlineFeatures: number;
-  filteredRelationMemberLineFeatures: number;
-}
-
 export interface SceneQuery {
   lat: number;
   lon: number;
   radius: number;
   includeRaw?: boolean;
-}
-
-export interface NormalizedOverpassResponse {
-  query: string;
-  geojson: NormalizedFeatureCollection;
-  diagnostics: NormalizationDiagnostics;
-  microGrid?: LabeledMicroGrid;
-  polarView?: NormalizedPolarView;
-  raw?: unknown;
 }
 
 export interface SceneSyncResponse {
@@ -186,37 +180,22 @@ export interface SceneSyncResponse {
   coverageRecorded: boolean;
 }
 
-export interface DbFeatureSummary {
-  featureId: string;
-  osmType: string;
-  osmId: number;
-  category: DbFeatureCategory;
-  geometryType: string;
-  tags: Record<string, string>;
-  relations: RelationReference[];
-  meta: Record<string, string | number>;
-  tainted: boolean;
-  containedPois?: ContainedPoiReference[];
-}
-
 export interface SceneLoadResponse {
   query: string;
   diagnostics: DbNormalizationDiagnostics;
   featureSummary: DbFeatureSummary[];
   microGrid?: LabeledMicroGrid;
-  polarView?: NormalizedPolarView;
+  polarView?: PolarView;
 }
 
 export interface SummaryPreviewRequest {
   lat: number;
   lon: number;
   radius: number;
-  summaryStyle: SummaryPreviewStyle;
 }
 
 export interface SummaryPreviewResponse {
   radius: number;
-  summaryStyle: SummaryPreviewStyle;
   summaryText: string;
 }
 
@@ -224,7 +203,6 @@ export interface RawOverpassResponse {
   data: unknown;
 }
 
-// 下面这一组是首页“正式游戏会话”使用的类型。
 export interface GamePosition {
   lat: number;
   lon: number;

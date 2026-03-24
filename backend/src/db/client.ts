@@ -70,6 +70,7 @@ export async function checkDatabaseHealth(): Promise<
   | { enabled: true; ok: true; tableNames: string | null }
   | { enabled: true; ok: false; reason: string }
 > {
+  console.log("测试 checkDatabaseHealth");
   if (!config.db.enabled) {
     return {
       enabled: false,
