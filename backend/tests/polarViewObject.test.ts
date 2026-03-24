@@ -10,12 +10,15 @@ jest.mock("@/db/sqlLoader.js", () => ({
 
 jest.mock("@/routes/apiTypes.js", () => ({}), { virtual: true });
 
+import type { SceneFeatureDetail } from "../src/services/scene/sceneUtilFeatureDetail";
 import {
   type SampledPolarViewFeature,
   buildPolarViewFeature
 } from "../src/services/scene/polarViewObject";
 import {
-  applyPolarViewFeatureMarkder,
+  applyLevelMarker,
+  attachLabelBasedOnLevel,
+  applyClusterMarkder,
   buildPolarView,
 } from "../src/services/scene/polarViewLabeled";
 
@@ -25,6 +28,48 @@ function buildTestRequest() {
     lon: 0,
     radius: 500,
   };
+}
+
+function buildFeatureDetailsMap(
+  features: SampledPolarViewFeature[],
+  overrides: Partial<Record<string, Partial<SceneFeatureDetail>>> = {},
+): ReadonlyMap<string, SceneFeatureDetail> {
+  return new Map(
+    features.map((feature) => {
+      const override = overrides[feature.featureId] || {};
+      const baseTags = buildDefaultTags(feature);
+
+      return [feature.featureId, {
+        featureId: feature.featureId,
+        osmId: feature.osmId,
+        osmType: feature.osmType,
+        category: feature.category,
+        geometryType: feature.geometryType,
+        tags: {
+          ...baseTags,
+          ...(override.tags || {}),
+        },
+        meta: override.meta,
+        tainted: override.tainted,
+        relationReferences: override.relationReferences,
+        outlineReferences: override.outlineReferences,
+        containedPoisReferences: override.containedPoisReferences,
+      } satisfies SceneFeatureDetail];
+    }),
+  );
+}
+
+function buildDefaultTags(feature: SampledPolarViewFeature): Record<string, string> {
+  switch (feature.category) {
+    case "building":
+      return { building: "yes", name: `Building ${feature.osmId}` };
+    case "line":
+      return { highway: "residential", name: `Road ${feature.osmId}` };
+    case "poi":
+      return { amenity: "cafe", name: `POI ${feature.osmId}` };
+    case "area":
+      return { landuse: "park", name: `Area ${feature.osmId}` };
+  }
 }
 
 describe("polarViewObject metrics", () => {
@@ -66,7 +111,11 @@ describe("polarViewObject metrics", () => {
       },
     ];
 
-    const metriced = buildPolarViewFeature(buildTestRequest(), features);
+    const metriced = buildPolarViewFeature(
+      buildTestRequest(),
+      features,
+      buildFeatureDetailsMap(features),
+    );
 
     expect(metriced).toHaveLength(2);
 
@@ -80,6 +129,7 @@ describe("polarViewObject metrics", () => {
     });
     expect(building?.nearestPoint.distanceMeters).toBeLessThan(building?.farthestPoint.distanceMeters ?? 0);
     expect(building?.centerPoint.coordinate).toEqual([0.0004, 0]);
+    expect(building?.featureDetail.tags.name).toBe("Building 1");
     expect(building?.linePath).toBeUndefined();
     expect(building?.linePoints).toBeUndefined();
     expect(building?.orientationDegrees).toBeUndefined();
@@ -92,14 +142,15 @@ describe("polarViewObject metrics", () => {
     expect(line?.nearestPoint.distanceMeters).toBeCloseTo(111.195, 1);
     expect(line?.farthestPoint.distanceMeters).toBeCloseTo(277.988, 1);
     expect(line?.centerPoint.coordinate).toEqual([0.002, 0]);
+    expect(line?.featureDetail.tags.highway).toBe("residential");
     expect(line?.linePath).toHaveLength(4);
     expect(line?.linePoints).toHaveLength(4);
     expect(line?.orientationDegrees).toBeDefined();
     expect(line?.widestSpan.angleWidthDegrees).toBeGreaterThanOrEqual(0);
   });
 
-  it("keeps level and cluster assembly stable for mixed feature categories", () => {
-    const metriced = buildPolarViewFeature(buildTestRequest(), [
+  it("keeps level, label and cluster assembly stable for mixed feature categories", () => {
+    const features: SampledPolarViewFeature[] = [
       {
         featureId: "building/2",
         osmId: 4,
@@ -125,22 +176,34 @@ describe("polarViewObject metrics", () => {
         ],
         centerCoordinate: [0.002, 0],
       },
-    ]);
+    ];
 
-    const marked = applyPolarViewFeatureMarkder(metriced);
-    const polarView = buildPolarView(buildTestRequest(), marked);
+    const details = buildFeatureDetailsMap(features, {
+      "building/2": { tags: { building: "yes", name: "North Building" } },
+      "line/2": { tags: { highway: "residential", name: "East Road" } },
+    });
+    const metriced = buildPolarViewFeature(buildTestRequest(), features, details);
+    const leveled = applyLevelMarker(metriced);
+    const labeled = attachLabelBasedOnLevel(leveled);
+    const clustered = applyClusterMarkder(labeled);
+    const polarView = buildPolarView(buildTestRequest(), clustered);
 
-    expect(marked.map((feature) => feature.featureId).sort()).toEqual(["building/2", "line/2"]);
-    expect(marked.find((feature) => feature.featureId === "building/2")?.levelMarker).toBe(1);
-    expect(marked.find((feature) => feature.featureId === "line/2")?.levelMarker).toBe(2);
+    expect(clustered.map((feature) => feature.featureId).sort()).toEqual(["building/2", "line/2"]);
+    expect(clustered.find((feature) => feature.featureId === "building/2")?.levelMarker).toBe(1);
+    expect(clustered.find((feature) => feature.featureId === "line/2")?.levelMarker).toBe(2);
+    expect(clustered.find((feature) => feature.featureId === "building/2")?.baseLabel).toBe("North Building | building");
+    expect(clustered.find((feature) => feature.featureId === "line/2")?.baseLabel).toBe("highway:residential");
+    expect(clustered.every((feature) => typeof feature.clusterMarker === "string")).toBe(true);
 
     expect(polarView.levels[0]!.clusters).toHaveLength(1);
     expect(polarView.levels[1]!.clusters).toHaveLength(1);
     expect(polarView.levels[2]!.clusters).toHaveLength(0);
+    expect(polarView.levels[0]!.clusters[0]!.features[0]!.baseLabel).toBe("North Building | building");
+    expect(polarView.levels[1]!.clusters[0]!.features[0]!.baseLabel).toBe("highway:residential");
   });
 
   it("builds line metrics from sampleCoordinates after deduping consecutive points", () => {
-    const metriced = buildPolarViewFeature(buildTestRequest(), [
+    const features: SampledPolarViewFeature[] = [
       {
         featureId: "line/3",
         osmId: 6,
@@ -156,7 +219,13 @@ describe("polarViewObject metrics", () => {
         ],
         centerCoordinate: null,
       },
-    ]);
+    ];
+
+    const metriced = buildPolarViewFeature(
+      buildTestRequest(),
+      features,
+      buildFeatureDetailsMap(features),
+    );
 
     expect(metriced).toHaveLength(1);
     expect(metriced[0]?.linePath).toHaveLength(4);

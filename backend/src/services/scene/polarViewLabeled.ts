@@ -1,8 +1,16 @@
 import { RangedPosition } from "@/routes/apiTypes.js";
 import { PolarViewFeature } from "./polarViewObject.js";
 import { computeCircularMeanDegrees } from "../geometry.js";
-import { buildBuildingBaseLabel, getAreaDisplayLabel, getAreaPrimaryLabel, getFallbackBuildingLabel, getPoiDisplayLabel, getPoiPrimaryLabel, getRoadDisplayLabel, getRoadPrimaryLabel } from "./sceneUtilLabel.js";
-import { SceneFeatureDetail } from "./sceneUtilFeatureDetail.js";
+import {
+  buildBuildingBaseLabel,
+  getAreaDisplayLabel,
+  getAreaPrimaryLabel,
+  getFallbackBuildingLabel,
+  getPoiDisplayLabel,
+  getPoiPrimaryLabel,
+  getRoadDisplayLabel,
+  getRoadPrimaryLabel
+} from "./sceneUtilLabel.js";
 
 export interface MarkedPolarViewFeature extends PolarViewFeature {
   clusterMarker: string;
