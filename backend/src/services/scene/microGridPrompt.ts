@@ -117,26 +117,48 @@ function buildCellLabel(
 }
 
 function buildGridDetailEntries(cells: MicroGridCell[][]): string[] {
-  const featureDetailIndex = new Map<string, SceneFeatureDetail | null>()
-  cells.forEach( row  => row.forEach(
+  const featureDetailGroups = new Map<string, { feature: SceneFeatureDetail; ids: string[] }>()
+  cells.forEach(row => row.forEach(
     cell => {
-      cell.poiFeatureDetails.forEach( d => featureDetailIndex.set(d.featureId, d))
-      cell.roadFeatureDetails.forEach( d => featureDetailIndex.set(d.featureId, d))
-      if (!cell.baseFeatureDetail) return
-      featureDetailIndex.set(cell.baseFeatureDetail.featureId, cell.baseFeatureDetail)
+      const details = [
+        ...(cell.baseFeatureDetail ? [cell.baseFeatureDetail] : []),
+        ...cell.poiFeatureDetails,
+        ...cell.roadFeatureDetails,
+      ];
+
+      details.forEach((detail) => {
+        const title = getFeatureDisplayTitle(detail);
+        const sortedTagEntries = Object.keys(detail.tags)
+          .sort()
+          .map((key) => `${key}: ${trimTagValue(detail.tags[key])}`);
+        const dedupeKey = JSON.stringify([title, sortedTagEntries]);
+        const existingGroup = featureDetailGroups.get(dedupeKey);
+
+        if (existingGroup) {
+          if (!existingGroup.ids.includes(detail.featureId)) {
+            existingGroup.ids.push(detail.featureId);
+          }
+          return;
+        }
+
+        featureDetailGroups.set(dedupeKey, {
+          feature: detail,
+          ids: [detail.featureId],
+        });
+      });
     }
   ))
 
-  return [...featureDetailIndex.values()].filter(d => d !== null).map(detail => buildFeatureDetailEntry(detail))
+  return [...featureDetailGroups.values()].map(({ feature, ids }) => buildFeatureDetailEntry(feature, ids))
 }
 
 
-function buildFeatureDetailEntry(feature: SceneFeatureDetail): string {
-  const detailTags = Object.keys(feature.tags).map( key => {
+function buildFeatureDetailEntry(feature: SceneFeatureDetail, featureIds: string[] = [feature.featureId]): string {
+  const detailTags = Object.keys(feature.tags).sort().map( key => {
     const value = trimTagValue(feature.tags[key]);
     return `${key}: ${value}`}
   );
-  const lines = [`${getFeatureDisplayTitle(feature)} (id=${feature.featureId}):`];
+  const lines = [`${getFeatureDisplayTitle(feature)} (ids=${featureIds.join(', ')}):`];
 
   if (detailTags.length > 0) {
     lines.push(...detailTags.map((tag) => `* ${tag}`));
