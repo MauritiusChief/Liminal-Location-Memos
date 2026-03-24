@@ -30,7 +30,7 @@ const POLAR_LEVEL_CLUSTER_PROMPT_CONFIG: Record<
 };
 
 const PROMPT_TAG_KEYS_BY_CATEGORY: Record<PolarFeatureCategory, readonly string[]> = {
-  building: ["name", "brand", ...BUILDING_TAG_KEYS, ...POI_TAG_KEYS],
+  building: ["name", "brand", "building:levels", "height", ...BUILDING_TAG_KEYS, ...POI_TAG_KEYS],
   poi: ["name", "brand", ...POI_TAG_KEYS],
   line: ["name", ...ROAD_TAG_KEYS],
   area: ["name", ...AREA_TAG_KEYS],
@@ -118,21 +118,21 @@ function buildPolarGroupBlock(
   if (cluster.features.length === 1) {
     return {
       title: firstFeature.baseLabel,
-      lines: buildPolarFeatureLines(firstFeature),
+      lines: buildPolarFeatureLines(level, firstFeature),
     };
   }
 
   return {
     title: firstFeature.baseLabel,
-    lines: buildPolarClusterSummaryLines(level, cluster.features, cluster),
+    lines: buildPolarClusterSummaryLines(level, cluster),
   };
 }
 
 function buildPolarClusterSummaryLines(
   level: 1 | 2 | 3,
-  features: MarkedPolarViewFeature[],
   cluster: PolarViewCluster,
 ): string[] {
+  const features: MarkedPolarViewFeature[] = cluster.features
   const config = POLAR_LEVEL_CLUSTER_PROMPT_CONFIG[level];
   const sortedFeatures = [...features].sort(
     (left, right) =>
@@ -140,11 +140,15 @@ function buildPolarClusterSummaryLines(
       left.centerPoint.distanceMeters - right.centerPoint.distanceMeters ||
       left.osmId - right.osmId,
   );
+  // 找到群里宽度最大的作为代表地物
   const representativeFeatures = sortedFeatures
     .filter((feature) => feature.widestSpan.angleWidthDegrees >= config.representativeMinAngleDegrees)
     .slice(0, config.representativeLimit);
+  // 如果代表地物各个都不满足条件，至少挑1个最大的作为保底
   const fallbackFeature = representativeFeatures.length === 0 ? (sortedFeatures[0] ?? null) : null;
+  // 最终决定展示的地物
   const resolvedRepresentativeFeatures = fallbackFeature ? [fallbackFeature] : representativeFeatures;
+
   const omittedCount = Math.max(0, features.length - resolvedRepresentativeFeatures.length);
   const shouldShowOmissionSummary = omittedCount > 0;
   const hint = shouldShowOmissionSummary
@@ -153,14 +157,17 @@ function buildPolarClusterSummaryLines(
   const lines = [`* 群中心方位${formatAngle(cluster.centerBearingDegrees)}${hint}`];
 
   for (const anchor of resolvedRepresentativeFeatures) {
-    lines.push(...buildPolarFeatureLines(anchor));
+    lines.push(...buildPolarFeatureLines(level, anchor));
   }
 
   return lines;
 }
 
-function buildPolarFeatureLines(feature: MarkedPolarViewFeature): string[] {
-  const detailTags = collectPromptTags(feature).map((tag) => `${tag.key}: ${tag.value}`);
+function buildPolarFeatureLines(
+  level: 1 | 2 | 3,
+  feature: MarkedPolarViewFeature
+): string[] {
+  const detailTags = collectPromptTags(level, feature).map((tag) => `${tag.key}: ${tag.value}`);
   const baseLines = [
     `* (id=${feature.featureId})`,
   ];
@@ -178,6 +185,14 @@ function buildPolarFeatureLines(feature: MarkedPolarViewFeature): string[] {
       ...detailTags.map((tag) => `  * ${tag}`),
     ];
   }
+  if (feature.category === 'poi') {
+    if ( level === 3) return [] // 在此处应用 level 3 的 POI 完全不显示的限制
+    return [
+      ...baseLines,
+      `  * 坐标${formatPolarSample(feature.centerPoint)}`,
+      ...detailTags.map((tag) => `  * ${tag}`),
+    ];
+  }
 
   return [
     ...baseLines,
@@ -187,26 +202,51 @@ function buildPolarFeatureLines(feature: MarkedPolarViewFeature): string[] {
   ];
 }
 
-function collectPromptTags(feature: MarkedPolarViewFeature): Array<{ key: string; value: string }> {
+/**
+ * 再次应用 Polar View Prompt 过滤逻辑，只不过这次是具体tag的呈现
+ * （上次是在 label 系统）
+ * 1. level 1: 特定细节一览无余
+ * 2. level 2: 对建筑来说，name brand height-level, 其余（POI、线、区域）仅基本信息
+ * 3. level 3: 对建筑来说，height-level，其余（线、区域）仅基本信息（POI会被自动过滤）
+ * @param feature
+ * @returns
+ */
+function collectPromptTags(level: 1|2|3, feature: MarkedPolarViewFeature): Array<{ key: string; value: string }> {
+  // 先把可展示的细节过滤出来
   const selectedEntries = PROMPT_TAG_KEYS_BY_CATEGORY[feature.category]
     .flatMap((key) => {
       const value = trimTagValue(feature.featureDetail.tags[key]);
       return value ? [{ key, value }] : [];
     });
-
-  const seen = new Set(selectedEntries.map((entry) => `${entry.key}:${entry.value}`));
-  const fallbackEntries = Object.entries(feature.featureDetail.tags)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .flatMap(([key, rawValue]) => {
-      const value = trimTagValue(rawValue);
-      const tagKey = `${key}:${value}`;
-      if (!value || seen.has(tagKey)) {
-        return [];
+  const entries = selectedEntries.map(e => [e.key, e.value])
+  switch (level) {
+    case 1:  // 特定细节一览无余
+      return entries.flatMap(([key, rawValue]) => {
+          const value = trimTagValue(rawValue);
+          if (!value) { return []; }
+          return [{ key, value }];
+        })
+    case 2:
+      if (feature.category === 'building') { // 建筑可展示：名字/品牌，楼层/高度
+        return entries.flatMap(([key, rawValue]) => {
+            const value = trimTagValue(rawValue);
+            if (!value) { return []; }
+            return [{ key, value }];
+          }).filter(e => ["name", "brand", "building:levels", "height"].includes(e.key))
+      } else {
+        return []
       }
-      return [{ key, value }];
-    });
-
-  return [...selectedEntries, ...fallbackEntries];
+    case 3:
+      if (feature.category === 'building') { // 建筑可展示：楼层/高度
+        return entries.flatMap(([key, rawValue]) => {
+            const value = trimTagValue(rawValue);
+            if (!value) { return []; }
+            return [{ key, value }];
+          }).filter(e => ["building:levels", "height"].includes(e.key))
+      } else {
+        return []
+      }
+  }
 }
 
 function formatPolarSample(sample: { distanceMeters: number; bearingDegrees: number }): string {

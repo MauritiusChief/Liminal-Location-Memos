@@ -185,7 +185,7 @@ export function applyVisualFilter(id: string = "naked_eye", polarView: PolarView
   return filteredPolarView
 }
 
-//#region 帮助函数
+//#region 转移函数
 
 function transferMatchingFeatures(
   sourceClusters: PolarViewCluster[],
@@ -238,6 +238,8 @@ function buildFilteredCluster(
     features: [...features],
   };
 }
+
+//#region 判断函数
 
 function isSignificantFeature(feature: MarkedPolarViewFeature): boolean {
   if (feature.category === "building") {
@@ -329,6 +331,8 @@ function shouldKeepClusterByChance(cluster: PolarViewCluster, filter: PolarViewF
 
   return Math.random() >= levelFilter.randomHideRate;
 }
+
+//#region 帮助函数
 
 function getLevelFilter(
   feature: MarkedPolarViewFeature,

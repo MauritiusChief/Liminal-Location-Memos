@@ -57,9 +57,9 @@ const DIRECTION_CLUSTER_THRESHOLD_DEGREES: Record<1 | 2 | 3, number> = {
   3: 5,
 };
 const DIRECTION_CLUSTER_THRESHOLD_COUNT: Record<1 | 2 | 3, number> = {
-  1: 3,
-  2: 4,
-  3: 5,
+  1: 4,
+  2: 3,
+  3: 2,
 };
 
 /**
