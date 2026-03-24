@@ -161,7 +161,7 @@ function parsePosition(body: Pick<SummaryPreviewRequestBody, 'lat' | 'lon'>) {
 
 apiRouter.get('/health', async (_request, response) => {
   const database = await checkDatabaseHealth();
-  console.log("BE: health");
+  // console.log("BE: health");
   response.json({
     ok: database.enabled ? database.ok : true,
     service: 'backend',
@@ -284,7 +284,7 @@ apiRouter.post('/debug/db/sync-overpass', async (request, response) => {
 
 apiRouter.post('/debug/db/normalized-load', async (request, response) => {
   const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
-  console.log("BE: normalized-load", parsed);
+  // console.log("BE: normalized-load", parsed);
 
   if ('error' in parsed) {
     response.status(400).json({ error: parsed.error });

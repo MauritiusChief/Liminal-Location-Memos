@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/dev.mjs",
-    "build": "tsc -p src/tsconfig.src.json --noEmit && node scripts/build.mjs && node scripts/copy-runtime-sql.mjs",
-    "start": "node dist/db/index.js",
+    "dev": "tsx watch --tsconfig tsconfig.base.json src/index.ts",
+    "build": "tsc -p src/tsconfig.src.json && tsc-alias -p src/tsconfig.src.json && node scripts/copy-runtime-sql.mjs",
+    "start": "node dist/index.js",
     "test": "jest",
     "test:osm-compat": "jest tests/osmNormalizer.compat.test.ts"
   },
@@ -27,9 +27,9 @@
     "@types/node": "^25.5.0",
     "@types/osmtogeojson": "^2.2.34",
     "@types/pg": "^8.15.6",
-    "esbuild": "^0.27.3",
     "jest": "^30.3.0",
     "ts-jest": "^29.4.6",
+    "tsc-alias": "^1.8.16",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }
