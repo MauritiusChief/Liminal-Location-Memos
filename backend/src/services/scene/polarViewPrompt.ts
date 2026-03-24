@@ -42,18 +42,19 @@ const PROMPT_TAG_KEYS_BY_CATEGORY: Record<PolarFeatureCategory, readonly string[
  * @returns
  */
 export function buildPolarViewPrompt(polarView: PolarView): string {
-  const buildingAndPoiBlocks = polarView.levels.map((level) =>
+  const largestLevel = getLargestLevel(polarView) ?? 3
+  const buildingAndPoiBlocks = polarView.levels.filter(l => l.level <= largestLevel).map((level) =>
     buildPolarLevelBlock(level, ["building", "poi"]),
   );
-  const lineBlocks = polarView.levels.map((level) =>
+  const lineBlocks = polarView.levels.filter(l => l.level <= largestLevel).map((level) =>
     buildPolarLevelBlock(level, ["line"]),
   );
-  const areaBlocks = polarView.levels.map((level) =>
+  const areaBlocks = polarView.levels.filter(l => l.level <= largestLevel).map((level) =>
     buildPolarLevelBlock(level, ["area"]),
   );
 
   let hintOfLevel = "## 极坐标摘要：无";
-  switch (getLargestLevel(polarView)) {
+  switch (largestLevel) {
     case 1:
       hintOfLevel = "## 极坐标摘要";
       break;
@@ -92,10 +93,15 @@ function buildPolarLevelBlock(
     return '';
   }
 
+  let noGroupLines = true
   const groupLines = clusters.map((cluster) => {
     const groupBlock = buildPolarGroupBlock(level.level, cluster);
+    if (!groupBlock) return ''
+    noGroupLines = false
     return [groupBlock.title + ":", "", ...groupBlock.lines, ""].join("\n");
   });
+
+  if (noGroupLines) return `#### 等级${level.level}(${levelDesc[level.level]})：\n信息不足，未生成极坐标摘要`
 
   return [`#### 等级${level.level}(${levelDesc[level.level]})：`, ...groupLines].join("\n");
 }
@@ -106,13 +112,11 @@ function buildPolarGroupBlock(
 ): {
   title: string;
   lines: string[];
-} {
-  const firstFeature = cluster.features[0];
+} | undefined {
+  const features = cluster.features.filter( f => f.baseLabel !== "NOT_DISPLAY")
+  const firstFeature = features[0];
   if (!firstFeature) {
-    return {
-      title: "",
-      lines: [""],
-    };
+    return
   }
 
   if (cluster.features.length === 1) {
