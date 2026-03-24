@@ -312,6 +312,8 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
       ...debugPayload,
     });
   } catch (error) {
+    console.log(error);
+
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected database normalized load error.',
     });
