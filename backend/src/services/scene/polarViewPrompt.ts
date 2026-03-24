@@ -83,13 +83,13 @@ function buildPolarLevelBlock(
   level: PolarViewLevel,
   includedCategories: PolarFeatureCategory[],
 ): string {
-  const levelDesc = { 1: "100m~30m", 2: "300m~100m", 3: "1km~300m" };
+  const levelDesc = { 1: "30m~100m", 2: "100m~300m", 3: "300m~1km" };
   const clusters = level.clusters.filter((cluster) =>
     cluster.features.some((feature) => includedCategories.includes(feature.category)),
   );
 
   if (clusters.length === 0) {
-    return `#### 等级${level.level}(${levelDesc[level.level]})：\n信息不足，未生成极坐标摘要\n`;
+    return '';
   }
 
   const groupLines = clusters.map((cluster) => {
