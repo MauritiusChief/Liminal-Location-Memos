@@ -32,15 +32,21 @@ function buildFeature(input: {
   osmId: number;
   category: "building" | "poi" | "line" | "area";
   levelMarker?: 1 | 2 | 3;
+  bearingDegrees?: number;
+  distanceMeters?: number;
+  clockwiseEarlyDegree?: number;
   angleWidthDegrees?: number;
   tags?: Record<string, string>;
 }): PolarView["levels"][number]["clusters"][number]["features"][number] {
   const levelMarker = input.levelMarker || 1;
+  const bearingDegrees = input.bearingDegrees ?? 15;
+  const distanceMeters = input.distanceMeters ?? 60;
   const angleWidthDegrees = input.angleWidthDegrees ?? 0;
+  const clockwiseEarlyDegree = input.clockwiseEarlyDegree ?? bearingDegrees;
   const sample = {
     coordinate: [0.001, 0] as [number, number],
-    distanceMeters: 60,
-    bearingDegrees: 15,
+    distanceMeters,
+    bearingDegrees,
   };
 
   return {
@@ -51,10 +57,10 @@ function buildFeature(input: {
     featureDetail: buildDetail(input.category, input.tags),
     centerPoint: sample,
     nearestPoint: sample,
-    farthestPoint: { ...sample, distanceMeters: 80 },
+    farthestPoint: { ...sample, distanceMeters: distanceMeters + 20 },
     widestSpan: {
-      clockwiseEarlyPoint: sample,
-      clockwiseLatePoint: { ...sample, bearingDegrees: 15 + angleWidthDegrees },
+      clockwiseEarlyPoint: { ...sample, bearingDegrees: clockwiseEarlyDegree },
+      clockwiseLatePoint: { ...sample, bearingDegrees: clockwiseEarlyDegree + angleWidthDegrees },
       angleWidthDegrees,
     },
     clusterMarker: `${input.featureId}#cluster`,
@@ -91,6 +97,10 @@ function buildPolarView(
 
 function getLevelClusters(result: PolarView, level: 1 | 2 | 3) {
   return result.levels.find((entry) => entry.level === level)?.clusters || [];
+}
+
+function getLevelFeatureIds(result: PolarView, level: 1 | 2 | 3) {
+  return getLevelClusters(result, level).flatMap((cluster) => cluster.features.map((feature) => feature.featureId));
 }
 
 describe("applyVisualFilter", () => {
@@ -279,5 +289,322 @@ describe("applyVisualFilter", () => {
     const kept = applyVisualFilter("naked_eye", buildPolarView({ 2: [sourceCluster] }));
     expect(getLevelClusters(kept, 2)).toHaveLength(1);
     expect(getLevelClusters(kept, 2)[0]?.memberCount).toBe(getLevelClusters(kept, 2)[0]?.features.length);
+  });
+
+  it("lets a level 1 building occlude a level 2 cluster in the same angular span", () => {
+    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+      1: [buildCluster("cluster/l1/occluder", [
+        buildFeature({
+          featureId: "building/l1/occluder",
+          osmId: 500,
+          category: "building",
+          angleWidthDegrees: 30,
+          clockwiseEarlyDegree: 10,
+        }),
+      ])],
+      2: [buildCluster("cluster/l2/blocked", Array.from({ length: 15 }, (_, index) =>
+        buildFeature({
+          featureId: `building/l2/blocked/${index + 1}`,
+          osmId: 510 + index,
+          category: "building",
+          levelMarker: 2,
+          bearingDegrees: 20,
+          angleWidthDegrees: 1,
+        }),
+      ))],
+    }));
+
+    expect(getLevelClusters(filtered, 2)).toHaveLength(0);
+  });
+
+  it("keeps a level 2 cluster when it sits inside a gap left by level 1 buildings", () => {
+    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+      1: [buildCluster("cluster/l1/occluder", [
+        buildFeature({
+          featureId: "building/l1/occluder",
+          osmId: 600,
+          category: "building",
+          angleWidthDegrees: 30,
+          clockwiseEarlyDegree: 10,
+        }),
+      ])],
+      2: [buildCluster("cluster/l2/visible", Array.from({ length: 15 }, (_, index) =>
+        buildFeature({
+          featureId: `building/l2/visible/${index + 1}`,
+          osmId: 610 + index,
+          category: "building",
+          levelMarker: 2,
+          bearingDegrees: 60,
+          angleWidthDegrees: 1,
+        }),
+      ))],
+    }));
+
+    expect(getLevelFeatureIds(filtered, 2)).toEqual(Array.from({ length: 15 }, (_, index) => `building/l2/visible/${index + 1}`));
+  });
+
+  it("does not let non-building level 1 features occlude level 2", () => {
+    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+      1: [buildCluster("cluster/l1/non-building", [
+        buildFeature({
+          featureId: "line/l1/occluder",
+          osmId: 700,
+          category: "line",
+          angleWidthDegrees: 30,
+          clockwiseEarlyDegree: 10,
+        }),
+      ])],
+      2: [buildCluster("cluster/l2/visible", Array.from({ length: 15 }, (_, index) =>
+        buildFeature({
+          featureId: `building/l2/non-blocked/${index + 1}`,
+          osmId: 710 + index,
+          category: "building",
+          levelMarker: 2,
+          bearingDegrees: 20,
+          angleWidthDegrees: 1,
+        }),
+      ))],
+    }));
+
+    expect(getLevelFeatureIds(filtered, 2)).toEqual(Array.from({ length: 15 }, (_, index) => `building/l2/non-blocked/${index + 1}`));
+  });
+
+  it("lets level 1 buildings occlude level 3 before level 2 is considered", () => {
+    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+      1: [buildCluster("cluster/l1/occluder", [
+        buildFeature({
+          featureId: "building/l1/occluder",
+          osmId: 800,
+          category: "building",
+          angleWidthDegrees: 30,
+          clockwiseEarlyDegree: 10,
+        }),
+      ])],
+      3: [buildCluster("cluster/l3/blocked", Array.from({ length: 20 }, (_, index) =>
+        buildFeature({
+          featureId: `building/l3/blocked/${index + 1}`,
+          osmId: 810 + index,
+          category: "building",
+          levelMarker: 3,
+          bearingDegrees: 20,
+          distanceMeters: 400,
+          angleWidthDegrees: 1,
+        }),
+      ))],
+    }));
+
+    expect(getLevelClusters(filtered, 3)).toHaveLength(0);
+  });
+
+  it("lets raw level 2 buildings occlude level 3", () => {
+    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+      2: [buildCluster("cluster/l2/occluder", [
+        buildFeature({
+          featureId: "building/l2/occluder",
+          osmId: 900,
+          category: "building",
+          levelMarker: 2,
+          angleWidthDegrees: 20,
+          clockwiseEarlyDegree: 10,
+        }),
+      ])],
+      3: [buildCluster("cluster/l3/blocked", Array.from({ length: 20 }, (_, index) =>
+        buildFeature({
+          featureId: `building/l3/blocked-by-l2/${index + 1}`,
+          osmId: 910 + index,
+          category: "building",
+          levelMarker: 3,
+          bearingDegrees: 20,
+          distanceMeters: 400,
+          angleWidthDegrees: 1,
+        }),
+      ))],
+    }));
+
+    expect(getLevelClusters(filtered, 3)).toHaveLength(0);
+  });
+
+  it("uses raw level 2 buildings as occluders even when filtered level 2 is empty", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.1);
+
+    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+      2: [buildCluster("cluster/l2/raw-occluder", [
+        buildFeature({
+          featureId: "building/l2/raw-occluder",
+          osmId: 1000,
+          category: "building",
+          levelMarker: 2,
+          angleWidthDegrees: 11,
+          clockwiseEarlyDegree: 10,
+        }),
+      ])],
+      3: [buildCluster("cluster/l3/blocked", Array.from({ length: 20 }, (_, index) =>
+        buildFeature({
+          featureId: `building/l3/blocked-by-hidden-l2/${index + 1}`,
+          osmId: 1010 + index,
+          category: "building",
+          levelMarker: 3,
+          bearingDegrees: 15,
+          distanceMeters: 400,
+          angleWidthDegrees: 1,
+        }),
+      ))],
+    }));
+
+    expect(getLevelClusters(filtered, 2)).toHaveLength(0);
+    expect(getLevelClusters(filtered, 3)).toHaveLength(0);
+  });
+
+  it("does not let non-building raw level 2 features occlude level 3", () => {
+    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+      2: [buildCluster("cluster/l2/non-building", [
+        buildFeature({
+          featureId: "line/l2/non-occluder",
+          osmId: 1100,
+          category: "line",
+          levelMarker: 2,
+          angleWidthDegrees: 20,
+          clockwiseEarlyDegree: 10,
+        }),
+      ])],
+      3: [buildCluster("cluster/l3/visible", Array.from({ length: 20 }, (_, index) =>
+        buildFeature({
+          featureId: `building/l3/not-blocked/${index + 1}`,
+          osmId: 1110 + index,
+          category: "building",
+          levelMarker: 3,
+          bearingDegrees: 20,
+          distanceMeters: 400,
+          angleWidthDegrees: 1,
+        }),
+      ))],
+    }));
+
+    expect(getLevelFeatureIds(filtered, 3)).toEqual(Array.from({ length: 20 }, (_, index) => `building/l3/not-blocked/${index + 1}`));
+  });
+
+  it("keeps significant buildings even when they are occluded", () => {
+    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+      1: [buildCluster("cluster/l1/occluder", [
+        buildFeature({
+          featureId: "building/l1/occluder",
+          osmId: 1200,
+          category: "building",
+          angleWidthDegrees: 30,
+          clockwiseEarlyDegree: 10,
+        }),
+      ])],
+      2: [buildCluster("cluster/l2/significant", [
+        buildFeature({
+          featureId: "building/l2/significant",
+          osmId: 1201,
+          category: "building",
+          levelMarker: 2,
+          bearingDegrees: 20,
+          angleWidthDegrees: 1,
+          tags: { height: "40" },
+        }),
+      ])],
+    }));
+
+    expect(getLevelFeatureIds(filtered, 2)).toEqual(["building/l2/significant"]);
+  });
+
+  it("keeps significant tower POIs even when they are occluded", () => {
+    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+      1: [buildCluster("cluster/l1/occluder", [
+        buildFeature({
+          featureId: "building/l1/occluder",
+          osmId: 1300,
+          category: "building",
+          angleWidthDegrees: 30,
+          clockwiseEarlyDegree: 10,
+        }),
+      ])],
+      2: [buildCluster("cluster/l2/significant-poi", [
+        buildFeature({
+          featureId: "poi/l2/significant",
+          osmId: 1301,
+          category: "poi",
+          levelMarker: 2,
+          bearingDegrees: 20,
+          tags: { man_made: "tower" },
+        }),
+      ])],
+    }));
+
+    expect(getLevelFeatureIds(filtered, 2)).toEqual(["poi/l2/significant"]);
+  });
+
+  it("handles building occlusion spans that cross the 360/0 seam", () => {
+    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+      1: [buildCluster("cluster/l1/seam-occluder", [
+        buildFeature({
+          featureId: "building/l1/seam-occluder",
+          osmId: 1400,
+          category: "building",
+          angleWidthDegrees: 20,
+          clockwiseEarlyDegree: 350,
+        }),
+      ])],
+      2: [
+        buildCluster("cluster/l2/seam-blocked", Array.from({ length: 15 }, (_, index) =>
+          buildFeature({
+            featureId: `building/l2/seam-blocked/${index + 1}`,
+            osmId: 1410 + index,
+            category: "building",
+            levelMarker: 2,
+            bearingDegrees: 355,
+            angleWidthDegrees: 1,
+          }),
+        )),
+        buildCluster("cluster/l2/seam-visible", Array.from({ length: 15 }, (_, index) =>
+          buildFeature({
+            featureId: `building/l2/seam-visible/${index + 1}`,
+            osmId: 1430 + index,
+            category: "building",
+            levelMarker: 2,
+            bearingDegrees: 40,
+            angleWidthDegrees: 1,
+          }),
+        )),
+      ],
+    }));
+
+    expect(getLevelFeatureIds(filtered, 2)).toEqual(Array.from({ length: 15 }, (_, index) => `building/l2/seam-visible/${index + 1}`));
+  });
+
+  it("keeps a cluster when at least one member remains visible through the gap", () => {
+    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+      1: [buildCluster("cluster/l1/occluder", [
+        buildFeature({
+          featureId: "building/l1/occluder",
+          osmId: 1500,
+          category: "building",
+          angleWidthDegrees: 30,
+          clockwiseEarlyDegree: 10,
+        }),
+      ])],
+      2: [buildCluster("cluster/l2/mixed-visibility", [
+        buildFeature({
+          featureId: "building/l2/hidden-member",
+          osmId: 1501,
+          category: "building",
+          levelMarker: 2,
+          bearingDegrees: 20,
+          angleWidthDegrees: 16,
+        }),
+        buildFeature({
+          featureId: "building/l2/visible-member",
+          osmId: 1502,
+          category: "building",
+          levelMarker: 2,
+          bearingDegrees: 60,
+          angleWidthDegrees: 16,
+        }),
+      ])],
+    }));
+
+    expect(getLevelFeatureIds(filtered, 2)).toEqual(["building/l2/hidden-member", "building/l2/visible-member"]);
   });
 });
