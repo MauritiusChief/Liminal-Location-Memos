@@ -127,6 +127,10 @@ const POLAR_VIEW_FILTERS: Record<string, PolarViewFilter> = {
 
 type PolarViewCluster = PolarView["levels"][number]["clusters"][number];
 type MarkedPolarViewFeature = PolarViewCluster["features"][number];
+interface TransferState {
+  keptFeatureIds: Set<string>;
+  keptClusterMarkers: Set<string>;
+}
 
 //#region 主函数
 
@@ -138,11 +142,15 @@ type MarkedPolarViewFeature = PolarViewCluster["features"][number];
  */
 export function applyVisualFilter(id: string = "naked_eye", polarView: PolarView): PolarView {
   const selectedFilter = POLAR_VIEW_FILTERS[id] || nakedEyeFilter;
-  const keptFeatureIds = new Set<string>();
-  const keptClusterMarkers = new Set<string>();
   const levelByMarker = new Map(polarView.levels.map((level) => [level.level, level]));
   const level1VisibleIntervals = buildVisibleIntervals(levelByMarker.get(1)?.clusters || []);
+  // console.log('level1VisibleIntervals',level1VisibleIntervals);
   const level2VisibleIntervals = buildVisibleIntervals(levelByMarker.get(2)?.clusters || []);
+  // console.log('level2VisibleIntervals',level2VisibleIntervals);
+  let transferState: TransferState = {
+    keptFeatureIds: new Set<string>(),
+    keptClusterMarkers: new Set<string>(),
+  };
 
   // 1. 先构造一个完全空的 Polar View，进行转移式移除。
   const filteredPolarView: PolarView = {
@@ -160,79 +168,87 @@ export function applyVisualFilter(id: string = "naked_eye", polarView: PolarView
   const level3 = levelByMarker.get(3);
 
   if (level1) {
-    applyLevelTransfers(
+    transferState = applyLevelTransfers(
       level1.clusters,
       filteredPolarView.levels.find((entry) => entry.level === 1)?.clusters || [],
-      keptFeatureIds,
-      keptClusterMarkers,
+      transferState,
       selectedFilter,
-      () => true,
+      [],
     );
   }
 
   if (level2) {
-    applyLevelTransfers(
+    transferState = applyLevelTransfers(
       level2.clusters,
       filteredPolarView.levels.find((entry) => entry.level === 2)?.clusters || [],
-      keptFeatureIds,
-      keptClusterMarkers,
+      transferState,
       selectedFilter,
-      (feature) => isFeatureVisibleInIntervals(feature, level1VisibleIntervals),
+      [level1VisibleIntervals],
     );
   }
 
   if (level3) {
-    applyLevelTransfers(
+    transferState = applyLevelTransfers(
       level3.clusters,
       filteredPolarView.levels.find((entry) => entry.level === 3)?.clusters || [],
-      keptFeatureIds,
-      keptClusterMarkers,
+      transferState,
       selectedFilter,
-      (feature) =>
-        isFeatureVisibleInIntervals(feature, level1VisibleIntervals) &&
-        isFeatureVisibleInIntervals(feature, level2VisibleIntervals),
+      [level1VisibleIntervals, level2VisibleIntervals],
     );
   }
 
   return filteredPolarView
 }
 
+/**
+ * 对单个 level 执行完整的转移过滤流程。
+ * @param sourceClusters 该 level 原始 clusters
+ * @param targetClusters 该 level 输出 clusters
+ * @param transferState 进入本轮前已经保留的 feature/cluster 状态
+ * @param filter 当前使用的 filter 配置
+ * @param visibleIntervalsByLayer 按层排列的可见区间列表；空数组代表不做遮挡判定
+ * @returns 更新后的保留状态
+ */
 function applyLevelTransfers(
   sourceClusters: PolarViewCluster[],
   targetClusters: PolarViewCluster[],
-  keptFeatureIds: Set<string>,
-  keptClusterMarkers: Set<string>,
+  transferState: TransferState,
   filter: PolarViewFilter,
-  isVisible: (feature: MarkedPolarViewFeature) => boolean,
-): void {
+  visibleIntervalsByLayer: DegreeInterval[][],
+): TransferState {
+  const isVisible = (feature: MarkedPolarViewFeature): boolean =>
+    visibleIntervalsByLayer.every((visibleIntervals) =>
+      visibleIntervals.length === 0 || isFeatureVisibleInIntervals(feature, visibleIntervals)
+    );
+
   // 2. 先转移因高度而显著的所有地物。
-  transferMatchingFeatures(sourceClusters, keptFeatureIds, keptClusterMarkers, targetClusters, (feature) =>
+  let nextState = transferMatchingFeatures(sourceClusters, transferState, targetClusters, (feature) =>
     isSignificantFeature(feature),
   );
 
   // 3. 再转移因视角宽度而显著的地物/地物簇。对于地物簇而言，其中任一地物达到了显著宽度则被转移。
-  transferMatchingFeatures(sourceClusters, keptFeatureIds, keptClusterMarkers, targetClusters, (feature, cluster) =>
+  nextState = transferMatchingFeatures(sourceClusters, nextState, targetClusters, (feature, cluster) =>
     cluster.features.length === 1 && isVisible(feature) && isFeatureIncludedByDegree(feature, filter)
   );
-  transferMatchingClusters(sourceClusters, keptFeatureIds, keptClusterMarkers, targetClusters, (cluster) =>
+  nextState = transferMatchingClusters(sourceClusters, nextState, targetClusters, (cluster) =>
     cluster.features.length > 1 &&
     cluster.features.some((feature) => isVisible(feature) && isFeatureIncludedByDegree(feature, filter))
   );
 
   // 4. 再转移因数量多而显著的地物簇。
-  transferMatchingClusters(sourceClusters, keptFeatureIds, keptClusterMarkers, targetClusters, (cluster) =>
+  nextState = transferMatchingClusters(sourceClusters, nextState, targetClusters, (cluster) =>
     cluster.features.length > 1 &&
     cluster.features.some((feature) => isVisible(feature)) &&
     isClusterIncludedByCount(cluster, filter)
   );
 
   // 5. 再按概率转移单个地物，单个地物看其视角宽度，达不到下限则放弃，否则概率转移。
-  transferMatchingFeatures(sourceClusters, keptFeatureIds, keptClusterMarkers, targetClusters, (feature, cluster) =>
+  nextState = transferMatchingFeatures(sourceClusters, nextState, targetClusters, (feature, cluster) =>
     cluster.features.length === 1 && isVisible(feature) && shouldKeepSingleFeatureByChance(feature, filter)
   );
 
   // 6. 最后按概率转移地物簇，不看其中最宽地物的宽度，只看这个簇的数量，达不到下限则放弃，否则概率转移。
-  transferMatchingClusters(sourceClusters, keptFeatureIds, keptClusterMarkers, targetClusters, (cluster) =>
+  return transferMatchingClusters(sourceClusters, nextState, targetClusters, (cluster) =>
     cluster.features.length > 1 &&
     cluster.features.some((feature) => isVisible(feature)) &&
     shouldKeepClusterByChance(cluster, filter)
@@ -241,47 +257,81 @@ function applyLevelTransfers(
 
 //#region 转移函数
 
+/**
+ * 按 feature 粒度转移匹配项，并返回更新后的保留状态。
+ * @param sourceClusters 候选来源 clusters
+ * @param transferState 当前已保留状态
+ * @param targetClusters 输出 clusters
+ * @param predicate 判断某个 feature 是否应该被转移
+ * @returns 更新后的保留状态
+ */
 function transferMatchingFeatures(
   sourceClusters: PolarViewCluster[],
-  keptFeatureIds: Set<string>,
-  keptClusterMarkers: Set<string>,
+  transferState: TransferState,
   targetClusters: PolarViewCluster[],
   predicate: (feature: MarkedPolarViewFeature, cluster: PolarViewCluster) => boolean,
-): void {
+): TransferState {
+  const nextState: TransferState = {
+    keptFeatureIds: new Set(transferState.keptFeatureIds),
+    keptClusterMarkers: new Set(transferState.keptClusterMarkers),
+  };
+
   for (const cluster of sourceClusters) {
-    if (keptClusterMarkers.has(cluster.clusterMarker)) {
+    if (nextState.keptClusterMarkers.has(cluster.clusterMarker)) {
       continue;
     }
 
     for (const feature of cluster.features) {
-      if (keptFeatureIds.has(feature.featureId) || !predicate(feature, cluster)) {
+      if (nextState.keptFeatureIds.has(feature.featureId) || !predicate(feature, cluster)) {
         continue;
       }
 
       targetClusters.push(buildFilteredCluster(cluster, [feature]));
-      keptFeatureIds.add(feature.featureId);
+      nextState.keptFeatureIds.add(feature.featureId);
     }
   }
+
+  return nextState;
 }
 
+/**
+ * 按 cluster 粒度转移匹配项，并返回更新后的保留状态。
+ * @param sourceClusters 候选来源 clusters
+ * @param transferState 当前已保留状态
+ * @param targetClusters 输出 clusters
+ * @param predicate 判断某个 cluster 是否应该被转移
+ * @returns 更新后的保留状态
+ */
 function transferMatchingClusters(
   sourceClusters: PolarViewCluster[],
-  keptFeatureIds: Set<string>,
-  keptClusterMarkers: Set<string>,
+  transferState: TransferState,
   targetClusters: PolarViewCluster[],
   predicate: (cluster: PolarViewCluster) => boolean,
-): void {
+): TransferState {
+  const nextState: TransferState = {
+    keptFeatureIds: new Set(transferState.keptFeatureIds),
+    keptClusterMarkers: new Set(transferState.keptClusterMarkers),
+  };
+
   for (const cluster of sourceClusters) {
-    if (keptClusterMarkers.has(cluster.clusterMarker) || !predicate(cluster)) {
+    if (nextState.keptClusterMarkers.has(cluster.clusterMarker) || !predicate(cluster)) {
       continue;
     }
 
     targetClusters.push(buildFilteredCluster(cluster, cluster.features));
-    keptClusterMarkers.add(cluster.clusterMarker);
-    cluster.features.forEach((feature) => keptFeatureIds.add(feature.featureId));
+    nextState.keptClusterMarkers.add(cluster.clusterMarker);
+    cluster.features.forEach((feature) => nextState.keptFeatureIds.add(feature.featureId));
   }
+
+  return nextState;
 }
 
+/**
+ * 基于原 cluster 构造转移后的 cluster 副本。
+ * @param cluster 原始 cluster
+ * @param features 需要保留的 features
+ * @returns 只包含保留 features 的新 cluster
+ */
 function buildFilteredCluster(
   cluster: PolarViewCluster,
   features: MarkedPolarViewFeature[],
@@ -295,6 +345,11 @@ function buildFilteredCluster(
 
 //#region 判断函数
 
+/**
+ * 判断一个地物是否因为高度或类型而显著。
+ * @param feature 待判断的地物
+ * @returns 是否可无视遮挡直接保留
+ */
 function isSignificantFeature(feature: MarkedPolarViewFeature): boolean {
   if (feature.category === "building") {
     return isSignificantBuilding(feature.featureDetail.tags);
@@ -307,6 +362,11 @@ function isSignificantFeature(feature: MarkedPolarViewFeature): boolean {
   return false;
 }
 
+/**
+ * 判断建筑 tags 是否达到“显著建筑”标准。
+ * @param tags 建筑 tags
+ * @returns 是否为显著建筑
+ */
 function isSignificantBuilding(tags: Record<string, string>): boolean {
   const heightMeters = parseHeightMeters(tags.height);
   if (heightMeters !== null && heightMeters >= SIGNIFICANT_BUILDING_MIN_HEIGHT_METERS) {
@@ -317,6 +377,11 @@ function isSignificantBuilding(tags: Record<string, string>): boolean {
   return levelValues.some((value) => value !== null && value >= SIGNIFICANT_BUILDING_MIN_LEVELS);
 }
 
+/**
+ * 判断 POI tags 是否属于显著 POI。
+ * @param tags POI tags
+ * @returns 是否为显著 POI
+ */
 function isSignificantPoi(tags: Record<string, string>): boolean {
   for (const [key, value] of Object.entries(tags)) {
     if (SIGNIFICANT_POI_TAGS.has(`${key}:${value}`)) {
@@ -327,6 +392,12 @@ function isSignificantPoi(tags: Record<string, string>): boolean {
   return false;
 }
 
+/**
+ * 判断单个非 POI 地物是否因视角宽度达到必定显著阈值。
+ * @param feature 待判断地物
+ * @param filter 当前过滤配置
+ * @returns 是否应按角宽直接保留
+ */
 function isFeatureIncludedByDegree(feature: MarkedPolarViewFeature, filter: PolarViewFilter): boolean {
   if (feature.category === "poi") {
     return false;
@@ -336,6 +407,12 @@ function isFeatureIncludedByDegree(feature: MarkedPolarViewFeature, filter: Pola
   return feature.widestSpan.angleWidthDegrees >= levelFilter.includeDegreeThreshold;
 }
 
+/**
+ * 判断 cluster 是否因数量达到必定显著阈值。
+ * @param cluster 待判断 cluster
+ * @param filter 当前过滤配置
+ * @returns 是否应按数量直接保留
+ */
 function isClusterIncludedByCount(cluster: PolarViewCluster, filter: PolarViewFilter): boolean {
   const firstFeature = cluster.features[0];
   if (!firstFeature) {
@@ -351,6 +428,12 @@ function isClusterIncludedByCount(cluster: PolarViewCluster, filter: PolarViewFi
   return cluster.memberCount >= levelFilter.includeCountThreshold;
 }
 
+/**
+ * 判断单个地物是否应按概率保留。
+ * @param feature 待判断地物
+ * @param filter 当前过滤配置
+ * @returns 是否通过概率筛选
+ */
 function shouldKeepSingleFeatureByChance(feature: MarkedPolarViewFeature, filter: PolarViewFilter): boolean {
   if (feature.category === "poi") {
     return false;
@@ -364,6 +447,12 @@ function shouldKeepSingleFeatureByChance(feature: MarkedPolarViewFeature, filter
   return Math.random() >= levelFilter.randomHideRate;
 }
 
+/**
+ * 判断 cluster 是否应按概率保留。
+ * @param cluster 待判断 cluster
+ * @param filter 当前过滤配置
+ * @returns 是否通过概率筛选
+ */
 function shouldKeepClusterByChance(cluster: PolarViewCluster, filter: PolarViewFilter): boolean {
   const firstFeature = cluster.features[0];
   if (!firstFeature) {
@@ -388,6 +477,12 @@ function shouldKeepClusterByChance(cluster: PolarViewCluster, filter: PolarViewF
 
 //#region 帮助函数
 
+/**
+ * 判断某个地物是否穿过给定的可见角度区间。
+ * @param feature 待判断地物
+ * @param visibleIntervals 单层可见区间
+ * @returns 只要任一角区间相交则为 true
+ */
 function isFeatureVisibleInIntervals(
   feature: MarkedPolarViewFeature,
   visibleIntervals: DegreeInterval[],
@@ -402,9 +497,18 @@ function isFeatureVisibleInIntervals(
   );
 }
 
+/**
+ * 基于一层内所有 building 的角跨度，计算补集形式的可见区间。
+ * @param clusters 某一层的 clusters
+ * @returns 该层未被 building 遮住的可见角度区间
+ */
 function buildVisibleIntervals(clusters: PolarViewCluster[]): DegreeInterval[] {
   const occlusionIntervals = mergeIntervals(
-    clusters.flatMap((cluster) => cluster.features.flatMap((feature) => expandAngularSpan(feature.widestSpan))),
+    clusters.flatMap((cluster) =>
+      cluster.features.flatMap((feature) =>
+        feature.category === "building" ? expandAngularSpan(feature.widestSpan) : [],
+      ),
+    ),
   );
 
   if (occlusionIntervals.length === 0) {
@@ -428,6 +532,11 @@ function buildVisibleIntervals(clusters: PolarViewCluster[]): DegreeInterval[] {
   return visibleIntervals;
 }
 
+/**
+ * 将角跨度展开为一个或两个不跨 360 度的区间。
+ * @param span 原始角跨度
+ * @returns 规范化后的角度区间数组
+ */
 function expandAngularSpan(
   span: AngularSpan | MarkedPolarViewFeature["widestSpan"],
 ): DegreeInterval[] {
@@ -452,6 +561,11 @@ function expandAngularSpan(
   ];
 }
 
+/**
+ * 合并重叠或相邻的角度区间。
+ * @param intervals 原始区间列表
+ * @returns 合并后的区间列表
+ */
 function mergeIntervals(intervals: DegreeInterval[]): DegreeInterval[] {
   if (intervals.length === 0) {
     return [];
@@ -475,10 +589,21 @@ function mergeIntervals(intervals: DegreeInterval[]): DegreeInterval[] {
   return mergedIntervals;
 }
 
+/**
+ * 判断两个角度区间是否有重叠。
+ * @param left 左侧区间
+ * @param right 右侧区间
+ * @returns 是否重叠
+ */
 function intervalsOverlap(left: DegreeInterval, right: DegreeInterval): boolean {
   return left.startDegree < right.endDegree && right.startDegree < left.endDegree;
 }
 
+/**
+ * 将两种 span 结构统一转换为本文件使用的 AngularSpan。
+ * @param span 输入 span
+ * @returns 标准化后的 AngularSpan
+ */
 function toAngularSpan(
   span: AngularSpan | MarkedPolarViewFeature["widestSpan"],
 ): AngularSpan {
@@ -493,6 +618,12 @@ function toAngularSpan(
   };
 }
 
+/**
+ * 根据地物类别和 level 选取对应的 degree 过滤配置。
+ * @param feature 待判断地物
+ * @param filter 当前过滤配置
+ * @returns 对应 level 的过滤参数
+ */
 function getLevelFilter(
   feature: MarkedPolarViewFeature,
   filter: PolarViewFilter,
@@ -509,6 +640,11 @@ function getLevelFilter(
   }
 }
 
+/**
+ * 解析 OSM height 标签并转换为米。
+ * @param value 原始 height 标签值
+ * @returns 米数；无法解析时返回 null
+ */
 function parseHeightMeters(value: string | undefined): number | null {
   const trimmed = value?.trim();
   if (!trimmed) {
@@ -528,6 +664,11 @@ function parseHeightMeters(value: string | undefined): number | null {
   return parsed;
 }
 
+/**
+ * 解析整数字段标签。
+ * @param value 原始标签值
+ * @returns 解析后的整数；无法解析时返回 null
+ */
 function parseIntegerTag(value: string | undefined): number | null {
   const trimmed = value?.trim();
   if (!trimmed) {
