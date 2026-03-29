@@ -15,7 +15,7 @@ interface PolarViewLevel {
   features: PolarViewFeature[]
 }
 
-interface LeveledPolarView {
+export interface LeveledPolarView {
   center: {
     lat: number;
     lon: number;
@@ -35,7 +35,7 @@ interface DegreeInterval {
   endDegree: number;
 }
 
-const POLAR_LEVELS: { level: 1 | 2 | 3; minExclusive: number; maxInclusive: number }[] = [
+export const POLAR_LEVELS: { level: 1 | 2 | 3; minExclusive: number; maxInclusive: number }[] = [
   { level: 1, minExclusive: 30, maxInclusive: 100 },
   { level: 2, minExclusive: 100, maxInclusive: 300 },
   { level: 3, minExclusive: 300, maxInclusive: 1000 },
@@ -50,9 +50,9 @@ const OCCLUSION_LEVEL_LAYERS: { layer: 'a'|'b'; minExclusive: number; maxInclusi
 
 // 因高度而显眼的地物
 // 同时必定显著，不会被过滤掉
-const SIGNIFICANT_POI_TAGS = new Set(['man_made:antenna', 'man_made:tower']);
-const SIGNIFICANT_BUILDING_MIN_HEIGHT_METERS = 35;
-const SIGNIFICANT_BUILDING_MIN_LEVELS = 10;
+export const SIGNIFICANT_POI_TAGS = new Set(['man_made:antenna', 'man_made:tower']);
+export const SIGNIFICANT_BUILDING_MIN_HEIGHT_METERS = 35;
+export const SIGNIFICANT_BUILDING_MIN_LEVELS = 10;
 
 //#region 主函数
 
@@ -122,7 +122,7 @@ export function buildLeveledPolarView(request: RangedPosition, polarViewFeatures
  * @param leveledPolarView
  * @returns
  */
-export function buildOccludedPolarView(leveledPolarView: LeveledPolarView): LeveledPolarView {
+export function applyOcclusion(leveledPolarView: LeveledPolarView): LeveledPolarView {
   const level1Features = leveledPolarView.levels[0].features
   const level2Features = leveledPolarView.levels[1].features
   const level3aFeatures = leveledPolarView.levels[2].features
@@ -133,14 +133,17 @@ export function buildOccludedPolarView(leveledPolarView: LeveledPolarView): Leve
 
   const occludedLevel2 = level2Features.filter( f => isFeatureVisibleInIntervals(f, level1VisibleIntervals))
   const occludedLevel3a = level3aFeatures.filter( f => {
-    return isFeatureVisibleInIntervals(f, level1VisibleIntervals) &&
-      isFeatureVisibleInIntervals(f, level2VisibleIntervals)
+
+    return isSignificantBuilding(f.featureDetail.tags) || isSignificantPoi(f.featureDetail.tags) || // 显著地物必定保留
+      (isFeatureVisibleInIntervals(f, level1VisibleIntervals) &&
+      isFeatureVisibleInIntervals(f, level2VisibleIntervals))
   })
   // level 3b 使用更严格的过滤
   const occludedLevel3b = level3bFeatures.filter( f => {
-    return isFeatureFullyVisibleInIntervals(f, level1VisibleIntervals) &&
-    isFeatureFullyVisibleInIntervals(f, level2VisibleIntervals) &&
-    isFeatureFullyVisibleInIntervals(f, level3aVisibleIntervals)
+    return isSignificantBuilding(f.featureDetail.tags) || isSignificantPoi(f.featureDetail.tags) || // 显著地物必定保留
+      (isFeatureFullyVisibleInIntervals(f, level1VisibleIntervals) &&
+      isFeatureFullyVisibleInIntervals(f, level2VisibleIntervals) &&
+      isFeatureFullyVisibleInIntervals(f, level3aVisibleIntervals))
   })
 
   return {
@@ -204,6 +207,37 @@ function isFeatureFullyVisibleInIntervals(
     )
   );
 }
+
+/**
+ * 判断建筑 tags 是否达到“显著建筑”标准。
+ * @param tags 建筑 tags
+ * @returns 是否为显著建筑
+ */
+function isSignificantBuilding(tags: Record<string, string>): boolean {
+  const heightMeters = parseHeightMeters(tags.height);
+  if (heightMeters !== null && heightMeters >= SIGNIFICANT_BUILDING_MIN_HEIGHT_METERS) {
+    return true;
+  }
+
+  const levelValues = [parseIntegerTag(tags["building:levels"]), parseIntegerTag(tags.level)];
+  return levelValues.some((value) => value !== null && value >= SIGNIFICANT_BUILDING_MIN_LEVELS);
+}
+
+/**
+ * 判断 POI tags 是否属于显著 POI。
+ * @param tags POI tags
+ * @returns 是否为显著 POI
+ */
+export function isSignificantPoi(tags: Record<string, string>): boolean {
+  for (const [key, value] of Object.entries(tags)) {
+    if (SIGNIFICANT_POI_TAGS.has(`${key}:${value}`)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 
 //#region 帮助函数
 
@@ -349,4 +383,42 @@ function classifyPolarLevelLayer(distanceMeters: number): 'a' | 'b' | null {
     (definition) => distanceMeters > definition.minExclusive && distanceMeters <= definition.maxInclusive,
   );
   return matchedLayer ? matchedLayer.layer : null;
+}
+/**
+ * 解析 OSM height 标签并转换为米。
+ * @param value 原始 height 标签值
+ * @returns 米数；无法解析时返回 null
+ */
+function parseHeightMeters(value: string | undefined): number | null {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const normalized = trimmed.toLowerCase().replace(/,/g, "");
+  const parsed = Number.parseFloat(normalized);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  if (normalized.includes("ft") || normalized.includes("feet")) {
+    return parsed * 0.3048;
+  }
+
+  return parsed;
+}
+
+/**
+ * 解析整数字段标签。
+ * @param value 原始标签值
+ * @returns 解析后的整数；无法解析时返回 null
+ */
+function parseIntegerTag(value: string | undefined): number | null {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }

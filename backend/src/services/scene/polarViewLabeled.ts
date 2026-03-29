@@ -11,6 +11,50 @@ import {
   getRoadDisplayLabel,
   getRoadPrimaryLabel
 } from "./sceneUtilLabel.js";
+import { isSignificantPoi, LeveledPolarView } from "./polarViewOcclusion.js";
+
+// TODO: 清理一下类型，可能有的不需要，比方说 Labeled 和 ClusterMarked 可以合并
+
+interface LabeledPolarViewFeature extends PolarViewFeature {
+  baseLabel: string;
+}
+
+interface ClusterMarkedPolarViewFeature extends LabeledPolarViewFeature {
+  clusterMarker: string;
+}
+
+interface LabeledPolarView {
+  center: {
+    lat: number;
+    lon: number;
+  };
+  maxRadiusMeters: number;
+  levels: LabeledPolarViewLevel[];
+}
+
+interface ClusterMarkedPolarView {
+  center: {
+    lat: number;
+    lon: number;
+  };
+  maxRadiusMeters: number;
+  levels: ClusterMarkedPolarViewLevel[];
+}
+
+/**
+ * 已经把 level 3a 与 3b 合并为 level 3
+ */
+interface LabeledPolarViewLevel {
+  level: 1 | 2 | 3;
+  distanceRangeMeters: [number, number];
+  features: LabeledPolarViewFeature[]
+}
+
+interface ClusterMarkedPolarViewLevel {
+  level: 1 | 2 | 3;
+  distanceRangeMeters: [number, number];
+  features: ClusterMarkedPolarViewFeature[]
+}
 
 export interface MarkedPolarViewFeature extends PolarViewFeature {
   clusterMarker: string;
@@ -22,7 +66,7 @@ export interface PolarViewCluster {
   clusterMarker: string;
   memberCount: number;
   centerBearingDegrees: number;
-  features: MarkedPolarViewFeature[];
+  features: ClusterMarkedPolarViewFeature[];
 }
 
 export interface PolarViewLevel {
@@ -46,11 +90,6 @@ export interface PolarView {
 
 //#region 主函数
 
-const POLAR_LEVELS: Array<{ level: 1 | 2 | 3; minExclusive: number; maxInclusive: number }> = [
-  { level: 1, minExclusive: 30, maxInclusive: 100 },
-  { level: 2, minExclusive: 100, maxInclusive: 300 },
-  { level: 3, minExclusive: 300, maxInclusive: 1000 },
-];
 const DIRECTION_CLUSTER_THRESHOLD_DEGREES: Record<1 | 2 | 3, number> = {
   1: 5,
   2: 5,
@@ -63,40 +102,55 @@ const DIRECTION_CLUSTER_THRESHOLD_COUNT: Record<1 | 2 | 3, number> = {
 };
 
 /**
- * 先打上 level 标记
- * @param polarViewFeatures
- * @returns label 与 clusterMarker 都是占位符状态的 MarkedPolarViewFeature
+ * 根据分好 level 打好 label，然后打上聚类 marker
+ * @param leveledPolarView 已分好级的 Polar View
+ * @return 已经 label 好且 level 3 合并好的聚类标记好的 Polar View
  */
-export function applyLevelMarker(polarViewFeatures: PolarViewFeature[]): MarkedPolarViewFeature[] {
-  const levelMarked: MarkedPolarViewFeature[] = []
+export function applyClusterMarkder(
+  leveledPolarView: LeveledPolarView,
+): ClusterMarkedPolarView {
+  const level1Features = leveledPolarView.levels[0].features
+  const level2Features = leveledPolarView.levels[1].features
+  const level3aFeatures = leveledPolarView.levels[2].features
+  const level3bFeatures = leveledPolarView.levels[3].features
+  const level3Features = [...level3aFeatures, ...level3bFeatures]
 
-  for (const polarViewFeature of polarViewFeatures) {
-    const distanceMeters = polarViewFeature.nearestPoint.distanceMeters
-    const levelMarker = typeof distanceMeters === "number" ? classifyPolarLevel(distanceMeters) : null;
+  const labeledLevel1 = attachLabelBasedOnLevel(1, level1Features)
+  const labeledLevel2 = attachLabelBasedOnLevel(2, level2Features)
+  const labeledLevel3 = attachLabelBasedOnLevel(3, level3Features)
 
-    if (!levelMarker) {
-      continue;
-    }
-    const levelMarkedPolarViewFeature = {
-      ...polarViewFeature,
-      levelMarker,
-      clusterMarker: "PLACE_HOLDER", // 先把 clusterMarker 空着，等会状态
-      baseLabel: "PLACE_HOLDER"
-    }
-    levelMarked.push(levelMarkedPolarViewFeature)
+  const clusteredLevel1 = applyClusterMarkderOnLevel(1, labeledLevel1)
+  const clusteredLevel2 = applyClusterMarkderOnLevel(2, labeledLevel2)
+  const clusteredLevel3 = applyClusterMarkderOnLevel(3, labeledLevel3)
+
+  return {
+    ...leveledPolarView,
+    levels: [
+      { ...leveledPolarView.levels[0], features: clusteredLevel1 },
+      { ...leveledPolarView.levels[1], features: clusteredLevel2 },
+      {
+        ...leveledPolarView.levels[2],
+        distanceRangeMeters: [
+          leveledPolarView.levels[2].distanceRangeMeters[0], // level 3a 内侧
+          leveledPolarView.levels[3].distanceRangeMeters[1], // level 3b 外侧
+        ],
+        features: clusteredLevel3
+      },
+    ]
   }
-
-  return levelMarked
 }
 
 /**
- * 根据已经打上的 levelMarker，决定 label 的形式
- * @param polarViewFeatures 已经打上 level marker 的地物列
+ * 对每一级 level 打上 base label（level 3 输入前应当已经把 3a 与 3b 合并
+ * @param level
+ * @param polarViewFeatures
+ * @returns 打好标签，且已把 level 3 POI 全部去掉的单个地物列
  */
-export function attachLabelBasedOnLevel(
-  polarViewFeatures: MarkedPolarViewFeature[],
-): MarkedPolarViewFeature[] {
-  const labeled: MarkedPolarViewFeature[] = []
+function attachLabelBasedOnLevel(
+  level: 1|2|3,
+  polarViewFeatures: PolarViewFeature[]
+): LabeledPolarViewFeature[] {
+  const labeled: LabeledPolarViewFeature[] = []
 
   for (const polarViewFeature of polarViewFeatures) {
     const detail = polarViewFeature.featureDetail
@@ -107,7 +161,7 @@ export function attachLabelBasedOnLevel(
     switch (polarViewFeature.category) {
       case "building":
         // 建筑在 level 3 时只有基础细节，level 1~2 全名称
-        switch (polarViewFeature.levelMarker) {
+        switch (level) {
           case 1:
           case 2:
             label = buildBuildingBaseLabel(detail)
@@ -118,8 +172,10 @@ export function attachLabelBasedOnLevel(
         }
         break
       case "poi":
+        // TODO: 做成自带一个 isSignificant 标签，自动过滤，不用再引用函数了
         // POI在 level 3 时不显示，level 2 透露基础标签，level 1 全名称
-        switch (polarViewFeature.levelMarker) {
+        // 除非是因高度显著的地物，此处特殊处理
+        switch (level) {
           case 1:
             label = getPoiDisplayLabel(detail.tags)
             break
@@ -127,14 +183,14 @@ export function attachLabelBasedOnLevel(
             label = getPoiPrimaryLabel(detail.tags)
             break
           case 3:
-            label = "NOT_DISPLAY"
+            label = isSignificantPoi(detail.tags) ? getPoiPrimaryLabel(detail.tags) :"NOT_DISPLAY"
             break
         }
         break
       case "area":
       case "line":
         // 线与区域在 level 2~3 时只有基础细节，level 1 全名称
-        switch (polarViewFeature.levelMarker) {
+        switch (level) {
           case 1:
             label = polarViewFeature.category === "line"
               ? getRoadDisplayLabel(detail.tags)
@@ -149,8 +205,11 @@ export function attachLabelBasedOnLevel(
         }
         break
     }
-    polarViewFeature.baseLabel = label
-    labeled.push(polarViewFeature)
+    const labeledPolarViewFeature: LabeledPolarViewFeature = {
+      ...polarViewFeature, baseLabel: label
+    }
+    // 若不展示，那么根本不会返回
+    if(label !== "NOT_DISPLAY") labeled.push(labeledPolarViewFeature)
   }
 
   return labeled
@@ -160,30 +219,31 @@ export function attachLabelBasedOnLevel(
  * 根据 label 打上 cluster 标签的函数
  * @param polarViewFeature 已经打上 base label 的地物列
  */
-export function applyClusterMarkder(
-  polarViewFeatures: MarkedPolarViewFeature[],
-): MarkedPolarViewFeature[] {
-  const groupedByLevelAndCategory = new Map<string, MarkedPolarViewFeature[]>();
+function applyClusterMarkderOnLevel(
+  level: 1|2|3,
+  polarViewFeatures: LabeledPolarViewFeature[],
+): ClusterMarkedPolarViewFeature[] {
+  const groupedByLevelAndCategory = new Map<string, ClusterMarkedPolarViewFeature[]>();
 
   // 先根据 base label 分类
   for (const polarViewFeature of polarViewFeatures) {
     // key是 level + base label
-    const groupKey = `L${polarViewFeature.levelMarker}:${polarViewFeature.baseLabel}`;
+    const groupKey = `L${level}:${polarViewFeature.baseLabel}`;
     const entries = groupedByLevelAndCategory.get(groupKey) || [];
-    entries.push(polarViewFeature);
+    // 在此处 LabeledPolarViewFeature 转化为了 ClusterMarkedPolarViewFeature
+    entries.push({...polarViewFeature, clusterMarker: groupKey});
     groupedByLevelAndCategory.set(groupKey, entries);
   }
 
-  let markedFeatures: MarkedPolarViewFeature[] = []
+  let markedFeatures: ClusterMarkedPolarViewFeature[] = []
 
   // 在各个分类下进行聚类
   for (const entries of groupedByLevelAndCategory.values()) {
-    const levelMarker = entries[0].levelMarker // 可以保证 levelMarker 全都一致，所以直接 [0] 就行
-
     const clusteredEntries = splitEntriesIntoDirectionClusters(
+      level,
       entries,
-      DIRECTION_CLUSTER_THRESHOLD_DEGREES[levelMarker],
-      DIRECTION_CLUSTER_THRESHOLD_COUNT[levelMarker]
+      DIRECTION_CLUSTER_THRESHOLD_DEGREES[level],
+      DIRECTION_CLUSTER_THRESHOLD_COUNT[level]
     );
 
     markedFeatures = [...markedFeatures, ...clusteredEntries]
@@ -195,59 +255,65 @@ export function applyClusterMarkder(
 /**
  * 组装最完整版 Polar View Object
  * @param request
- * @param polarViewFeatures
+ * @param clusterMarkedPolarView
+ * @return 包含 level、label、聚类三种信息/结构的 Polar View Object
  */
 export function buildPolarView(
-  request: RangedPosition,
-  polarViewFeatures: MarkedPolarViewFeature[],
+  clusterMarkedPolarView: ClusterMarkedPolarView,
 ): PolarView {
-  const levels = POLAR_LEVELS.map<PolarViewLevel>((definition) => {
-    // 以 cluster marker 分组
-    const groupedByClusterMarker = new Map<string, MarkedPolarViewFeature[]>();
+  const level1 = clusterMarkedPolarView.levels[0]
+  const level2 = clusterMarkedPolarView.levels[1]
+  const level3 = clusterMarkedPolarView.levels[2]
+  const level1Features = level1.features
+  const level2Features = level2.features
+  const level3Features = level3.features
 
-    for (const polarViewFeature of polarViewFeatures) {
-      if (polarViewFeature.levelMarker !== definition.level) {
-        continue;
-      }
-
-      const entries = groupedByClusterMarker.get(polarViewFeature.clusterMarker) || [];
-      entries.push(polarViewFeature);
-      groupedByClusterMarker.set(polarViewFeature.clusterMarker, entries);
-    }
-
-    // 组装 Polar View Object 所需的 clusters
-    const clusters = Array.from(groupedByClusterMarker.entries())
-      .map<PolarViewCluster>(([clusterMarker, entries]) => ({
-        clusterMarker,
-        memberCount: entries.length,
-        centerBearingDegrees: computeCircularMeanDegrees(
-          entries.map((entry) => entry.centerPoint.bearingDegrees),
-        ),
-        features: [...entries].sort(
-          (left, right) => left.centerPoint.distanceMeters - right.centerPoint.distanceMeters || left.osmId - right.osmId,
-        ),
-      }))
-      .sort(
-        (left, right) =>
-          left.centerBearingDegrees - right.centerBearingDegrees ||
-          left.features[0]!.centerPoint.distanceMeters - right.features[0]!.centerPoint.distanceMeters,
-      );
-
-    // 返回某一 level 组装好的结果（包含 clusters）
-    return {
-      level: definition.level,
-      distanceRangeMeters: [definition.minExclusive, definition.maxInclusive],
-      clusters,
-    };
-  });
+  const levels = [
+    buildClusterOnLevel(level1.level, level1.distanceRangeMeters, level1Features),
+    buildClusterOnLevel(level2.level, level2.distanceRangeMeters, level2Features),
+    buildClusterOnLevel(level3.level, level3.distanceRangeMeters, level3Features),
+  ]
 
   return {
-    center: {
-      lat: request.lat,
-      lon: request.lon,
-    },
-    maxRadiusMeters: request.radius,
+    ...clusterMarkedPolarView,
     levels,
+  };
+}
+
+function buildClusterOnLevel(
+  level: 1|2|3,
+  distanceRangeMeters: [number, number],
+  features: ClusterMarkedPolarViewFeature[]
+): PolarViewLevel {
+  const groupedByClusterMarker = new Map<string, ClusterMarkedPolarViewFeature[]>();
+  // 先按 clusterMarker 分类好
+  for (const polarViewFeature of features) {
+    const entries = groupedByClusterMarker.get(polarViewFeature.clusterMarker) || [];
+    entries.push(polarViewFeature);
+    groupedByClusterMarker.set(polarViewFeature.clusterMarker, entries);
+  }
+  // 组装 Polar View Object 所需的 clusters
+  const clusters = Array.from(groupedByClusterMarker.entries())
+    .map<PolarViewCluster>(([clusterMarker, entries]) => ({
+      clusterMarker,
+      memberCount: entries.length,
+      centerBearingDegrees: computeCircularMeanDegrees(
+        entries.map((entry) => entry.centerPoint.bearingDegrees),
+      ),
+      features: [...entries].sort(
+        (left, right) => left.centerPoint.distanceMeters - right.centerPoint.distanceMeters || left.osmId - right.osmId,
+      ),
+    }))
+    .sort(
+      (left, right) =>
+        left.centerBearingDegrees - right.centerBearingDegrees ||
+        left.features[0]!.centerPoint.distanceMeters - right.features[0]!.centerPoint.distanceMeters,
+    );
+
+  return {
+    level,
+    distanceRangeMeters,
+    clusters,
   };
 }
 
@@ -261,10 +327,11 @@ export function buildPolarView(
  * @returns 打好标签的 entries
  */
 function splitEntriesIntoDirectionClusters(
-  entries: MarkedPolarViewFeature[],
+  level: 1|2|3,
+  entries: ClusterMarkedPolarViewFeature[],
   degreesThreshold: number,
   clusterCntThreshold: number,
-): MarkedPolarViewFeature[] {
+): ClusterMarkedPolarViewFeature[] {
   if (entries.length === 0) {
     return entries;
   }
@@ -293,7 +360,7 @@ function splitEntriesIntoDirectionClusters(
     }
 
     // 创建新簇
-    const clusterMarker = `L${currentEntry.levelMarker}:${currentEntry.baseLabel}:C${clusterId}`
+    const clusterMarker = `L${level}:${currentEntry.baseLabel}:C${clusterId}`
     currentEntry.clusterMarker = clusterMarker
     const seedSet = [...neighborFeatureIds];
 
@@ -338,7 +405,7 @@ function splitEntriesIntoDirectionClusters(
  * @returns
  */
 function regionQuery(
-  entries: MarkedPolarViewFeature[],
+  entries: ClusterMarkedPolarViewFeature[],
   featureId: string,
   degreesThreshold: number,
 ): string[] {
@@ -353,11 +420,3 @@ function regionQuery(
   }).map(e => e.featureId)
 }
 
-//#region 帮助函数
-
-function classifyPolarLevel(distanceMeters: number): 1 | 2 | 3 | null {
-  const matchedLevel = POLAR_LEVELS.find(
-    (definition) => distanceMeters > definition.minExclusive && distanceMeters <= definition.maxInclusive,
-  );
-  return matchedLevel ? matchedLevel.level : null;
-}

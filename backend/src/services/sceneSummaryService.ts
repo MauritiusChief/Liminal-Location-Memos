@@ -13,11 +13,10 @@ import { buildMicroGrid, fetchMicroGridFromDb } from './scene/microGridObject.js
 import { buildPolarViewFeature, fetchScenePolarFeaturesFromDb } from './scene/polarViewObject.js';
 import {
   applyClusterMarkder,
-  applyLevelMarker,
-  attachLabelBasedOnLevel,
   buildPolarView,
   type PolarView,
 } from './scene/polarViewLabeled.js';
+import { applyOcclusion, buildLeveledPolarView } from './scene/polarViewOcclusion.js';
 
 export const SUMMARY_PREVIEW_MODE_CONFIG = {
   detailed_far_1000: { radius: 1000 },
@@ -88,10 +87,12 @@ function buildScenePolarView(
   polarRecords: Awaited<ReturnType<typeof fetchScenePolarFeaturesFromDb>>,
 ): PolarView {
   const polarFeatures = buildPolarViewFeature(request, polarRecords, featureDetailIndex);
-  const levelMarked = applyLevelMarker(polarFeatures);
-  const labeled = attachLabelBasedOnLevel(levelMarked);
-  const clusterMarked = applyClusterMarkder(labeled);
-  return buildPolarView(request, clusterMarked);
+  const levelMarked = buildLeveledPolarView(request, polarFeatures)
+  const occluded = applyOcclusion(levelMarked)
+  const clusterMarked = applyClusterMarkder(occluded);
+  const clustered = buildPolarView(clusterMarked);
+  // return applyVisualFilter('naked_eye', clustered);
+  return clustered
 }
 
 export function isSummaryPreviewMode(value: unknown): value is SummaryPreviewMode {
