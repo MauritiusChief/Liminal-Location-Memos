@@ -13,13 +13,15 @@ import {
 } from "./sceneUtilLabel.js";
 import { isSignificantPoi, LeveledPolarView } from "./polarViewOcclusion.js";
 
-interface MarkedPolarViewFeature extends PolarViewFeature {
+const UNVISITED_CLUSTER_MARKER = "PLACE_HOLDER";
+
+export interface MarkedPolarViewFeature extends PolarViewFeature {
   baseLabel: string;
-  levelMarker: number;
+  levelMarker: 1 | 2 | 3;
   clusterMarker: string;
 }
 
-interface MarkedPolarView {
+export interface MarkedPolarView {
   center: {
     lat: number;
     lon: number;
@@ -181,7 +183,7 @@ function attachLabelBasedOnLevel(
         break
     }
     const labeledPolarViewFeature: MarkedPolarViewFeature = {
-      ...polarViewFeature, baseLabel: label, levelMarker: level, clusterMarker: "PLACE_HOLDER"
+      ...polarViewFeature, baseLabel: label, levelMarker: level, clusterMarker: UNVISITED_CLUSTER_MARKER
     }
     // 若不展示，那么根本不会返回
     if(label !== "NOT_DISPLAY") labeled.push(labeledPolarViewFeature)
@@ -205,8 +207,8 @@ function applyClusterMarkderOnLevel(
     // key是 level + base label
     const groupKey = `L${level}:${polarViewFeature.baseLabel}`;
     const entries = groupedByLevelAndCategory.get(groupKey) || [];
-    // 在此处 LabeledPolarViewFeature 转化为了 MarkedPolarViewFeature
-    entries.push({...polarViewFeature, clusterMarker: groupKey});
+    // 每个分组单独进行方向聚类，因此初始状态必须保留为“未访问”。
+    entries.push({...polarViewFeature, clusterMarker: UNVISITED_CLUSTER_MARKER});
     groupedByLevelAndCategory.set(groupKey, entries);
   }
 
@@ -325,7 +327,7 @@ function splitEntriesIntoDirectionClusters(
 
   sortedEntries.forEach(currentEntry => {
     // 已访问就跳过
-    if (currentEntry.clusterMarker !== "PLACE_HOLDER") return
+    if (currentEntry.clusterMarker !== UNVISITED_CLUSTER_MARKER) return
 
     const neighborFeatureIds = regionQuery(entries, currentEntry.featureId, degreesThreshold)
     // 如果邻居不足，先标记噪声
@@ -349,7 +351,7 @@ function splitEntriesIntoDirectionClusters(
       }
 
       // 如果尚未访问，加入当前簇
-      if (neighborFeature.clusterMarker === "PLACE_HOLDER") {
+      if (neighborFeature.clusterMarker === UNVISITED_CLUSTER_MARKER) {
         neighborFeature.clusterMarker = clusterMarker
 
         const neighborFeatureIds = regionQuery(entries, neighborFeature.featureId, degreesThreshold)

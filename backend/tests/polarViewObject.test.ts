@@ -16,11 +16,10 @@ import {
   buildPolarViewFeature
 } from "../src/services/scene/polarViewObject";
 import {
-  applyLevelMarker,
-  attachLabelBasedOnLevel,
   applyClusterMarkder,
   buildPolarView,
 } from "../src/services/scene/polarViewLabeled";
+import { buildLeveledPolarView } from "../src/services/scene/polarViewOcclusion";
 
 function buildTestRequest() {
   return {
@@ -183,17 +182,19 @@ describe("polarViewObject metrics", () => {
       "line/2": { tags: { highway: "residential", name: "East Road" } },
     });
     const metriced = buildPolarViewFeature(buildTestRequest(), features, details);
-    const leveled = applyLevelMarker(metriced);
-    const labeled = attachLabelBasedOnLevel(leveled);
-    const clustered = applyClusterMarkder(labeled);
-    const polarView = buildPolarView(buildTestRequest(), clustered);
+    const leveled = buildLeveledPolarView(buildTestRequest(), metriced);
+    const clustered = applyClusterMarkder(leveled);
+    const polarView = buildPolarView(clustered);
+    const level1Features = clustered.levels[0]!.features;
+    const level2Features = clustered.levels[1]!.features;
 
-    expect(clustered.map((feature) => feature.featureId).sort()).toEqual(["building/2", "line/2"]);
-    expect(clustered.find((feature) => feature.featureId === "building/2")?.levelMarker).toBe(1);
-    expect(clustered.find((feature) => feature.featureId === "line/2")?.levelMarker).toBe(2);
-    expect(clustered.find((feature) => feature.featureId === "building/2")?.baseLabel).toBe("North Building | building");
-    expect(clustered.find((feature) => feature.featureId === "line/2")?.baseLabel).toBe("highway:residential");
-    expect(clustered.every((feature) => typeof feature.clusterMarker === "string")).toBe(true);
+    expect(level1Features.map((feature) => feature.featureId)).toEqual(["building/2"]);
+    expect(level2Features.map((feature) => feature.featureId)).toEqual(["line/2"]);
+    expect(level1Features[0]?.levelMarker).toBe(1);
+    expect(level2Features[0]?.levelMarker).toBe(2);
+    expect(level1Features[0]?.baseLabel).toBe("North Building | building");
+    expect(level2Features[0]?.baseLabel).toBe("highway:residential");
+    expect([...level1Features, ...level2Features].every((feature) => typeof feature.clusterMarker === "string")).toBe(true);
 
     expect(polarView.levels[0]!.clusters).toHaveLength(1);
     expect(polarView.levels[1]!.clusters).toHaveLength(1);
