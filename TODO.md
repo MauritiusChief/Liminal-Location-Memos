@@ -21,3 +21,5 @@
 * 根据玩家行动更改存档中的大描述/小描述的功能
 * 改用 stream，避免超长时间等待
 * large description 与 small description 看怎么样也改成 stream，即能与前端互动又能作为总体 chat turn 的一部分
+* 玩家行为反向存入数据库的方法（比如修建某些东西）
+  * 以5m²为尺寸填格子，全球统一网格

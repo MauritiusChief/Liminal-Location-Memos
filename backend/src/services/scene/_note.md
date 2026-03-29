@@ -30,11 +30,26 @@
 
 组装 Polar View OBject 的工具流程是
 1. 组装扁平结构（理论上最完整的信息，但暂时没有归类）
-2. 初步打上标签，然后再 marker（cluster marker 和 level marker）
-3. 按照 marker 标记组装分为不同 level，level 内部又包含单个 feature 或者多个 feature 组成的 cluster，得到最完整版 Polar View Object
-4. 按照不同的配置，对最完整版进行过滤筛选
+2. 先进行分层与分区（LeveledPolarView），然后剔除视野遮挡（OccludedPolarView）
+3. 打上标签（base label），随后在 level 内进行聚类，level 内部包含单个 feature 或者多个 feature 组成的 cluster（ClusteredPolarView）
+4. 按照不同的配置，对 ClusteredPolarView 进行过滤筛选，得到 FilteredPolarView
 
 `polarViewObject.ts` 出口的工具可以直接给定经纬度、范围与分档好的配置名，自动读取 relational DB 数据以及存储的配置，输出一个 FilteredPolarView
+
+## Polar View Occlusion
+
+剔除视野遮挡物体发生在扁平结构组装之后，
+
+此处定义因高度而必定被看到的地物（同时用在此处以及后续 Polar View Filter）
+
+视野遮挡机制：
+1. 所有 level 1 (30~100m) 建筑视为完全可见，也因此通过 level 1 计算可见的角度区间
+2. 通过 level 2 (100~300m) 建筑计算第二层可见角度区间
+3. 对 level 2 每个地物应用 level 1 算出的可见区间，对 level 3 每个地物应用两层可见区间
+2. 分别对 level 2 和 3 的每个地物，判断是否有点能透过可见角度区间被极坐标原点看到
+3. 对实际存在的 level 2 建筑，也计算遮挡/可视区间
+4. 然后再对 level 3 幸存的地物进行再次过滤
+5. 把因高度而必定显著的地物额外加上
 
 ## Polar View Filter
 
@@ -44,13 +59,6 @@
 
 遮挡情况是决定性的，如果被遮挡那么即使细节辨别能力极强也无法看到。
 此处假定如果一个地物非常高，不用站在高处也能看到，那么这个地物一定是显著的
-
-视野遮挡机制：
-1. 所有 level 1 (30~100m) 建筑视为完全可见，也因此通过 level 1 计算遮挡/可见的角度区间
-2. 分别对 level 2 和 3 的每个地物，判断是否有点能透过可见角度区间被极坐标原点看到
-3. 对实际存在的 level 2 建筑，也计算遮挡/可视区间
-4. 然后再对 level 3 幸存的地物进行再次过滤
-5. 把因高度而必定显著的地物额外加上
 
 ## DEBUG API
 

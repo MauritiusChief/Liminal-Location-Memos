@@ -107,10 +107,12 @@ export async function fetchScenePolarFeaturesFromDb(
 }
 
 /**
- * 组装可用来打标签的扁平结构，精炼 Samples Coordinates 为真正所需要的数据：
+ * 组装可用来剔除视野遮挡的扁平结构，精炼 Samples Coordinates 为真正所需要的数据：
  * 最远点、最近点、视角宽度等等
  * @param request
- * @param polarViewFeature
+ * @param polarViewFeatures 只含有 feature id 与基本几何信息的地物列表
+ * @param featureDetails 以 feature id 为键的具体细节 map
+ * @returns
  */
 export function buildPolarViewFeature(
   request: RangedPosition,
@@ -171,9 +173,12 @@ export function buildPolarViewFeature(
 
 /**
  * 精炼 Samples Coordinates 为真正所需要的数据：
- * 最远点、最近点、视角宽度等等
+ * 最远点、最近点、视角宽度等等，然后挂载上细节
  * @param origin
  * @param polarViewFeature
+ * @param coordinates
+ * @param centerCoordinate
+ * @param featureDetails
  * @returns
  */
 function buildCommonPolarViewFeature(
