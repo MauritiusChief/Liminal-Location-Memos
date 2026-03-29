@@ -32,7 +32,7 @@ export function PolarFanChart({
   onFeatureSelect,
 }: PolarFanChartProps) {
 
-  console.log('PolarFanChart:', polarView.levels[0].clusters);
+  // console.log('PolarFanChart:', polarView.levels[0].clusters);
 
   const visibleFeatures = polarView.levels.flatMap((level) =>
     selectedLevel === 'all' || level.level === selectedLevel
