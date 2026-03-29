@@ -24,6 +24,7 @@ import {
   type PolarView,
 } from '@/services/scene/polarViewLabeled.js';
 import { applyVisualFilter } from '@/services/scene/polarViewFilter.js';
+import { buildLeveledPolarView, buildOccludedPolarView } from '@/services/scene/polarViewOcclusion.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -76,6 +77,17 @@ function buildDebugPolarView(
   featureDetailIndex: ReadonlyMap<string, SceneFeatureDetail>,
 ): PolarView {
   const polarFeatures = buildPolarViewFeature(request, polarRecords, featureDetailIndex);
+
+  // // debug:
+  // let DEBUG_polar = buildLeveledPolarView(request, polarFeatures)
+  // let DEBUG_occluded = buildOccludedPolarView(DEBUG_polar)
+  // console.log('DEBUG for buildOccludedPolarView():')
+  // DEBUG_polar.levels.forEach((l, i) => {
+  //   console.log(`level ${l.level} layer ${l.layer}`);
+  //   console.log(`剔除前${l.features.length}`);
+  //   console.log(`剔除后${DEBUG_occluded.levels[i].features.length}`);
+  // })
+
   const levelMarked = applyLevelMarker(polarFeatures);
   const labeled = attachLabelBasedOnLevel(levelMarked);
   const clusterMarked = applyClusterMarkder(labeled);
