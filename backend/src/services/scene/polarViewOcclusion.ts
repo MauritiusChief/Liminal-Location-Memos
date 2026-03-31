@@ -213,7 +213,7 @@ function isFeatureFullyVisibleInIntervals(
  * @param tags 建筑 tags
  * @returns 是否为显著建筑
  */
-function isSignificantBuilding(tags: Record<string, string>): boolean {
+export function isSignificantBuilding(tags: Record<string, string>): boolean {
   const heightMeters = parseHeightMeters(tags.height);
   if (heightMeters !== null && heightMeters >= SIGNIFICANT_BUILDING_MIN_HEIGHT_METERS) {
     return true;

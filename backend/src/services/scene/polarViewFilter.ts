@@ -1,15 +1,11 @@
 import { normalizeBearingDegrees } from "../geometry.js";
 import { PolarView } from "./polarViewLabeled.js";
+import { isSignificantBuilding, isSignificantPoi } from "./polarViewOcclusion.js";
 
 interface AngularSpan {
   clockwiseEarlyDegree: number;
   clockwiseLateDegree: number;
   angleWidthDegrees: number;
-}
-
-interface DegreeInterval {
-  startDegree: number;
-  endDegree: number;
 }
 
 /**
@@ -19,7 +15,6 @@ interface DegreeInterval {
 interface PolarViewFilter {
   id: string,
   visibleSpan?: AngularSpan, // TODO 可视的范围
-  seeThroughSpans?: AngularSpan[], // TODO 可以无视遮挡看到所有物体的范围
   buildingFilters: Record<1 | 2 | 3, PolarViewLevelFilter>,
   poiFilters: Record<1 | 2 | 3, PolarViewPoiLevelFilter>,
   lineFilters: Record<1 | 2 | 3, PolarViewLevelFilter>,
@@ -41,12 +36,6 @@ interface PolarViewPoiLevelFilter {
   randomHideRate: number,
   excludeCountThreshold: number,
 }
-
-// 因高度而显眼的地物，可以无视 seeThroughSpans 强行出现
-// 同时必定显著，不会被过滤掉
-const SIGNIFICANT_POI_TAGS = new Set(['man_made:antenna', 'man_made:tower']);
-const SIGNIFICANT_BUILDING_MIN_HEIGHT_METERS = 35;
-const SIGNIFICANT_BUILDING_MIN_LEVELS = 10;
 
 const nakedEyeFilter: PolarViewFilter = {
   id: "naked_eye",
@@ -70,19 +59,19 @@ const nakedEyeFilter: PolarViewFilter = {
   },
   poiFilters: {
     1: {
-      includeCountThreshold: 10,
+      includeCountThreshold: 5,
       randomHideRate: 0.2,
       excludeCountThreshold: 0,
     },
     2: {
-      includeCountThreshold: 50,
+      includeCountThreshold: 10,
       randomHideRate: 0.4,
-      excludeCountThreshold: 20,
+      excludeCountThreshold: 5,
     },
     3: {
-      includeCountThreshold: 75,
+      includeCountThreshold: 15,
       randomHideRate: 0.6,
-      excludeCountThreshold: 50,
+      excludeCountThreshold: 10,
     }
   },
   lineFilters: {
@@ -143,9 +132,6 @@ interface TransferState {
 export function applyVisualFilter(id: string = "naked_eye", polarView: PolarView): PolarView {
   const selectedFilter = POLAR_VIEW_FILTERS[id] || nakedEyeFilter;
   const levelByMarker = new Map(polarView.levels.map((level) => [level.level, level]));
-  const level1VisibleIntervals = buildVisibleIntervals(levelByMarker.get(1)?.clusters || []);
-  // console.log('level1VisibleIntervals',level1VisibleIntervals);
-  const level2VisibleIntervals = buildVisibleIntervals(levelByMarker.get(2)?.clusters || []);
   // console.log('level2VisibleIntervals',level2VisibleIntervals);
   let transferState: TransferState = {
     keptFeatureIds: new Set<string>(),
@@ -173,7 +159,6 @@ export function applyVisualFilter(id: string = "naked_eye", polarView: PolarView
       filteredPolarView.levels.find((entry) => entry.level === 1)?.clusters || [],
       transferState,
       selectedFilter,
-      [],
     );
   }
 
@@ -183,7 +168,6 @@ export function applyVisualFilter(id: string = "naked_eye", polarView: PolarView
       filteredPolarView.levels.find((entry) => entry.level === 2)?.clusters || [],
       transferState,
       selectedFilter,
-      [level1VisibleIntervals],
     );
   }
 
@@ -193,7 +177,6 @@ export function applyVisualFilter(id: string = "naked_eye", polarView: PolarView
       filteredPolarView.levels.find((entry) => entry.level === 3)?.clusters || [],
       transferState,
       selectedFilter,
-      [level1VisibleIntervals, level2VisibleIntervals],
     );
   }
 
@@ -214,44 +197,35 @@ function applyLevelTransfers(
   targetClusters: PolarViewCluster[],
   transferState: TransferState,
   filter: PolarViewFilter,
-  visibleIntervalsByLayer: DegreeInterval[][],
 ): TransferState {
-  const isVisible = (feature: MarkedPolarViewFeature): boolean =>
-    visibleIntervalsByLayer.every((visibleIntervals) =>
-      visibleIntervals.length === 0 || isFeatureVisibleInIntervals(feature, visibleIntervals)
-    );
 
   // 2. 先转移因高度而显著的所有地物。
-  let nextState = transferMatchingFeatures(sourceClusters, transferState, targetClusters, (feature) =>
-    isSignificantFeature(feature),
+  let nextState = transferMatchingFeatures(sourceClusters, transferState, targetClusters, (f) =>
+    isSignificantBuilding(f.featureDetail.tags) || isSignificantPoi(f.featureDetail.tags),
   );
 
   // 3. 再转移因视角宽度而显著的地物/地物簇。对于地物簇而言，其中任一地物达到了显著宽度则被转移。
   nextState = transferMatchingFeatures(sourceClusters, nextState, targetClusters, (feature, cluster) =>
-    cluster.features.length === 1 && isVisible(feature) && isFeatureIncludedByDegree(feature, filter)
+    cluster.features.length === 1 && isFeatureIncludedByDegree(feature, filter)
   );
   nextState = transferMatchingClusters(sourceClusters, nextState, targetClusters, (cluster) =>
     cluster.features.length > 1 &&
-    cluster.features.some((feature) => isVisible(feature) && isFeatureIncludedByDegree(feature, filter))
+    cluster.features.some((feature) => isFeatureIncludedByDegree(feature, filter))
   );
 
   // 4. 再转移因数量多而显著的地物簇。
   nextState = transferMatchingClusters(sourceClusters, nextState, targetClusters, (cluster) =>
-    cluster.features.length > 1 &&
-    cluster.features.some((feature) => isVisible(feature)) &&
-    isClusterIncludedByCount(cluster, filter)
+    cluster.features.length > 1 && isClusterIncludedByCount(cluster, filter)
   );
 
   // 5. 再按概率转移单个地物，单个地物看其视角宽度，达不到下限则放弃，否则概率转移。
   nextState = transferMatchingFeatures(sourceClusters, nextState, targetClusters, (feature, cluster) =>
-    cluster.features.length === 1 && isVisible(feature) && shouldKeepSingleFeatureByChance(feature, filter)
+    cluster.features.length === 1 && shouldKeepSingleFeatureByChance(feature, filter)
   );
 
   // 6. 最后按概率转移地物簇，不看其中最宽地物的宽度，只看这个簇的数量，达不到下限则放弃，否则概率转移。
   return transferMatchingClusters(sourceClusters, nextState, targetClusters, (cluster) =>
-    cluster.features.length > 1 &&
-    cluster.features.some((feature) => isVisible(feature)) &&
-    shouldKeepClusterByChance(cluster, filter)
+    cluster.features.length > 1 && shouldKeepClusterByChance(cluster, filter)
   );
 }
 
@@ -346,53 +320,6 @@ function buildFilteredCluster(
 //#region 判断函数
 
 /**
- * 判断一个地物是否因为高度或类型而显著。
- * @param feature 待判断的地物
- * @returns 是否可无视遮挡直接保留
- */
-function isSignificantFeature(feature: MarkedPolarViewFeature): boolean {
-  if (feature.category === "building") {
-    return isSignificantBuilding(feature.featureDetail.tags);
-  }
-
-  if (feature.category === "poi") {
-    return isSignificantPoi(feature.featureDetail.tags);
-  }
-
-  return false;
-}
-
-/**
- * 判断建筑 tags 是否达到“显著建筑”标准。
- * @param tags 建筑 tags
- * @returns 是否为显著建筑
- */
-function isSignificantBuilding(tags: Record<string, string>): boolean {
-  const heightMeters = parseHeightMeters(tags.height);
-  if (heightMeters !== null && heightMeters >= SIGNIFICANT_BUILDING_MIN_HEIGHT_METERS) {
-    return true;
-  }
-
-  const levelValues = [parseIntegerTag(tags["building:levels"]), parseIntegerTag(tags.level)];
-  return levelValues.some((value) => value !== null && value >= SIGNIFICANT_BUILDING_MIN_LEVELS);
-}
-
-/**
- * 判断 POI tags 是否属于显著 POI。
- * @param tags POI tags
- * @returns 是否为显著 POI
- */
-function isSignificantPoi(tags: Record<string, string>): boolean {
-  for (const [key, value] of Object.entries(tags)) {
-    if (SIGNIFICANT_POI_TAGS.has(`${key}:${value}`)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/**
  * 判断单个非 POI 地物是否因视角宽度达到必定显著阈值。
  * @param feature 待判断地物
  * @param filter 当前过滤配置
@@ -476,128 +403,6 @@ function shouldKeepClusterByChance(cluster: PolarViewCluster, filter: PolarViewF
 }
 
 //#region 帮助函数
-
-/**
- * 判断某个地物是否穿过给定的可见角度区间。
- * @param feature 待判断地物
- * @param visibleIntervals 单层可见区间
- * @returns 只要任一角区间相交则为 true
- */
-function isFeatureVisibleInIntervals(
-  feature: MarkedPolarViewFeature,
-  visibleIntervals: DegreeInterval[],
-): boolean {
-  if (visibleIntervals.length === 0) {
-    return false;
-  }
-
-  const featureIntervals = expandAngularSpan(feature.widestSpan);
-  return featureIntervals.some((featureInterval) =>
-    visibleIntervals.some((visibleInterval) => intervalsOverlap(featureInterval, visibleInterval))
-  );
-}
-
-/**
- * 基于一层内所有 building 的角跨度，计算补集形式的可见区间。
- * @param clusters 某一层的 clusters
- * @returns 该层未被 building 遮住的可见角度区间
- */
-function buildVisibleIntervals(clusters: PolarViewCluster[]): DegreeInterval[] {
-  const occlusionIntervals = mergeIntervals(
-    clusters.flatMap((cluster) =>
-      cluster.features.flatMap((feature) =>
-        feature.category === "building" ? expandAngularSpan(feature.widestSpan) : [],
-      ),
-    ),
-  );
-
-  if (occlusionIntervals.length === 0) {
-    return [{ startDegree: 0, endDegree: 360 }];
-  }
-
-  const visibleIntervals: DegreeInterval[] = [];
-  let currentDegree = 0;
-
-  for (const interval of occlusionIntervals) {
-    if (interval.startDegree > currentDegree) {
-      visibleIntervals.push({ startDegree: currentDegree, endDegree: interval.startDegree });
-    }
-    currentDegree = Math.max(currentDegree, interval.endDegree);
-  }
-
-  if (currentDegree < 360) {
-    visibleIntervals.push({ startDegree: currentDegree, endDegree: 360 });
-  }
-
-  return visibleIntervals;
-}
-
-/**
- * 将角跨度展开为一个或两个不跨 360 度的区间。
- * @param span 原始角跨度
- * @returns 规范化后的角度区间数组
- */
-function expandAngularSpan(
-  span: AngularSpan | MarkedPolarViewFeature["widestSpan"],
-): DegreeInterval[] {
-  const normalizedSpan = toAngularSpan(span);
-  if (normalizedSpan.angleWidthDegrees <= 0) {
-    return [];
-  }
-
-  if (normalizedSpan.angleWidthDegrees >= 360) {
-    return [{ startDegree: 0, endDegree: 360 }];
-  }
-
-  const startDegree = normalizeBearingDegrees(normalizedSpan.clockwiseEarlyDegree);
-  const endDegree = startDegree + normalizedSpan.angleWidthDegrees;
-  if (endDegree <= 360) {
-    return [{ startDegree, endDegree }];
-  }
-
-  return [
-    { startDegree, endDegree: 360 },
-    { startDegree: 0, endDegree: endDegree - 360 },
-  ];
-}
-
-/**
- * 合并重叠或相邻的角度区间。
- * @param intervals 原始区间列表
- * @returns 合并后的区间列表
- */
-function mergeIntervals(intervals: DegreeInterval[]): DegreeInterval[] {
-  if (intervals.length === 0) {
-    return [];
-  }
-
-  const sortedIntervals = [...intervals].sort(
-    (left, right) => left.startDegree - right.startDegree || left.endDegree - right.endDegree,
-  );
-  const mergedIntervals: DegreeInterval[] = [{ ...sortedIntervals[0]! }];
-
-  for (let index = 1; index < sortedIntervals.length; index += 1) {
-    const interval = sortedIntervals[index]!;
-    const previousInterval = mergedIntervals[mergedIntervals.length - 1]!;
-    if (interval.startDegree <= previousInterval.endDegree) {
-      previousInterval.endDegree = Math.max(previousInterval.endDegree, interval.endDegree);
-      continue;
-    }
-    mergedIntervals.push({ ...interval });
-  }
-
-  return mergedIntervals;
-}
-
-/**
- * 判断两个角度区间是否有重叠。
- * @param left 左侧区间
- * @param right 右侧区间
- * @returns 是否重叠
- */
-function intervalsOverlap(left: DegreeInterval, right: DegreeInterval): boolean {
-  return left.startDegree < right.endDegree && right.startDegree < left.endDegree;
-}
 
 /**
  * 将两种 span 结构统一转换为本文件使用的 AngularSpan。

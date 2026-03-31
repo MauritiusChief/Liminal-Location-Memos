@@ -79,8 +79,8 @@ function buildDebugPolarView(
   const occluded = applyOcclusion(levelMarked)
   const clusterMarked = applyClusterMarkder(occluded);
   const clustered = buildPolarView(clusterMarked);
-  // return applyVisualFilter('naked_eye', clustered);
-  return clustered
+  return applyVisualFilter('naked_eye', clustered);
+  // return clustered
 }
 
 function buildNormalizationDebugPayload(input: {
