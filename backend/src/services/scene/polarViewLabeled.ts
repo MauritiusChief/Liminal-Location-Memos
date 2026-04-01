@@ -13,6 +13,10 @@ import {
 } from "./sceneUtilLabel.js";
 import { isSignificantPoi, LeveledPolarView } from "./polarViewOcclusion.js";
 
+/**
+ * 实际上同时应用 base label，cluster marker 聚类这两层逻辑
+ */
+
 const UNVISITED_CLUSTER_MARKER = "PLACE_HOLDER";
 
 export interface MarkedPolarViewFeature extends PolarViewFeature {

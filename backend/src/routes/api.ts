@@ -161,6 +161,8 @@ function parsePosition(body: Pick<SummaryPreviewRequestBody, 'lat' | 'lon'>) {
   } as const;
 }
 
+//#region 常规 API
+
 apiRouter.get('/health', async (_request, response) => {
   const database = await checkDatabaseHealth();
   // console.log("BE: health");
@@ -169,27 +171,6 @@ apiRouter.get('/health', async (_request, response) => {
     service: 'backend',
     database,
   });
-});
-
-apiRouter.post('/debug/llm', async (request, response) => {
-  const { systemPrompt, message } = request.body as DebugLlmRequestBody;
-
-  if (!message || !message.trim()) {
-    response.status(400).json({ error: 'Message is required.' });
-    return;
-  }
-
-  try {
-    const result = await generateReplyWithSystemPrompt(
-      typeof systemPrompt === 'string' ? systemPrompt : DEBUG_LLM_SYSTEM_PROMPT_PLACEHOLDER,
-      message.trim(),
-    );
-    response.json(result);
-  } catch (error) {
-    response.status(502).json({
-      error: error instanceof Error ? error.message : 'Unexpected upstream error.',
-    });
-  }
 });
 
 apiRouter.post('/game/chat', async (request, response) => {
@@ -233,6 +214,29 @@ apiRouter.get('/game/session/:sessionId', async (request, response) => {
   } catch (error) {
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected session restore error.',
+    });
+  }
+});
+
+//#region DEBUG API
+
+apiRouter.post('/debug/llm', async (request, response) => {
+  const { systemPrompt, message } = request.body as DebugLlmRequestBody;
+
+  if (!message || !message.trim()) {
+    response.status(400).json({ error: 'Message is required.' });
+    return;
+  }
+
+  try {
+    const result = await generateReplyWithSystemPrompt(
+      typeof systemPrompt === 'string' ? systemPrompt : DEBUG_LLM_SYSTEM_PROMPT_PLACEHOLDER,
+      message.trim(),
+    );
+    response.json(result);
+  } catch (error) {
+    response.status(502).json({
+      error: error instanceof Error ? error.message : 'Unexpected upstream error.',
     });
   }
 });
