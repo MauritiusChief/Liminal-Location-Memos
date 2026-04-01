@@ -15,6 +15,9 @@ export interface LabeledMicroGridCell {
   sourceFeatureIds: string[];
 }
 
+/**
+ * 可直接用于组装 Micro Grid Prompt 的素材
+ */
 export interface LabeledMicroGrid {
   center: {
     lat: number;

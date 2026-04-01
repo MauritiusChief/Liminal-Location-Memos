@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
-interface Position {
+export interface Position {
   lat: number;
   lon: number;
 }
@@ -16,11 +16,11 @@ export type GameMessage =
       content: string;
     }
   | {
-      role: 'game';
+      role: 'book';
       content: string;
     }
 
-interface GameSession {
+export interface GameSession {
   sessionId: string;
   playerPosition: Position;
   playerIndoorLocation: PlayerIndoorLocation | null;
@@ -34,7 +34,7 @@ interface GameSession {
 /**
  * 文本形式记录某一经纬度附近(100m范围内)的事实性细节
  */
-interface VisualDescriptionRecord {
+export interface VisualDescriptionRecord {
   id: string;
   center: Position; // 绑定经纬度坐标
   content: string; // 纯文本形式的列表
@@ -49,7 +49,7 @@ export type BuildingSchema = Record<string, BuildingLevelSchemaDefinition>;
 /**
  * 建筑楼层蓝图组成，由该蓝图所管辖的房间以及所属的多个建筑房间蓝图组成
  */
-interface BuildingLevelSchemaDefinition {
+export interface BuildingLevelSchemaDefinition {
   span: number | [number, number]; // 对应单层与多层状况
   rooms: Record<string, BuildingSchemaRoom | BuildingSchemaSuiteRoom>;
 }
@@ -80,7 +80,7 @@ export interface BuildingSchemaSubRoom {
 /**
  * 文本形式记录某一建筑的某一楼层的事实性细节
  */
-interface LevelDescriptionRecord {
+export interface LevelDescriptionRecord {
   buildingId: string;
   level: number; // 综合绑定特定建筑的特定楼层
   content: string; // 纯文本形式的列表
@@ -121,11 +121,11 @@ const SAVE_DIRECTORY = path.resolve(process.cwd(), 'data', 'game-saves');
 const sessions = new Map<string, GameSession>();
 
 /**
- * 获取或者创建 Game Session
+ * 获取 Game Session
  * @param sessionId
- * @returns
+ * @returns 获取到的 Game Session，或者表示失败的 undefined
  */
-export async function getOrCreateSession(sessionId?: string): Promise<GameSession> {
+export async function getSession(sessionId: string): Promise<GameSession | undefined> {
   if (sessionId) {
     const existing = sessions.get(sessionId);
     if (existing) {
@@ -133,8 +133,21 @@ export async function getOrCreateSession(sessionId?: string): Promise<GameSessio
     }
   }
 
-  const nextSessionId = sessionId || randomUUID();
-  const save = await loadSaveDocument(nextSessionId) || createSaveDocument(nextSessionId);
+  const save = await loadSaveDocument(sessionId)
+  if (!save) return undefined // 没有找到 Game Session
+
+  const loadedSession: GameSession = save
+  sessions.set(sessionId, loadedSession);
+  return loadedSession;
+}
+
+/**
+ * 创建 Game Session
+ * @returns 新创建的 Game Session
+ */
+export async function createSession(): Promise<GameSession> {
+  const nextSessionId = randomUUID();
+  const save = createSaveDocument(nextSessionId);
   const loadedSession: GameSession = save
 
   sessions.set(nextSessionId, loadedSession);
