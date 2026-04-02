@@ -11,7 +11,7 @@ import {
   buildProjectedSceneSummary,
 } from '../services/sceneSummaryService.js';
 import type { GameChatRequest } from '../types/game.js';
-import type { NormalizedOverpassRequestBody, SummaryPreviewRequestBody } from '../types/overpass.js';
+import type { NormalizedOverpassRequestBody } from '../types/overpass.js';
 import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
 import { buildLabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
 import { fetchSceneFeatureDetailsFromDb } from '@/services/scene/sceneUtilFeatureDetail.js';
@@ -23,6 +23,7 @@ import {
 } from '@/services/scene/polarViewLabeled.js';
 import { applyVisualFilter } from '@/services/scene/polarViewFilter.js';
 import { buildLeveledPolarView, applyOcclusion } from '@/services/scene/polarViewOcclusion.js';
+import { buildSceneFromRequest } from '@/services/scene/sceneObject.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -141,7 +142,7 @@ function parseNormalizedRequest(body: NormalizedOverpassRequestBody) {
   } as const;
 }
 
-function parsePosition(body: Pick<SummaryPreviewRequestBody, 'lat' | 'lon'>) {
+function parsePosition(body: Partial<RangedPosition>) {
   const { lat, lon } = body;
 
   if (
@@ -326,13 +327,16 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
   }
 });
 
-apiRouter.post('/debug/db/summary-preview', async (request, response) => {
-  const body = request.body as SummaryPreviewRequestBody;
-  const parsedPosition = parsePosition(body);
+/**
+ * 预览生成的 Scene Prompt
+ */
+apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
+  const body = request.body as Partial<RangedPosition>;
+  const {value, error} = parsePosition(body);
   const radius = body.radius;
 
-  if ('error' in parsedPosition) {
-    response.status(400).json({ error: parsedPosition.error });
+  if (error) {
+    response.status(400).json({ error });
     return;
   }
 
@@ -342,18 +346,16 @@ apiRouter.post('/debug/db/summary-preview', async (request, response) => {
   }
 
   try {
-    const summaryText = await buildProjectedSceneSummary(
-      parsedPosition.value,
-      { radius },
-      'debug',
-    );
+    const {lat, lon} = value
+    const rangedPosition: RangedPosition = {lat, lon, radius}
+    const scenePrompt = await buildSceneFromRequest(rangedPosition);
     response.json({
       radius,
-      summaryText,
+      scenePrompt,
     });
   } catch (error) {
     response.status(502).json({
-      error: error instanceof Error ? error.message : 'Unexpected summary preview error.',
+      error: error instanceof Error ? error.message : '[未知错误] buildSceneFromRequest',
     });
   }
 });

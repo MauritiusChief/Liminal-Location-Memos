@@ -23,5 +23,5 @@ export function loadSceneFromDb(request: SceneQuery): Promise<SceneLoadResponse>
 }
 
 export function loadSummaryPreview(request: SummaryPreviewRequest): Promise<SummaryPreviewResponse> {
-  return postJson<SummaryPreviewResponse, SummaryPreviewRequest>('/api/debug/db/summary-preview', request);
+  return postJson<SummaryPreviewResponse, SummaryPreviewRequest>('/api/debug/db/scene-prompt-preview', request);
 }

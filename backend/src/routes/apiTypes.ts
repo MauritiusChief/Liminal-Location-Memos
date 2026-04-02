@@ -9,6 +9,8 @@ export interface RangedPosition {
   radius: number;
 }
 
+//#region DEBUG API 使用
+
 export interface debugSyncOverpassRespond {
   query: string
   features: NormalizedFeature[]

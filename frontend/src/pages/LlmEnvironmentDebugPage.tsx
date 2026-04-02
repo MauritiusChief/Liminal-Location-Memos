@@ -46,7 +46,7 @@ export function LlmEnvironmentDebugPage() {
           cols={100}
           value={message}
           onChange={(event) => dispatch(setMessage(event.target.value))}
-          placeholder="Paste the prompt preview from debug/summary-preview here."
+          placeholder="Single message would send to LLM."
         />
         <br />
         <button type="submit" disabled={request.status === 'loading'}>

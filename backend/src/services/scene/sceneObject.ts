@@ -42,6 +42,7 @@ export async function buildSceneFromRequest(request: RangedPosition): Promise<Sc
   const occluded = applyOcclusion(levelMarked)
   const clusterMarked = applyClusterMarkder(occluded);
   const clustered = buildPolarView(clusterMarked);
+  // TODO 硬编码应用 naked_eye 过滤，以后再添加可调的过滤
   const polarView = applyVisualFilter('naked_eye', clustered);
 
   return {

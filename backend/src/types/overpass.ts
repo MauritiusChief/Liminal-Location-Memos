@@ -42,17 +42,6 @@ export interface DbDebugLoadResponseBody {
   polarView?: PolarView;
 }
 
-export interface SummaryPreviewRequestBody {
-  lat?: number;
-  lon?: number;
-  radius?: number;
-}
-
-export interface SummaryPreviewResponseBody {
-  radius: number;
-  summaryText: string;
-}
-
 export type {
   ContainedPoiReference,
   DbFeatureCategory,

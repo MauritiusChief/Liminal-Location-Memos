@@ -24,7 +24,7 @@ export const router = createBrowserRouter([
         element: <RawOverpassDebugPage />,
       },
       {
-        path: 'debug/summary-preview',
+        path: 'debug/scene-prompt-preview',
         element: <SummaryPreviewPage />,
       },
       {

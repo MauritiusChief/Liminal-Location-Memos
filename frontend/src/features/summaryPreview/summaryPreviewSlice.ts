@@ -3,6 +3,10 @@ import { loadSummaryPreview } from '../../api/sceneDebugApi';
 import type { SummaryPreviewResponse } from '../../api/sceneTypes';
 import type { RootState } from '../../app/store';
 
+/**
+ * Summary 是 Scene Prompt 的旧称
+ */
+
 type RequestStatus = 'idle' | 'loading' | 'succeeded' | 'failed';
 
 interface SummaryPreviewFormState {

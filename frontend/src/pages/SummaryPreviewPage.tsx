@@ -7,6 +7,10 @@ import {
   setRadius,
 } from '../features/summaryPreview/summaryPreviewSlice';
 
+/**
+ * Summary 是 Scene Prompt 的旧称
+ */
+
 export function SummaryPreviewPage() {
   const dispatch = useAppDispatch();
   const { form, request } = useAppSelector(selectSummaryPreviewState);
