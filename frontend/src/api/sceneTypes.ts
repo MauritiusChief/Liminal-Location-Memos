@@ -188,17 +188,6 @@ export interface SceneLoadResponse {
   polarView?: PolarView;
 }
 
-export interface SummaryPreviewRequest {
-  lat: number;
-  lon: number;
-  radius: number;
-}
-
-export interface SummaryPreviewResponse {
-  radius: number;
-  summaryText: string;
-}
-
 export interface RawOverpassResponse {
   data: unknown;
 }

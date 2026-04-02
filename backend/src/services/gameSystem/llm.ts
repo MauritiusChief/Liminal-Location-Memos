@@ -5,6 +5,11 @@ import { config } from "@/config.js";
  */
 type ChatRequestMessage = { role: 'system' | 'user'; content: string }
 
+type ResponseWithReasoning = {
+  reply: string;
+  reasoning: string | null;
+}
+
 //#region 主函数
 
 /**
@@ -16,13 +21,16 @@ type ChatRequestMessage = { role: 'system' | 'user'; content: string }
 export async function generateReplySingleMessage(
   systemPrompt: string,
   message: string,
-): Promise<string> {
+): Promise<ResponseWithReasoning> {
   const messages: ChatRequestMessage[] = [
     {role: 'system', content: systemPrompt},
     {role: 'user', content: message}
   ]
   const payload = await chatCompletionSingleMessage( messages );
-  return payload.choices[0].message;
+  return {
+    reply: payload.choices[0].message.content,
+    reasoning: payload.choices[0].message.reasoning_content
+  };
 }
 
 //#region 帮助函数

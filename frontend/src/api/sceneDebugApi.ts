@@ -4,9 +4,18 @@ import type {
   SceneLoadResponse,
   SceneQuery,
   SceneSyncResponse,
-  SummaryPreviewRequest,
-  SummaryPreviewResponse,
 } from './sceneTypes';
+
+export interface debugScenePromptRequest {
+  lat: number;
+  lon: number;
+  radius: number;
+}
+
+export interface debugScenePromptResponse {
+  radius: number;
+  scenePrompt: string;
+}
 
 export function runRawOverpassQuery(input: { query: string }): Promise<RawOverpassResponse> {
   return postJson<RawOverpassResponse, { query: string }>('/api/debug/overpass', input);
@@ -17,11 +26,11 @@ export function syncSceneFromOverpass(request: SceneQuery): Promise<SceneSyncRes
 }
 
 export function loadSceneFromDb(request: SceneQuery): Promise<SceneLoadResponse> {
-  console.log("FE: loadSceneFromDb", request);
+  // console.log("FE: loadSceneFromDb", request);
 
   return postJson<SceneLoadResponse, SceneQuery>('/api/debug/db/normalized-load', request);
 }
 
-export function loadSummaryPreview(request: SummaryPreviewRequest): Promise<SummaryPreviewResponse> {
-  return postJson<SummaryPreviewResponse, SummaryPreviewRequest>('/api/debug/db/scene-prompt-preview', request);
+export function loadScenePromptPreview(request: debugScenePromptRequest): Promise<debugScenePromptResponse> {
+  return postJson<debugScenePromptResponse, debugScenePromptRequest>('/api/debug/db/scene-prompt-preview', request);
 }

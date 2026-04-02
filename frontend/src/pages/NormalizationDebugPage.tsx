@@ -89,14 +89,14 @@ export function NormalizationDebugPage() {
   }, [chartPolarView]);
 
   useEffect(() => {
-    console.log('chartPolarView:', chartPolarView);
+    // console.log('chartPolarView:', chartPolarView);
     if (!chartPolarView) {
       setSelectedPolarFeature(null);
       setHoveredPolarFeature(null);
       return;
     }
 
-    console.log('chartPolarView:', chartPolarView.levels[0].clusters);
+    // console.log('chartPolarView:', chartPolarView.levels[0].clusters);
 
     const visibleFeatureIds = new Set(
       chartPolarView.levels.flatMap((level) => level.clusters.flatMap((cluster) => cluster.features.map((feature) => feature.featureId))),

@@ -1,6 +1,5 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { loadSummaryPreview } from '../../api/sceneDebugApi';
-import type { SummaryPreviewResponse } from '../../api/sceneTypes';
+import { debugScenePromptResponse, loadScenePromptPreview } from '../../api/sceneDebugApi';
 import type { RootState } from '../../app/store';
 
 /**
@@ -22,7 +21,7 @@ interface AsyncRequestState<T> {
 
 interface SummaryPreviewState {
   form: SummaryPreviewFormState;
-  request: AsyncRequestState<SummaryPreviewResponse>;
+  request: AsyncRequestState<debugScenePromptResponse>;
 }
 
 const initialState: SummaryPreviewState = {
@@ -57,7 +56,7 @@ function parseCoordinates(coordinates: string): { lat: number; lon: number } | {
   return { lat, lon };
 }
 
-export const fetchSummaryPreview = createAsyncThunk<SummaryPreviewResponse, SummaryPreviewFormState, { rejectValue: string }>(
+export const fetchSummaryPreview = createAsyncThunk<debugScenePromptResponse, SummaryPreviewFormState, { rejectValue: string }>(
   'summaryPreview/fetchSummaryPreview',
   async ({ coordinates, radius }, { rejectWithValue }) => {
     const parsed = parseCoordinates(coordinates);
@@ -75,7 +74,7 @@ export const fetchSummaryPreview = createAsyncThunk<SummaryPreviewResponse, Summ
     }
 
     try {
-      return await loadSummaryPreview({
+      return await loadScenePromptPreview({
         ...parsed,
         radius: parsedRadius,
       });

@@ -22,11 +22,11 @@ export function SummaryPreviewPage() {
   };
 
   const handleCopy = async () => {
-    if (!request.result?.summaryText) {
+    if (!request.result?.scenePrompt) {
       return;
     }
 
-    await navigator.clipboard.writeText(request.result.summaryText);
+    await navigator.clipboard.writeText(request.result.scenePrompt);
     setCopyStatus('copied');
   };
 
@@ -59,11 +59,11 @@ export function SummaryPreviewPage() {
       <p>
         Current radius: {(request.result?.radius ?? form.radius) || 'n/a'}m
       </p>
-      <button type="button" onClick={() => void handleCopy()} disabled={!request.result?.summaryText}>
+      <button type="button" onClick={() => void handleCopy()} disabled={!request.result?.scenePrompt}>
         {copyStatus === 'copied' ? 'Copied' : 'Copy Summary'}
       </button>
       <pre style={{ border: '1px solid', maxHeight: '480px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>
-        {request.result?.summaryText || 'No summary preview yet.'}
+        {request.result?.scenePrompt || 'No summary preview yet.'}
       </pre>
 
       {request.error ? (

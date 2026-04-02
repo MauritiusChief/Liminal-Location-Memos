@@ -3,13 +3,9 @@ import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
 import type { RangedPosition } from './apiTypes.js';
 import type { SceneFeatureDetail } from '../services/sceneTypes.js';
-import { generateReplyWithSystemPrompt } from '../services/llm.js';
 import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
 import { runGameChatTurn } from '../services/gameChat.js';
 import { getSessionSnapshot } from '../services/gameSessionStore.js';
-import {
-  buildProjectedSceneSummary,
-} from '../services/sceneSummaryService.js';
 import type { GameChatRequest } from '../types/game.js';
 import type { NormalizedOverpassRequestBody } from '../types/overpass.js';
 import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
@@ -24,6 +20,8 @@ import {
 import { applyVisualFilter } from '@/services/scene/polarViewFilter.js';
 import { buildLeveledPolarView, applyOcclusion } from '@/services/scene/polarViewOcclusion.js';
 import { buildSceneFromRequest } from '@/services/scene/sceneObject.js';
+import { generateReplySingleMessage } from '@/services/gameSystem/llm.js';
+import { buildScenePrompt } from '@/services/scene/scenePrompt.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -230,14 +228,14 @@ apiRouter.post('/debug/llm', async (request, response) => {
   }
 
   try {
-    const result = await generateReplyWithSystemPrompt(
+    const result = await generateReplySingleMessage(
       typeof systemPrompt === 'string' ? systemPrompt : DEBUG_LLM_SYSTEM_PROMPT_PLACEHOLDER,
       message.trim(),
     );
     response.json(result);
   } catch (error) {
     response.status(502).json({
-      error: error instanceof Error ? error.message : 'Unexpected upstream error.',
+      error: error instanceof Error ? error.message : '[未知错误] 发生在 generateReplySingleMessage',
     });
   }
 });
@@ -332,6 +330,8 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
  */
 apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
   const body = request.body as Partial<RangedPosition>;
+  // console.log(body);
+
   const {value, error} = parsePosition(body);
   const radius = body.radius;
 
@@ -348,14 +348,16 @@ apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
   try {
     const {lat, lon} = value
     const rangedPosition: RangedPosition = {lat, lon, radius}
-    const scenePrompt = await buildSceneFromRequest(rangedPosition);
+    // console.log(rangedPosition);
+    const sceneObject = await buildSceneFromRequest(rangedPosition)
+    const scenePrompt = buildScenePrompt(sceneObject)
     response.json({
       radius,
       scenePrompt,
     });
   } catch (error) {
     response.status(502).json({
-      error: error instanceof Error ? error.message : '[未知错误] buildSceneFromRequest',
+      error: error instanceof Error ? error.message : '[未知错误] 发生在 buildSceneFromRequest',
     });
   }
 });
