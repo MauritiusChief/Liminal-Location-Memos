@@ -53,7 +53,9 @@ export async function buildSceneFromRequest(request: RangedPosition): Promise<Sc
 }
 
 export function getLargestLevel(polarView: PolarView):  1 | 2 | 3 {
-  const levels = polarView.levels.map( l => l.level)
+  const levels = polarView.levels.filter(l => l.clusters.length > 0).map( l => l.level)
+  // console.log(polarView.levels);
+  if (levels.includes(3)) return 3
   if (levels.includes(2)) return 2
   if (levels.includes(1)) return 1
   return 3 // 只要有 polar view，那么默认就是 3

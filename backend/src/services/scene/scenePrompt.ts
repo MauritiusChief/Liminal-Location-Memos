@@ -11,6 +11,8 @@ import { SceneObject } from "./sceneObject.js";
 export function buildScenePrompt(scene: SceneObject): string {
 
   const {largestLevel, microGrid, polarView} = scene
+  // console.log(largestLevel);
+
   const rangedPosision: RangedPosition = {
     lat: microGrid.center.lat, // 其实 polarView.center 也可以，下同
     lon: microGrid.center.lon,
