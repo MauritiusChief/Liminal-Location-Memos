@@ -20,5 +20,5 @@ async function initialBookMessage(request: RangedPosition): Promise<string> {
     sceenPrompt
   )
 
-  return generated
+  return generated.reply
 }
