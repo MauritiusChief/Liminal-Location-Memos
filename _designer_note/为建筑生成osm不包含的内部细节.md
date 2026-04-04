@@ -11,10 +11,7 @@
 
 ## 建筑内部随机生成的方式
 
-触发生成建筑内部时，会先随机生成一个主题，比方说有的住宅会是四口之家主题、退休老人主题、汽车爱好者主题等。
-这部分用程序随机生成。
-
-按照此主题，结合建筑的 tag 以及面积，LLM 为建筑生成模板。比方说对于多层大酒店而言，可能一楼是大堂、顶楼是游泳池、其余都是客房等。
+建筑内部是按照建筑模板（Building Schema）生成的。
 
 ```json
 {
@@ -24,23 +21,35 @@
       // 以下部分由 LLM 通过读取建筑的 tag 生成
       "levels": {
         "roof": {
-          "span": [2],
-          "rooms": { "storage:" { "count": 1, "desc": "楼顶阁楼储物间", "access": "可收回的木梯"} }
+          "span": 4,
+          "rooms": { "storage:" { "count": 1, "access": "vertical"} }
         },
         "ground": {
-          "span": [1], // 要表示多层的话，用包括首尾的数列，比方说 1~10层 为 [1,10]
+          "span": [1, 3], // 要表示多层的话，用包括首尾的数列，比方说 1~10层 为 [1,10]
           "rooms": {
-            "livingRoom:" { "count": 1, "desc": "客厅", "access": "大门"},
-            "hallWay": { "count": 1, "desc": "连接各房间的走道", "access": "木质楼梯"},
-            "masterBedRoom": { "count": 1, "desc": "主卧"},
-            "bedRoom": { "count": 2, "desc": "普通卧室"},
-            "restRoom": { "count": 2, "desc": "厕所"},
-            "kitchen": { "count": 1, "desc": "厨房"}
+            "livingRoom:" { "count": 1, "access": "entrance" },
+            "hallWay": { "count": 1, "access": "vertical" },
+            "masterBedRoomSuite": {
+              "count": 1,
+              "subRooms": {
+                "bedRoom:" { "count": 1 },
+                "bathRoom": { "count": 1}
+              }
+            },
+            "bedRoomSuite": {
+              "count": 2,
+              "subRooms": {
+                "bedRoom:" { "count": 1 },
+                "bathRoom": { "count": 1}
+              }
+            },
+            "restRoom": { "count": 1},
+            "kitchen": { "count": 1}
           }
         },
         "basement": {
-          "span": [-1],
-          "rooms": { "storage:" { "count": 1, "desc": "地下室储物间", "access": "木质楼梯"} }
+          "span": -1,
+          "rooms": { "storage:" { "count": 1, "access": "vertical"} }
         }
       }
     }
@@ -50,3 +59,7 @@
 
 当玩家进入某个房间时，则按图索骥生成房间与楼层的描述。
 房间也可能有随机主题，而此主题与建筑主题有关。
+
+而建筑模板又是由LLM综合建筑周遭的地物以及其他建筑信息进行分类，然后程序填充的。每套分类都会有固定的内部结构，比如图书馆必定有前台、讨论室、办公室等等之类的。
+
+多个建筑组合成的大建筑，则呼叫 LLM 把固定结构分配给各个建筑，然后再程序填充零碎部分，比如楼梯电梯、厕所、保洁间、储物间之类。
