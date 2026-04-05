@@ -12,7 +12,7 @@ export interface Position {
  */
 export type GameMessage =
   | {
-      role: 'user';
+      role: 'player';
       content: string;
     }
   | {
@@ -20,21 +20,25 @@ export type GameMessage =
       content: string;
     }
 
+/**
+ * TODO 记录 deepseek、Openrouter 等不同的供应商，以兼容不同的 API 格式
+ */
 export interface GameSession {
   sessionId: string;
   playerPosition: Position;
   playerIndoorLocation: PlayerIndoorLocation | null;
   messageHistory: GameMessage[];
-  activeVisualDescriptions: string[]; // 记录 id
-  visualDescriptions: Record<string, VisualDescriptionRecord>;
+  activeOutdoorVisualDescriptions: string[]; // 记录 outdoorVisualDescriptions id
+  outdoorVisualDescriptions: Record<string, OutdoorVisualDescriptionRecord>;
   buildingSchemas: Record<string, BuildingSchema>;
-  levelDescriptions: Record<string, LevelDescriptionRecord>;
+  levelVisualDescriptions: Record<string, LevelVisualDescriptionRecord>;
+  llmProvider?: string;
 }
 
 /**
  * 文本形式记录某一经纬度附近(100m范围内)的事实性细节
  */
-export interface VisualDescriptionRecord {
+export interface OutdoorVisualDescriptionRecord {
   id: string;
   center: Position; // 绑定经纬度坐标
   content: string; // 纯文本形式的列表
@@ -47,7 +51,7 @@ export interface VisualDescriptionRecord {
  */
 export type BuildingSchema = Record<string, BuildingLevelSchemaDefinition>;
 /**
- * 建筑楼层蓝图组成，由该蓝图所管辖的房间以及所属的多个建筑房间蓝图组成
+ * 建筑楼层蓝图，由该蓝图所管辖的房间以及所属的多个建筑房间蓝图组成
  */
 export interface BuildingLevelSchemaDefinition {
   span: number | [number, number]; // 对应单层与多层状况
@@ -80,8 +84,8 @@ export interface BuildingSchemaSubRoom {
 /**
  * 文本形式记录某一建筑的某一楼层的事实性细节
  */
-export interface LevelDescriptionRecord {
-  buildingId: string;
+export interface LevelVisualDescriptionRecord {
+  buildingId: string; // 综合绑定特定建筑的特定楼层
   level: number; // 综合绑定特定建筑的特定楼层
   content: string; // 纯文本形式的列表
   createdAt: string;
@@ -137,7 +141,7 @@ export async function getSession(sessionId: string): Promise<GameSession | undef
   if (!save) return undefined // 没有找到 Game Session
 
   const loadedSession: GameSession = save
-  sessions.set(sessionId, loadedSession);
+  sessions.set(sessionId, loadedSession); // 把文件存档态的 Game Session 存入内存缓存
   return loadedSession;
 }
 
@@ -188,10 +192,10 @@ function createSaveDocument(sessionId: string): GameSession {
     playerPosition: { ...DEFAULT_START_POSITION },
     playerIndoorLocation: null,
     messageHistory: [],
-    activeVisualDescriptions: [],
-    visualDescriptions: {},
+    activeOutdoorVisualDescriptions: [],
+    outdoorVisualDescriptions: {},
     buildingSchemas: {},
-    levelDescriptions: {},
+    levelVisualDescriptions: {},
   };
 }
 
