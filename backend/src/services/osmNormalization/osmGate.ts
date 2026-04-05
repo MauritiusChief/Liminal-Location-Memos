@@ -1,4 +1,4 @@
-import { debugSyncOverpassRespond } from "@/routes/apiTypes.js";
+import { debugSyncOverpassRespond, RangedPosition } from "@/routes/apiTypes.js";
 import { overpassJson } from "overpass-ts";
 import { convertOverpassToNormalizedFeatures } from "./osmNormalizer.js";
 import { syncNormalizedFeaturesToDb } from "./osmNormalizedToDb.js";
@@ -12,11 +12,7 @@ import { syncNormalizedFeaturesToDb } from "./osmNormalizedToDb.js";
  * @returns debug 用的参数
  */
 export async function syncOverpassCoverage(
-  request: {
-    lat: number,
-    lon: number,
-    radius: number,
-  },
+  request: RangedPosition,
   includeRaw: boolean = false
 ): Promise<debugSyncOverpassRespond> {
   const query = buildJsonSkelOverpassQuery(request);
@@ -42,11 +38,7 @@ export async function syncOverpassCoverage(
  * @returns 生成的 Overpass Query
  */
 function buildJsonSkelOverpassQuery(
-  para: {
-    lat: number,
-    lon: number,
-    radius: number,
-  },
+  para: RangedPosition,
 ): string {
   return [
     '[out:json][timeout:25];',

@@ -3,6 +3,7 @@ import { getStructuredTagColumns, matchFeatureCategory } from "./osmFeatureConfi
 import { withTransaction } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { PoolClient } from "pg";
+import { RangedPosition } from "@/routes/apiTypes.js";
 
 const BUILDING_TAG_COLUMNS = getStructuredTagColumns('building');
 const POI_TAG_COLUMNS = getStructuredTagColumns('poi');
@@ -26,11 +27,7 @@ const upsertAreaFeatureSqlPromise = loadServiceSql('osmRepository/upsertAreaFeat
  */
 export async function syncNormalizedFeaturesToDb(
   features: NormalizedFeature[],
-  para: {
-    lat: number,
-    lon: number,
-    radius: number,
-  },
+  para: RangedPosition,
 ): Promise<{ buildings: number; pois: number; lines: number; areas: number }> {
   return withTransaction(async (client) => {
     let buildings = 0;
