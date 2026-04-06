@@ -164,6 +164,7 @@ export async function createSession(): Promise<GameSession> {
  */
 export async function updateSession(session: GameSession): Promise<void> {
   sessions.set(session.sessionId, session);
+  // 同步写入文件
   await mkdir(SAVE_DIRECTORY, { recursive: true });
   const savePath = path.join(SAVE_DIRECTORY, `${session.sessionId}.json`)
   await writeFile(savePath, `${JSON.stringify(session, null, 2)}\n`, 'utf8');

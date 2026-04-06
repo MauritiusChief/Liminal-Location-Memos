@@ -1,7 +1,7 @@
 import { RangedPosition } from "@/routes/apiTypes.js";
 import { buildSceneFromRequest } from "../scene/sceneObject.js";
 import { buildScenePrompt } from "../scene/scenePrompt.js";
-import { INITIAL_BOOK_MESSAGE_SYSTEM, OUTDOOR_VISUAL_DESCRIPTION_SYSTEM } from "./systemPrompts.js";
+import { buildGameStateManagerSystemPrompt, INITIAL_BOOK_MESSAGE_SYSTEM, OUTDOOR_VISUAL_DESCRIPTION_SYSTEM } from "./systemPrompts.js";
 import { generateReplySingleMessage } from "./llm.js";
 import { GameSession, getSession } from "./gameSessionStore.js";
 import { GamePosition } from "@/types/game.js";
@@ -92,11 +92,48 @@ async function extractOutdoorVisualDescription(bookMessage: string, pos: GamePos
 
 /**
  * 从 Game Session 获取所需信息，尤其是玩家最新的消息，然后单独给一个 agent，令其返回该玩家行为将导致的游戏状态变化
- * @param session
+ * @param session 保证 messageHistory 最新一条为 player Message 的 GameSession
  * @returns 需要改变的游戏状态，各自需要改变的值等等
  */
 async function gameStateManager(session: GameSession): Promise<GameStateToolCall[]> {
-  return []
+  const tooDefs = [MOVE_PLAYER_TOOL].map( def => toToolPrompt(def))
+  const systemPrompt = buildGameStateManagerSystemPrompt(tooDefs)
+
+  // 获取所需信息
+  const {lat, lon} = session.playerPosition
+  const sceneObject = await buildSceneFromRequest({lat, lon, radius: 500})
+  const sceenPrompt = buildScenePrompt(sceneObject)
+  const messageHistory = session.messageHistory
+  // TODO 需要用经纬度算出极坐标方位吗？
+  const outdoorVisualDescriptions = Object.entries(session.outdoorVisualDescriptions)
+    .filter(record => session.activeOutdoorVisualDescriptions.includes(record[0]))
+    .map(record => record[1].content).join('\n')
+
+  // 组装 message
+  // TODO 目前只输入基本信息，建筑内部相关内容后续再加
+  const message = [
+    '玩家发送的消息：',
+    `> ${messageHistory[messageHistory.length - 1]}`, // 盲目取最后一个，因此输入时 session 得保证最新一个确实是 Player Message
+    '近期对话历史：', // 保留最近 3 轮 / 6 次对话，因此这里会出现 5 个 message
+    messageHistory.slice(Math.max(0, messageHistory.length - 6), messageHistory.length - 2)
+      .map(m => {
+        const hint = m.role === 'book' ? "**游戏输出**" : "**玩家输入**"
+        return `> ${hint}：${m.content}\n>`
+      }).join('\n'),
+    '---',
+    '玩家周遭环境数据：',
+    sceenPrompt,
+    '---',
+    '玩家周遭环境细节记录：',
+    outdoorVisualDescriptions,
+  ].join('\n')
+
+  const response = await generateReplySingleMessage(
+    systemPrompt,
+    message
+  )
+  const parsedToolCall: GameStateToolCall[] = JSON.parse(response.reply)
+  return parsedToolCall
 }
 
 //#region 出口函数
@@ -111,4 +148,30 @@ export async function runGameChatTurn(sessionId: string, playerMessage: string):
   const session = await getSession(sessionId)
   if (!session) return
   return session
+}
+
+//#region 帮助函数
+
+/**
+ * 把 GameStateToolDef 转化为可直接排入提示词的字符串
+ * @param tooDef
+ * @returns
+ */
+function toToolPrompt(tooDef: GameStateToolDef): string {
+  const argsStringArray = Object.entries(tooDef.arguments).map( argEntry => {
+    return [
+      `\`${argEntry[0]}\``, // 参数名
+      `- 类型：${argEntry[1].type}`,
+      `- ${argEntry[1].optional ? '可选参数' : '必要参数'}`,
+      `- 描述：${argEntry[1].description}`,
+    ]
+  })
+  const prompt = [
+    `**工具名**: \`${tooDef.name}\``,
+    '介绍：',
+    tooDef.description.join('\n'),
+    '参数：',
+    argsStringArray.join('\n')
+  ].join('\n')
+  return prompt
 }

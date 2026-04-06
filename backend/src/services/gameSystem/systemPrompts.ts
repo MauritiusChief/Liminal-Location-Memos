@@ -62,5 +62,19 @@ export const OUTDOOR_VISUAL_DESCRIPTION_SYSTEM = `
  * @returns
  */
 export function buildGameStateManagerSystemPrompt(toolDefs: string[]): string {
-  return ''
+  return `
+你是一个文字探索游戏的游戏状态管理者。你的任务是结合现有游戏状态，从玩家的输入中判断是否需要用到游戏状态调整工具列表中的一个或者多个工具，并且为用到的工具提供合适的输入参数。
+游戏状态调整工具列表：
+${toolDefs.join('\n')}
+
+输出格式：仅输出一段 JSON Array，其中的元素为 JSON Object，格式为
+{
+  "name": <工具名>,
+  "arguments": {
+    <参数名>: <该参数的值>,
+    ...
+  }
+}
+输出的 JSON Array 代表所有需要用到的工具，而其中的各个 JSON Object 元素代表每个用到的工具的详细细节。
+`
 }
