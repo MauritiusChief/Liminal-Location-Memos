@@ -1,8 +1,10 @@
 
 ## 重构计划
 
-* buildScenePrompt 改输入了
-* llm 整体都要重构
+* gameChat.ts 裁切 messageHistory 时的注释（包括 generateBookMessage() 和 gameStateManager() ）
+* Game State 已经定义为 Game Session 的同义词，所以 toGameStatePrompt() 函数以及相应的 "gameState/gameStatePrompt" 也要改名
+  * 暂定改名为 Player State，需要同步写入 _note.md
+* gameMovement.ts 函数合并入 geometry.ts 和 gameSystem/
 
 ## 近期计划
 
