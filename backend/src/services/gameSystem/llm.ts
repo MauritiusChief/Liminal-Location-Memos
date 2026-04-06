@@ -1,4 +1,6 @@
 import { config } from "@/config.js";
+import { DeepSeekChatRequest, DeepSeekChatResponse, DeepSeekMessage } from "./llmTypes.js";
+import { GameMessage } from "./gameSessionStore.js";
 
 /**
  * 不包含工具的 chat message
@@ -7,10 +9,12 @@ type ChatRequestMessage = { role: 'system' | 'user'; content: string }
 
 type ResponseWithReasoning = {
   reply: string;
-  reasoning: string | null;
+  reasoning?: string;
 }
 
 //#region 主函数
+
+// TODO 添加其他模型供应商支持，比如 Openrouter
 
 /**
  * 仅输入 system prompt 和单个 use message 的单一回合 LLM call
@@ -22,35 +26,85 @@ export async function generateReplySingleMessage(
   systemPrompt: string,
   message: string,
 ): Promise<ResponseWithReasoning> {
-  const messages: ChatRequestMessage[] = [
-    {role: 'system', content: systemPrompt},
-    {role: 'user', content: message}
-  ]
-  const payload = await chatCompletionSingleMessage( messages );
+  const requestBody: DeepSeekChatRequest = {
+    model: config.llmModel,
+    messages: [
+      {role: 'system', content: systemPrompt},
+      {role: 'user', content: message}
+    ]
+  }
+  const payload = await chatCompletionDeepSeek(requestBody);
   return {
-    reply: payload.choices[0].message.content,
+    reply: payload.choices[0].message.content ?? '[错误] 模型返回空内容！',
+    reasoning: payload.choices[0].message.reasoning_content
+  };
+}
+
+/**
+ * 专门给 generateBookMessage() 用的，生成常规回合 Book Message 的函数。
+ * 构造传统 messages 数组，并把 Game State 以虚拟 tool call/return 的方式插入。
+ * @param systemPrompt
+ * @param gameMessages
+ * @param gameState
+ * @returns
+ */
+export async function generateReplyFullMessages(
+  systemPrompt: string,
+  gameMessages: GameMessage[],
+  gameState: string,
+): Promise<ResponseWithReasoning> {
+  const messages: DeepSeekMessage[] = [{role: 'system', content: systemPrompt}]
+  gameMessages.forEach( m => {
+    m.role === 'book' ?
+      messages.push({role: 'assistant', content: m.content}) :
+      messages.push({role: 'user', content: m.content})
+  })
+
+  const syntheticToolId = 'synthetic_get_game_state'
+  // 填充虚假 tool call
+  messages.push({
+    role: 'assistant',
+    content: '',
+    reasoning_content: '',
+    tool_calls: [{
+      id: syntheticToolId, type: "function", function: {name: "refresh_game_state", arguments: "{}"}
+    }]
+  })
+  // 填充虚假 tool return
+  messages.push({
+    role: 'tool',
+    tool_call_id: syntheticToolId,
+    content: gameState,
+  })
+  const requestBody: DeepSeekChatRequest = {
+    model: config.llmModel,
+    messages
+  }
+  // 真正发送给模型
+  const payload = await chatCompletionDeepSeek(requestBody);
+  return {
+    reply: payload.choices[0].message.content ?? '[错误] 模型返回空内容！',
     reasoning: payload.choices[0].message.reasoning_content
   };
 }
 
 //#region 帮助函数
 
+// TODO 添加其他模型供应商支持，比如 Openrouter
+
 /**
- * TODO 目前仅覆盖单轮，视后续情况再抽出 fetch 逻辑或者兼容工具
+ * 通用的 Deepseek 沟通函数
  * @param messages
  * @returns
  */
-async function chatCompletionSingleMessage(messages: ChatRequestMessage[]): Promise<any> {
+async function chatCompletionDeepSeek(requestBody: DeepSeekChatRequest): Promise<DeepSeekChatResponse> {
   const response = await fetch(`${config.llmBaseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${config.llmApiKey}`,
     },
-    body: JSON.stringify({
-      model: config.llmModel,
-      messages,
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   const payload = await response.json();

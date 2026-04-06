@@ -21,6 +21,7 @@ export type GameMessage =
     }
 
 /**
+ * TODO 目前 Game State, Game Session, Game Save 都是这个类型
  * TODO 记录 deepseek、Openrouter 等不同的供应商，以兼容不同的 API 格式
  */
 export interface GameSession {

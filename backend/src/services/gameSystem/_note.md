@@ -2,14 +2,15 @@
 
 这个模块包括：
 - 游戏的初始化
-- Game Save 与 Game State 的定义以及修改函数（TODO：细化）
+- Game Save/Game State/Game Session 的定义以及修改函数
 - 游戏回合的运作机制
 - LLM 可以使用的各种工具
 
 术语：
 - **Book**：指代的是剧本，也就是该剧本的主持人。是采用多种程序生成信息然后以自然语言呈现给玩家的“直接交互者”
 - **Book Message**：与 User Message 相对，指的是剧本发送给玩家的消息
-
+- **Game State / Game Session / Game Save**：目前指的是同一个东西，即传统意义上的游戏状态。因为目前结构还很简单，所以三者混用
+  - （TODO）未来，Game Session 可能会包含登录信息，而 Game Save 可能会包含更多缓存内容
 - **Visual Description**：用来记录某地范围内，确定性数据（比如 OSM）未呈现而让 LLM 自由发挥的地方。
   - **Outdoor Visual Description**
     - 内容为以列表形式记录某一经纬度半径300米范围内的，OSM 数据未呈现，但在过往 LLM 对话中提及的细节

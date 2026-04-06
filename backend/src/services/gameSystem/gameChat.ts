@@ -1,8 +1,8 @@
 import { RangedPosition } from "@/routes/apiTypes.js";
 import { buildSceneFromRequest } from "../scene/sceneObject.js";
 import { buildScenePrompt } from "../scene/scenePrompt.js";
-import { buildGameStateManagerSystemPrompt, INITIAL_BOOK_MESSAGE_SYSTEM, OUTDOOR_VISUAL_DESCRIPTION_SYSTEM } from "./systemPrompts.js";
-import { generateReplySingleMessage } from "./llm.js";
+import { buildGameStateManagerSystemPrompt, INITIAL_BOOK_MESSAGE_SYSTEM, OUTDOOR_VISUAL_DESCRIPTION_SYSTEM, REGULAR_BOOK_MESSAGE_SYSTEM } from "./systemPrompts.js";
+import { generateReplyFullMessages, generateReplySingleMessage } from "./llm.js";
 import { GameSession, getSession } from "./gameSessionStore.js";
 import { GamePosition } from "@/types/game.js";
 
@@ -98,42 +98,42 @@ async function extractOutdoorVisualDescription(bookMessage: string, pos: GamePos
 async function gameStateManager(session: GameSession): Promise<GameStateToolCall[]> {
   const tooDefs = [MOVE_PLAYER_TOOL].map( def => toToolPrompt(def))
   const systemPrompt = buildGameStateManagerSystemPrompt(tooDefs)
-
-  // 获取所需信息
-  const {lat, lon} = session.playerPosition
-  const sceneObject = await buildSceneFromRequest({lat, lon, radius: 500})
-  const sceenPrompt = buildScenePrompt(sceneObject)
   const messageHistory = session.messageHistory
-  // TODO 需要用经纬度算出极坐标方位吗？
-  const outdoorVisualDescriptions = Object.entries(session.outdoorVisualDescriptions)
-    .filter(record => session.activeOutdoorVisualDescriptions.includes(record[0]))
-    .map(record => record[1].content).join('\n')
-
-  // 组装 message
-  // TODO 目前只输入基本信息，建筑内部相关内容后续再加
-  const message = [
-    '玩家发送的消息：',
-    `> ${messageHistory[messageHistory.length - 1]}`, // 盲目取最后一个，因此输入时 session 得保证最新一个确实是 Player Message
-    '近期对话历史：', // 保留最近 3 轮 / 6 次对话，因此这里会出现 5 个 message
-    messageHistory.slice(Math.max(0, messageHistory.length - 6), messageHistory.length - 2)
-      .map(m => {
-        const hint = m.role === 'book' ? "**游戏输出**" : "**玩家输入**"
-        return `> ${hint}：${m.content}\n>`
-      }).join('\n'),
-    '---',
-    '玩家周遭环境数据：',
-    sceenPrompt,
-    '---',
-    '玩家周遭环境细节记录：',
-    outdoorVisualDescriptions,
-  ].join('\n')
+  const gameStatePrompt = await toGameStatePrompt(session)
 
   const response = await generateReplySingleMessage(
     systemPrompt,
-    message
+    [
+      '玩家发送的消息：',
+      `> ${messageHistory[messageHistory.length - 1]}`, // 盲目取最后一个，因此输入时 session 得保证最新一个确实是 Player Message
+      '近期对话历史：', // 保留最近 3 轮 / 6 次对话，因此这里会出现 5 个 message
+      messageHistory.slice(Math.max(0, messageHistory.length - 6), messageHistory.length - 2)
+        .map(m => {
+          const hint = m.role === 'book' ? "**游戏输出**" : "**玩家输入**"
+          return `> ${hint}：${m.content}\n>`
+        }).join('\n'),
+      '---',
+      gameStatePrompt
+    ].join('\n')
   )
   const parsedToolCall: GameStateToolCall[] = JSON.parse(response.reply)
   return parsedToolCall
+}
+
+/**
+ * 以传统的 system, user, assist... 格式。以及虚拟的 tool calling 生成最新的回复
+ * @param session
+ * @returns
+ */
+async function generateBookMessage(session: GameSession): Promise<string> {
+  const gameState = await toGameStatePrompt(session)
+  const messageHistory = session.messageHistory
+  const response = await generateReplyFullMessages(
+    REGULAR_BOOK_MESSAGE_SYSTEM,
+    messageHistory.slice(Math.max(0, messageHistory.length - 12), messageHistory.length - 1), // 限制最后 6 轮 / 12 次对话
+    gameState
+  )
+  return response.reply
 }
 
 //#region 出口函数
@@ -151,6 +151,32 @@ export async function runGameChatTurn(sessionId: string, playerMessage: string):
 }
 
 //#region 帮助函数
+
+/**
+ * TODO 目前只输入基本信息，建筑内部相关内容后续再加
+ * 系统性把 Game State 转化为当前状态的提示词描述
+ * @param state
+ * @returns
+ */
+async function toGameStatePrompt(state: GameSession): Promise<string> {
+  // 获取所需信息
+  const {lat, lon} = state.playerPosition
+  const sceneObject = await buildSceneFromRequest({lat, lon, radius: 500})
+  const sceenPrompt = buildScenePrompt(sceneObject)
+  // TODO 需要用经纬度算出极坐标方位吗？
+  const outdoorVisualDescriptions = Object.entries(state.outdoorVisualDescriptions)
+    .filter(record => state.activeOutdoorVisualDescriptions.includes(record[0]))
+    .map(record => record[1].content).join('\n')
+
+  return [
+    '玩家周遭环境数据：',
+    sceenPrompt,
+    '---',
+    '玩家周遭环境细节记录：',
+    outdoorVisualDescriptions,
+  ].join('\n')
+
+}
 
 /**
  * 把 GameStateToolDef 转化为可直接排入提示词的字符串
