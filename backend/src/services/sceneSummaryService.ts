@@ -17,6 +17,7 @@ import {
   type PolarView,
 } from './scene/polarViewLabeled.js';
 import { applyOcclusion, buildLeveledPolarView } from './scene/polarViewOcclusion.js';
+import { getLargestLevel } from './scene/sceneObject.js';
 
 export const SUMMARY_PREVIEW_MODE_CONFIG = {
   detailed_far_1000: { radius: 1000 },
@@ -142,9 +143,11 @@ export async function buildProjectedSceneSummary(
   }, profile);
 
   return buildScenePrompt(
-    scene.request,
-    scene.microGrid,
-    scene.polarView,
+    {
+      largestLevel: getLargestLevel(scene.polarView),
+      microGrid: scene.microGrid,
+      polarView: scene.polarView,
+    },
   );
 }
 

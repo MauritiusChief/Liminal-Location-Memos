@@ -2,11 +2,6 @@ import { config } from "@/config.js";
 import { DeepSeekChatRequest, DeepSeekChatResponse, DeepSeekMessage } from "./llmTypes.js";
 import { GameMessage } from "./gameSessionStore.js";
 
-/**
- * 不包含工具的 chat message
- */
-type ChatRequestMessage = { role: 'system' | 'user'; content: string }
-
 type ResponseWithReasoning = {
   reply: string;
   reasoning?: string;

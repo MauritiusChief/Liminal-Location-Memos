@@ -1,15 +1,7 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { fetchGameSessionSnapshot, submitGameChat } from '../../api/gameApi';
-import { OPENING_GAME_PROMPT } from './openingPrompt';
+import { fetchGameSession, startGame as startGameRequest, submitGameTurn } from '../../api/gameApi';
 import { readStoredSessionId, writeStoredSessionId } from './sessionStorage';
-import type {
-  GameChatResponse,
-  GameMessage,
-  GamePosition,
-  GameSessionSnapshotResponse,
-  LargeDescriptionRecord,
-  SmallDescriptionRecord,
-} from '../../api/sceneTypes';
+import type { GameSession } from '../../api/gameTypes';
 import type { RootState } from '../../app/store';
 
 type RequestStatus = 'idle' | 'loading' | 'succeeded' | 'failed';
@@ -20,53 +12,45 @@ interface ChatRequestState {
 }
 
 interface ChatState {
-  // 首页状态除了消息流，还额外保留“世界状态”：
-  // 当前 session、玩家位置、大描述、小描述列表、最近移动结果。
-  sessionId: string | null;
+  session: GameSession | null;
   message: string;
-  messages: GameMessage[];
   hasStarted: boolean;
   detectedStoredSessionId: string | null;
   hasCheckedStoredSessionId: boolean;
-  playerPosition: GamePosition | null;
-  activeLargeDescription: LargeDescriptionRecord | null;
-  nearbySmallDescriptions: SmallDescriptionRecord[];
   request: ChatRequestState;
 }
 
 const initialState: ChatState = {
-  sessionId: null,
+  session: null,
   message: '',
-  messages: [],
   hasStarted: false,
   detectedStoredSessionId: null,
   hasCheckedStoredSessionId: false,
-  playerPosition: null,
-  activeLargeDescription: null,
-  nearbySmallDescriptions: [],
   request: {
     status: 'idle',
     error: null,
   },
 };
 
-export const submitChatMessage = createAsyncThunk<GameChatResponse, void, { state: RootState; rejectValue: string }>(
+export const submitChatMessage = createAsyncThunk<GameSession, void, { state: RootState; rejectValue: string }>(
   'chat/submitChatMessage',
   async (_unused, { getState, rejectWithValue }) => {
-    // thunk 直接从 Redux 里取当前输入和 sessionId，
-    // 页面组件不需要关心请求体拼装细节。
     const { chat } = getState();
     const trimmedMessage = chat.message.trim();
+    const sessionId = chat.session?.sessionId;
 
     if (!trimmedMessage) {
       return rejectWithValue('Message is required.');
     }
 
+    if (!sessionId) {
+      return rejectWithValue('Session is not started.');
+    }
+
     try {
-      return await submitGameChat({
-        sessionId: chat.sessionId || undefined,
+      return await submitGameTurn({
+        sessionId,
         message: trimmedMessage,
-        isOpeningPrompt: false,
       });
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
@@ -79,24 +63,18 @@ export const hydrateStoredSessionId = createAsyncThunk<string | null>(
   async () => readStoredSessionId(),
 );
 
-export const startGame = createAsyncThunk<GameChatResponse, void, { state: RootState; rejectValue: string }>(
+export const startGame = createAsyncThunk<GameSession, void, { rejectValue: string }>(
   'chat/startGame',
-  async (_unused, { getState, rejectWithValue }) => {
-    const { chat } = getState();
-
+  async (_unused, { rejectWithValue }) => {
     try {
-      return await submitGameChat({
-        sessionId: undefined,
-        message: OPENING_GAME_PROMPT,
-        isOpeningPrompt: true,
-      });
+      return await startGameRequest();
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
     }
   },
 );
 
-export const restoreStoredSession = createAsyncThunk<GameSessionSnapshotResponse, void, { state: RootState; rejectValue: string }>(
+export const restoreStoredSession = createAsyncThunk<GameSession, void, { state: RootState; rejectValue: string }>(
   'chat/restoreStoredSession',
   async (_unused, { getState, rejectWithValue }) => {
     const { chat } = getState();
@@ -107,12 +85,20 @@ export const restoreStoredSession = createAsyncThunk<GameSessionSnapshotResponse
     }
 
     try {
-      return await fetchGameSessionSnapshot(sessionId);
+      return await fetchGameSession(sessionId);
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
     }
   },
 );
+
+function applyLoadedSession(state: ChatState, session: GameSession): void {
+  state.session = session;
+  state.hasStarted = true;
+  state.detectedStoredSessionId = session.sessionId;
+  state.message = '';
+  writeStoredSessionId(session.sessionId);
+}
 
 const chatSlice = createSlice({
   name: 'chat',
@@ -123,9 +109,6 @@ const chatSlice = createSlice({
     },
   },
   extraReducers: (builder) => {
-    // fulfilled 时同时更新两条线：
-    // 1. 对话消息流
-    // 2. 世界状态 / debug 面板数据
     builder
       .addCase(submitChatMessage.pending, (state) => {
         state.request.status = 'loading';
@@ -133,15 +116,7 @@ const chatSlice = createSlice({
       })
       .addCase(submitChatMessage.fulfilled, (state, action) => {
         state.request.status = 'succeeded';
-        state.hasStarted = true;
-        state.sessionId = action.payload.sessionId;
-        state.detectedStoredSessionId = action.payload.sessionId;
-        state.playerPosition = action.payload.playerPosition;
-        state.activeLargeDescription = action.payload.activeLargeDescription;
-        state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
-        state.messages = action.payload.messages;
-        state.message = '';
-        writeStoredSessionId(action.payload.sessionId);
+        applyLoadedSession(state, action.payload);
       })
       .addCase(submitChatMessage.rejected, (state, action) => {
         state.request.status = 'failed';
@@ -157,14 +132,7 @@ const chatSlice = createSlice({
       })
       .addCase(startGame.fulfilled, (state, action) => {
         state.request.status = 'succeeded';
-        state.hasStarted = true;
-        state.sessionId = action.payload.sessionId;
-        state.detectedStoredSessionId = action.payload.sessionId;
-        state.playerPosition = action.payload.playerPosition;
-        state.activeLargeDescription = action.payload.activeLargeDescription;
-        state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
-        state.messages = action.payload.messages;
-        writeStoredSessionId(action.payload.sessionId);
+        applyLoadedSession(state, action.payload);
       })
       .addCase(startGame.rejected, (state, action) => {
         state.request.status = 'failed';
@@ -177,14 +145,7 @@ const chatSlice = createSlice({
       })
       .addCase(restoreStoredSession.fulfilled, (state, action) => {
         state.request.status = 'succeeded';
-        state.hasStarted = action.payload.hasStarted;
-        state.sessionId = action.payload.sessionId;
-        state.detectedStoredSessionId = action.payload.sessionId;
-        state.messages = action.payload.messages;
-        state.playerPosition = action.payload.playerPosition;
-        state.activeLargeDescription = action.payload.activeLargeDescription;
-        state.nearbySmallDescriptions = action.payload.nearbySmallDescriptions;
-        writeStoredSessionId(action.payload.sessionId);
+        applyLoadedSession(state, action.payload);
       })
       .addCase(restoreStoredSession.rejected, (state, action) => {
         state.request.status = 'failed';

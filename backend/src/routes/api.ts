@@ -4,9 +4,6 @@ import { checkDatabaseHealth } from '../db/client.js';
 import type { RangedPosition } from './apiTypes.js';
 import type { SceneFeatureDetail } from '../services/sceneTypes.js';
 import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
-import { runGameChatTurn } from '../services/gameChat.js';
-import { getSessionSnapshot } from '../services/gameSessionStore.js';
-import type { GameChatRequest } from '../types/game.js';
 import type { NormalizedOverpassRequestBody } from '../types/overpass.js';
 import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
 import { buildLabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
@@ -22,6 +19,8 @@ import { buildLeveledPolarView, applyOcclusion } from '@/services/scene/polarVie
 import { buildSceneFromRequest } from '@/services/scene/sceneObject.js';
 import { generateReplySingleMessage } from '@/services/gameSystem/llm.js';
 import { buildScenePrompt } from '@/services/scene/scenePrompt.js';
+import { getSession } from '@/services/gameSystem/gameSessionStore.js';
+import { runGameTurn, startGame } from '@/services/gameSystem/gameChat.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -30,6 +29,11 @@ interface DebugLlmRequestBody {
 
 interface OverpassRequestBody {
   query?: string;
+}
+
+interface GameTurnRequestBody {
+  sessionId?: string;
+  message?: string;
 }
 
 const DEBUG_LLM_SYSTEM_PROMPT_PLACEHOLDER = '[debug system prompt placeholder]';
@@ -172,8 +176,24 @@ apiRouter.get('/health', async (_request, response) => {
   });
 });
 
-apiRouter.post('/game/chat', async (request, response) => {
-  const { sessionId, message, isOpeningPrompt } = request.body as GameChatRequest;
+apiRouter.post('/game/start', async (_request, response) => {
+  try {
+    const result = await startGame();
+    response.json(result);
+  } catch (error) {
+    response.status(502).json({
+      error: error instanceof Error ? error.message : 'Unexpected game start error.',
+    });
+  }
+});
+
+apiRouter.post('/game/turn', async (request, response) => {
+  const { sessionId, message } = request.body as GameTurnRequestBody;
+
+  if (typeof sessionId !== 'string' || !sessionId.trim()) {
+    response.status(400).json({ error: 'sessionId is required.' });
+    return;
+  }
 
   if (!message || !message.trim()) {
     response.status(400).json({ error: 'Message is required.' });
@@ -181,15 +201,16 @@ apiRouter.post('/game/chat', async (request, response) => {
   }
 
   try {
-    const result = await runGameChatTurn({
-      sessionId: typeof sessionId === 'string' ? sessionId : undefined,
-      message: message.trim(),
-      isOpeningPrompt: isOpeningPrompt === true,
-    });
+    const result = await runGameTurn(sessionId.trim(), message.trim());
+    if (!result) {
+      response.status(404).json({ error: 'Session not found.' });
+      return;
+    }
+
     response.json(result);
   } catch (error) {
     response.status(502).json({
-      error: error instanceof Error ? error.message : 'Unexpected game chat error.',
+      error: error instanceof Error ? error.message : 'Unexpected game turn error.',
     });
   }
 });
@@ -203,13 +224,13 @@ apiRouter.get('/game/session/:sessionId', async (request, response) => {
   }
 
   try {
-    const snapshot = await getSessionSnapshot(sessionId);
-    if (!snapshot) {
+    const session = await getSession(sessionId);
+    if (!session) {
       response.status(404).json({ error: 'Session not found.' });
       return;
     }
 
-    response.json(snapshot);
+    response.json(session);
   } catch (error) {
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected session restore error.',
