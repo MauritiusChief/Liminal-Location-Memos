@@ -2,12 +2,10 @@ import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
 import type { RangedPosition } from './apiTypes.js';
-import type { SceneFeatureDetail } from '../services/sceneTypes.js';
 import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
-import type { NormalizedOverpassRequestBody } from '../types/overpass.js';
 import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
 import { buildLabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
-import { fetchSceneFeatureDetailsFromDb } from '@/services/scene/sceneUtilFeatureDetail.js';
+import { fetchSceneFeatureDetailsFromDb, SceneFeatureDetail } from '@/services/scene/sceneUtilFeatureDetail.js';
 import { buildPolarViewFeature, fetchScenePolarFeaturesFromDb } from '@/services/scene/polarViewObject.js';
 import {
   applyClusterMarkder,
@@ -117,7 +115,7 @@ function buildNormalizationDebugPayload(input: {
   };
 }
 
-function parseNormalizedRequest(body: NormalizedOverpassRequestBody) {
+function parseNormalizedRequest(body: RangedPosition) {
   const { lat, lon, radius } = body;
 
   if (
@@ -283,7 +281,7 @@ apiRouter.post('/debug/overpass', async (request, response) => {
 });
 
 apiRouter.post('/debug/db/sync-overpass', async (request, response) => {
-  const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
+  const parsed = parseNormalizedRequest(request.body as RangedPosition);
 
   if ('error' in parsed) {
     response.status(400).json({ error: parsed.error });
@@ -309,7 +307,7 @@ apiRouter.post('/debug/db/sync-overpass', async (request, response) => {
 });
 
 apiRouter.post('/debug/db/normalized-load', async (request, response) => {
-  const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
+  const parsed = parseNormalizedRequest(request.body as RangedPosition);
   // console.log("BE: normalized-load", parsed);
 
   if ('error' in parsed) {

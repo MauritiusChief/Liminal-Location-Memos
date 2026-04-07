@@ -1,3 +1,5 @@
+import { Position } from "./gameSystem/gameSessionStore.js";
+
 export const EARTH_RADIUS_METERS = 6371000
 
 export function distanceBetweenCoordinates(
@@ -22,6 +24,16 @@ export function distanceBetweenCoordinates(
 
   const angularDistance = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
   return earthRadiusMeters * angularDistance;
+}
+
+/**
+ * 计算两个经纬度点之间的直线距离，单位为米。
+ */
+export function distanceToPosition(left: Position, right: Position): number {
+  return distanceBetweenCoordinates(
+    [left.lon, left.lat],
+    [right.lon, right.lat],
+  );
 }
 
 export function bearingBetweenCoordinates(

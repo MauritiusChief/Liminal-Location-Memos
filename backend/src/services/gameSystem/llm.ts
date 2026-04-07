@@ -77,6 +77,8 @@ export async function generateReplyFullMessages(
   }
   // 真正发送给模型
   const payload = await chatCompletionDeepSeek(requestBody);
+  console.log('generateReplyFullMessages() 函数中 Deepseek 返回 message：',payload.choices[0].message);
+
   return {
     reply: payload.choices[0].message.content ?? '[错误] 模型返回空内容！',
     reasoning: payload.choices[0].message.reasoning_content

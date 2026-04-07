@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { RangedPosition } from '@/routes/apiTypes.js';
-import { degreesToRadians, distanceBetweenCoordinates, EARTH_RADIUS_METERS, normalizeLongitude, radiansToDegrees } from '@/services/geometry.js';
+import { degreesToRadians, distanceBetweenCoordinates, distanceToPosition, EARTH_RADIUS_METERS, normalizeLongitude, radiansToDegrees } from '@/services/geometry.js';
 import { buildSceneFromRequest } from '../scene/sceneObject.js';
 import { buildScenePrompt } from '../scene/scenePrompt.js';
 import {
@@ -9,6 +9,7 @@ import {
   OUTDOOR_VISUAL_DESCRIPTION_SYSTEM,
   REGULAR_BOOK_MESSAGE_SYSTEM,
 } from './systemPrompts.js';
+import { writeGameDebugMarkdown } from './gameDebug.js';
 import { generateReplyFullMessages, generateReplySingleMessage } from './llm.js';
 import {
   createSession,
@@ -70,12 +71,21 @@ const MOVE_PLAYER_TOOL: GameStateToolDef = {
  * @returns 整个游戏的第一条描述周遭状况的 Book Message
  */
 async function initialBookMessage(request: RangedPosition): Promise<string> {
+  console.log(`[${new Date().toISOString()}] initialBookMessage() 触发`);
+
   const sceneObject = await buildSceneFromRequest(request);
   const scenePrompt = buildScenePrompt(sceneObject);
   const generated = await generateReplySingleMessage(
     INITIAL_BOOK_MESSAGE_SYSTEM,
     scenePrompt,
   );
+  await writeGameDebugMarkdown({
+    functionName: 'initialBookMessage',
+    systemPrompt: INITIAL_BOOK_MESSAGE_SYSTEM,
+    input: scenePrompt,
+    reply: generated.reply,
+    reasoning: generated.reasoning,
+  });
 
   return generated.reply;
 }
@@ -90,6 +100,8 @@ async function extractOutdoorVisualDescription(
   pos: Position,
   oldVisualDescription?: string,
 ): Promise<string> {
+  console.log(`[${new Date().toISOString()}] 开始 extractOutdoorVisualDescription()`);
+
   const { lat, lon } = pos;
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: VISUAL_DESCRIPTION_RADIUS_METERS });
   const scenePrompt = buildScenePrompt(sceneObject);
@@ -109,6 +121,13 @@ async function extractOutdoorVisualDescription(
     OUTDOOR_VISUAL_DESCRIPTION_SYSTEM,
     message,
   );
+  await writeGameDebugMarkdown({
+    functionName: 'extractOutdoorVisualDescription',
+    systemPrompt: OUTDOOR_VISUAL_DESCRIPTION_SYSTEM,
+    input: message,
+    reply: response.reply,
+    reasoning: response.reasoning,
+  });
   return response.reply;
 }
 
@@ -118,34 +137,48 @@ async function extractOutdoorVisualDescription(
  * @returns 需要改变的游戏状态，各自需要改变的值等等，如果出错则返回空列表
  */
 async function gameStateManager(session: GameSession): Promise<GameStateToolCall[]> {
+  console.log(`[${new Date().toISOString()}] gameStateManager() 触发`);
+
   const toolDefs = [MOVE_PLAYER_TOOL].map((def) => toToolPrompt(def));
   const systemPrompt = buildGameStateManagerSystemPrompt(toolDefs);
   const messageHistory = session.messageHistory;
   const latestPlayerMessage = messageHistory[messageHistory.length - 1]; // 盲目取最后一个，因此输入时 session 得保证最新一个确实是 Player Message
   const worldStatePrompt = await toWorldStatePrompt(session);
+  const message = [
+    '玩家发送的消息：',
+    `> ${latestPlayerMessage?.content ?? ''}`,
+    '近期对话历史：', // 保留最近 3 轮 / 6 次对话
+    messageHistory
+      .slice(Math.max(0, messageHistory.length - 6), messageHistory.length - 1) // 最新对话已经由 latestPlayerMessage 表示，所以这里其实是 5 个对话
+      .map((message) => {
+        const hint = message.role === 'book' ? '**游戏输出**' : '**玩家输入**';
+        return `> ${hint}：${message.content}\n>`;
+      })
+      .join('\n'),
+    '---',
+    worldStatePrompt,
+  ].join('\n');
 
   try {
     // 获取 LLM 返回
     const response = await generateReplySingleMessage(
       systemPrompt,
-      [
-        '玩家发送的消息：',
-        `> ${latestPlayerMessage?.content ?? ''}`,
-        '近期对话历史：', // 保留最近 3 轮 / 6 次对话
-        messageHistory
-          .slice(Math.max(0, messageHistory.length - 6), messageHistory.length - 1) // 最新对话已经由 latestPlayerMessage 表示，所以这里其实是 5 个对话
-          .map((message) => {
-            const hint = message.role === 'book' ? '**游戏输出**' : '**玩家输入**';
-            return `> ${hint}：${message.content}\n>`;
-          })
-          .join('\n'),
-        '---',
-        worldStatePrompt,
-      ].join('\n'),
+      message,
     );
+    let replyForDebug: GameStateToolCall[] | string = response.reply;
     // 解析返回
-    const parsedToolCall: GameStateToolCall[] = JSON.parse(response.reply)
-    return parsedToolCall
+    const parsedToolCall: GameStateToolCall[] = JSON.parse(response.reply);
+    replyForDebug = parsedToolCall;
+    await writeGameDebugMarkdown({
+      functionName: 'gameStateManager',
+      systemPrompt,
+      input: message,
+      worldStatePrompt,
+      reply: replyForDebug,
+      reasoning: response.reasoning,
+    });
+    return parsedToolCall;
+
   } catch(e) {
     console.error(e)
     return []
@@ -158,6 +191,8 @@ async function gameStateManager(session: GameSession): Promise<GameStateToolCall
  * @returns
  */
 async function generateBookMessage(session: GameSession): Promise<string> {
+  console.log(`[${new Date().toISOString()}] generateBookMessage() 触发`);
+
   const worldStatePrompt = await toWorldStatePrompt(session);
   const messageHistory = session.messageHistory;
   const response = await generateReplyFullMessages(
@@ -165,6 +200,14 @@ async function generateBookMessage(session: GameSession): Promise<string> {
     messageHistory.slice(Math.max(0, messageHistory.length - 12)),
     worldStatePrompt,
   );
+  await writeGameDebugMarkdown({
+    functionName: 'generateBookMessage',
+    systemPrompt: REGULAR_BOOK_MESSAGE_SYSTEM,
+    input: messageHistory.slice(Math.max(0, messageHistory.length - 12)),
+    worldStatePrompt,
+    reply: response.reply,
+    reasoning: response.reasoning,
+  });
   return response.reply;
 }
 
@@ -175,6 +218,8 @@ async function generateBookMessage(session: GameSession): Promise<string> {
  * @returns 完整初始化后的 Game Session
  */
 export async function startGame(): Promise<GameSession> {
+  console.log(`[${new Date().toISOString()}] 开始游戏`);
+
   const session = await createSession();
   const { lat, lon } = session.playerPosition;
   const openingMessage = await initialBookMessage({
@@ -200,6 +245,8 @@ export async function startGame(): Promise<GameSession> {
  * @returns 包含最终 Book Message 在内的整个 GameSession，或者表示失败的 undefined
  */
 export async function runGameTurn(sessionId: string, playerMessage: string): Promise<GameSession | undefined> {
+  console.log(`[${new Date().toISOString()}] 运行回合...`);
+
   const session = await getSession(sessionId);
   if (!session) {
     return undefined;
@@ -221,6 +268,7 @@ export async function runGameTurn(sessionId: string, playerMessage: string): Pro
     content: bookMessage,
   });
 
+  console.log(`[${new Date().toISOString()}] 回合即将结束，将要更新存档并返回前端数据`);
   await upsertOutdoorVisualDescription(session, bookMessage);
   await updateSession(session);
   return session;
@@ -258,6 +306,8 @@ async function toWorldStatePrompt(state: GameSession): Promise<string> {
  */
 function applyGameStateToolCalls(session: GameSession, toolCalls: GameStateToolCall[]): void {
   for (const toolCall of toolCalls) {
+    console.log(`[${new Date().toISOString()}] 开始解析 ${toolCall.name} 工具参数：`, toolCall.arguments);
+
     if (toolCall.name !== MOVE_PLAYER_TOOL.name) {
       continue;
     }
@@ -273,6 +323,8 @@ function applyGameStateToolCalls(session: GameSession, toolCalls: GameStateToolC
     if (!nextPosition) {
       continue;
     }
+
+    console.log(`[${new Date().toISOString()}] 移动玩家工具完成`);
 
     session.playerPosition = nextPosition;
     session.playerIndoorLocation = null;
@@ -374,15 +426,6 @@ function findNearestOutdoorVisualDescription(
   return records[0]?.record || null;
 }
 
-/**
- * 计算两个经纬度点之间的直线距离，单位为米。
- */
-function distanceToPosition(left: Position, right: Position): number {
-  return distanceBetweenCoordinates(
-    [left.lon, left.lat],
-    [right.lon, right.lat],
-  );
-}
 
 /**
  * 把 GameStateToolDef 转化为可直接排入提示词的字符串
