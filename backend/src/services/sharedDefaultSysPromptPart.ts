@@ -1,3 +1,4 @@
+// deprecated
 
 export const styleRule = `
 游戏设定：

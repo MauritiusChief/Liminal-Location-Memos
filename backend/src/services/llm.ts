@@ -1,5 +1,6 @@
 import { config } from '../config.js';
-import { writeSceneDescriptionSnapshot, type SceneSnapshotType } from './gameChatDebugLog.js';
+
+// deprecated
 
 interface ChatCompletionContentPart {
   type?: string;
@@ -91,21 +92,11 @@ export type ChatRequestMessage =
 export async function generateReplyWithSystemPrompt(
   systemPrompt: string,
   message: string,
-  options?: { snapshotType?: SceneSnapshotType },
 ): Promise<LlmDebugResponse> {
   const messages = buildSingleTurnMessages(systemPrompt, message);
   const payload = await requestChatCompletion({ messages });
   const responseMessage = payload?.choices?.[0]?.message;
   const result = extractLlmDebugResponse(responseMessage);
-
-  if (options?.snapshotType) {
-    await writeSceneDescriptionSnapshot({
-      type: options.snapshotType,
-      messages,
-      content: result.reply,
-      reasoning: result.reasoning,
-    });
-  }
 
   return result;
 }
