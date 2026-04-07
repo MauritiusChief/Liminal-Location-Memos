@@ -1,4 +1,6 @@
 
+//#region DeepSeek 类型
+
 export type DeepSeekTool = {
   type: "function"
   function: {
@@ -49,5 +51,58 @@ export type DeepSeekChatResponse = {
       tool_calls?: DeepSeekToolCall[]
     }
     finish_reason: "stop" | "tool_calls"
+  }[]
+}
+
+//#region Openrouter 类型
+
+export type OpenRouterTool = DeepSeekTool
+
+export type OpenRouterToolCall = DeepSeekToolCall
+
+export type OpenRouterMessage = {
+  role: "system" | "user" | "assistant" | "tool"
+  content?: string
+  reasoning?: string
+  reasoning_content?: string
+  tool_calls?: OpenRouterToolCall[]
+  tool_call_id?: string
+}
+
+export type OpenRouterChatRequest = {
+  model: string
+  messages: OpenRouterMessage[]
+  tools?: OpenRouterTool[]
+  tool_choice?: "auto" | "none" | { type: "function"; function: { name: string } }
+  reasoning?: { enabled: boolean }
+  include_reasoning?: boolean
+}
+
+export type OpenRouterChatResponse = {
+  choices: {
+    message: {
+      role: "assistant"
+      content?: string
+      reasoning?: string
+      reasoning_content?: string
+      tool_calls?: OpenRouterToolCall[]
+    }
+    finish_reason?: "stop" | "tool_calls" | string
+  }[]
+}
+
+//#region 共享类型
+
+export type LlmProviderMessage = DeepSeekMessage | OpenRouterMessage
+
+export type NormalizedLlmResponse = {
+  choices: {
+    message: {
+      role: "assistant"
+      content?: string
+      reasoning_content?: string
+      tool_calls?: DeepSeekToolCall[] | OpenRouterToolCall[]
+    }
+    finish_reason?: "stop" | "tool_calls" | string
   }[]
 }

@@ -1,5 +1,13 @@
 import { config } from "@/config.js";
-import { DeepSeekChatRequest, DeepSeekChatResponse, DeepSeekMessage } from "./llmTypes.js";
+import {
+  DeepSeekChatRequest,
+  DeepSeekChatResponse,
+  DeepSeekMessage,
+  NormalizedLlmResponse,
+  OpenRouterChatRequest,
+  OpenRouterChatResponse,
+  OpenRouterMessage,
+} from "./llmTypes.js";
 import { GameMessage } from "./gameSessionStore.js";
 
 type ResponseWithReasoning = {
@@ -21,18 +29,11 @@ export async function generateReplySingleMessage(
   systemPrompt: string,
   message: string,
 ): Promise<ResponseWithReasoning> {
-  const requestBody: DeepSeekChatRequest = {
-    model: config.llmModel,
-    messages: [
-      {role: 'system', content: systemPrompt},
-      {role: 'user', content: message}
-    ]
-  }
-  const payload = await chatCompletionDeepSeek(requestBody);
-  return {
-    reply: payload.choices[0].message.content ?? '[错误] 模型返回空内容！',
-    reasoning: payload.choices[0].message.reasoning_content
-  };
+  const payload = await chatCompletion(buildReasoningRequest([
+    {role: 'system', content: systemPrompt},
+    {role: 'user', content: message}
+  ]));
+  return extractResponseWithReasoning(payload);
 }
 
 /**
@@ -48,7 +49,7 @@ export async function generateReplyFullMessages(
   gameMessages: GameMessage[],
   worldState: string,
 ): Promise<ResponseWithReasoning> {
-  const messages: DeepSeekMessage[] = [{role: 'system', content: systemPrompt}]
+  const messages: DeepSeekMessage[] | OpenRouterMessage[] = [{role: 'system', content: systemPrompt}]
   gameMessages.forEach( m => {
     m.role === 'book' ?
       messages.push({role: 'assistant', content: m.content}) :
@@ -71,18 +72,12 @@ export async function generateReplyFullMessages(
     tool_call_id: syntheticToolId,
     content: worldState,
   })
-  const requestBody: DeepSeekChatRequest = {
-    model: config.llmModel,
-    messages
-  }
+  const requestBody = buildReasoningRequest(messages)
   // 真正发送给模型
-  const payload = await chatCompletionDeepSeek(requestBody);
+  const payload = await chatCompletion(requestBody);
   console.log('generateReplyFullMessages() 函数中 Deepseek 返回 message：',payload.choices[0].message);
 
-  return {
-    reply: payload.choices[0].message.content ?? '[错误] 模型返回空内容！',
-    reasoning: payload.choices[0].message.reasoning_content
-  };
+  return extractResponseWithReasoning(payload);
 }
 
 //#region 帮助函数
@@ -94,6 +89,16 @@ export async function generateReplyFullMessages(
  * @param messages
  * @returns
  */
+async function chatCompletion(requestBody: DeepSeekChatRequest | OpenRouterChatRequest): Promise<NormalizedLlmResponse> {
+  if (config.llmProvider === 'deepseek') {
+    const payload = await chatCompletionDeepSeek(requestBody as DeepSeekChatRequest);
+    return normalizeDeepSeekResponse(payload);
+  }
+
+  const payload = await chatCompletionOpenRouter(requestBody as OpenRouterChatRequest);
+  return normalizeOpenRouterResponse(payload);
+}
+
 async function chatCompletionDeepSeek(requestBody: DeepSeekChatRequest): Promise<DeepSeekChatResponse> {
   const response = await fetch(`${config.llmBaseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
     method: 'POST',
@@ -111,4 +116,75 @@ async function chatCompletionDeepSeek(requestBody: DeepSeekChatRequest): Promise
   }
 
   return payload;
+}
+
+async function chatCompletionOpenRouter(requestBody: OpenRouterChatRequest): Promise<OpenRouterChatResponse> {
+  const response = await fetch(`${config.llmBaseUrl.replace(/\/$/, '')}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.llmApiKey}`,
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || 'LLM request failed.');
+  }
+
+  return payload;
+}
+
+function buildReasoningRequest(messages: DeepSeekMessage[] | OpenRouterMessage[]): DeepSeekChatRequest | OpenRouterChatRequest {
+  if (config.llmProvider === 'deepseek') {
+    return {
+      model: config.llmModel,
+      messages: messages as DeepSeekMessage[],
+      thinking: { type: 'enabled' }
+    };
+  }
+
+  return {
+    model: config.llmModel,
+    messages: messages as OpenRouterMessage[],
+    reasoning: { enabled: true },
+    include_reasoning: true
+  };
+}
+
+function normalizeDeepSeekResponse(payload: DeepSeekChatResponse): NormalizedLlmResponse {
+  return {
+    choices: payload.choices.map((choice) => ({
+      message: {
+        role: choice.message.role,
+        content: choice.message.content,
+        reasoning_content: choice.message.reasoning_content,
+        tool_calls: choice.message.tool_calls,
+      },
+      finish_reason: choice.finish_reason,
+    })),
+  };
+}
+
+function normalizeOpenRouterResponse(payload: OpenRouterChatResponse): NormalizedLlmResponse {
+  return {
+    choices: payload.choices.map((choice) => ({
+      message: {
+        role: choice.message.role,
+        content: choice.message.content,
+        reasoning_content: choice.message.reasoning_content ?? choice.message.reasoning,
+        tool_calls: choice.message.tool_calls,
+      },
+      finish_reason: choice.finish_reason,
+    })),
+  };
+}
+
+function extractResponseWithReasoning(payload: NormalizedLlmResponse): ResponseWithReasoning {
+  return {
+    reply: payload.choices[0]?.message.content ?? '[错误] 模型返回空内容！',
+    reasoning: payload.choices[0]?.message.reasoning_content
+  };
 }
