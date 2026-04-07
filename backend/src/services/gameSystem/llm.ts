@@ -15,6 +15,8 @@ type ResponseWithReasoning = {
   reasoning?: string;
 }
 
+type ReplyFormat = 'text' | 'json';
+
 //#region 主函数
 
 // TODO 添加其他模型供应商支持，比如 Openrouter
@@ -29,11 +31,35 @@ export async function generateReplySingleMessage(
   systemPrompt: string,
   message: string,
 ): Promise<ResponseWithReasoning> {
-  const payload = await chatCompletion(buildReasoningRequest([
+  const payload = await chatCompletion(buildSingleMessageRequest(
+    systemPrompt,
+    message,
+    'text',
+  ));
+  return extractResponseWithReasoning(payload);
+}
+
+export async function generateJsonReplySingleMessage(
+  systemPrompt: string,
+  message: string,
+): Promise<ResponseWithReasoning> {
+  const payload = await chatCompletion(buildSingleMessageRequest(
+    systemPrompt,
+    message,
+    'json',
+  ));
+  return extractResponseWithReasoning(payload);
+}
+
+function buildSingleMessageRequest(
+  systemPrompt: string,
+  message: string,
+  replyFormat: ReplyFormat,
+): DeepSeekChatRequest | OpenRouterChatRequest {
+  return buildReasoningRequest([
     {role: 'system', content: systemPrompt},
     {role: 'user', content: message}
-  ]));
-  return extractResponseWithReasoning(payload);
+  ], replyFormat);
 }
 
 /**
@@ -72,7 +98,7 @@ export async function generateReplyFullMessages(
     tool_call_id: syntheticToolId,
     content: worldState,
   })
-  const requestBody = buildReasoningRequest(messages)
+  const requestBody = buildReasoningRequest(messages, 'text')
   // 真正发送给模型
   const payload = await chatCompletion(requestBody);
   console.log('generateReplyFullMessages() 函数中 Deepseek 返回 message：',payload.choices[0].message);
@@ -137,21 +163,36 @@ async function chatCompletionOpenRouter(requestBody: OpenRouterChatRequest): Pro
   return payload;
 }
 
-function buildReasoningRequest(messages: DeepSeekMessage[] | OpenRouterMessage[]): DeepSeekChatRequest | OpenRouterChatRequest {
+function buildReasoningRequest(
+  messages: DeepSeekMessage[] | OpenRouterMessage[],
+  replyFormat: ReplyFormat,
+): DeepSeekChatRequest | OpenRouterChatRequest {
   if (config.llmProvider === 'deepseek') {
-    return {
+    const requestBody: DeepSeekChatRequest = {
       model: config.llmModel,
       messages: messages as DeepSeekMessage[],
       thinking: { type: 'enabled' }
     };
+
+    if (replyFormat === 'json') {
+      requestBody.response_format = { type: 'json_object' };
+    }
+
+    return requestBody;
   }
 
-  return {
+  const requestBody: OpenRouterChatRequest = {
     model: config.llmModel,
     messages: messages as OpenRouterMessage[],
     reasoning: { enabled: true },
     include_reasoning: true
   };
+
+  if (replyFormat === 'json') {
+    requestBody.response_format = { type: 'json_object' };
+  }
+
+  return requestBody;
 }
 
 function normalizeDeepSeekResponse(payload: DeepSeekChatResponse): NormalizedLlmResponse {

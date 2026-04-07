@@ -10,7 +10,7 @@ import {
   REGULAR_BOOK_MESSAGE_SYSTEM,
 } from './systemPrompts.js';
 import { writeGameDebugMarkdown } from './gameDebug.js';
-import { generateReplyFullMessages, generateReplySingleMessage } from './llm.js';
+import { generateJsonReplySingleMessage, generateReplyFullMessages, generateReplySingleMessage } from './llm.js';
 import {
   createSession,
   GameSession,
@@ -161,7 +161,7 @@ async function gameStateManager(session: GameSession): Promise<GameStateToolCall
 
   try {
     // 获取 LLM 返回
-    const response = await generateReplySingleMessage(
+    const response = await generateJsonReplySingleMessage(
       systemPrompt,
       message,
     );

@@ -76,6 +76,7 @@ export type OpenRouterChatRequest = {
   tool_choice?: "auto" | "none" | { type: "function"; function: { name: string } }
   reasoning?: { enabled: boolean }
   include_reasoning?: boolean
+  response_format?: { type: "json_object" }
 }
 
 export type OpenRouterChatResponse = {
