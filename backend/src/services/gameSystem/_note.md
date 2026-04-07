@@ -11,6 +11,7 @@
 - **Book Message**：与 User Message 相对，指的是剧本发送给玩家的消息
 - **Game State / Game Session / Game Save**：目前指的是同一个东西，即传统意义上的游戏状态。因为目前结构还很简单，所以三者混用
   - （TODO）未来，Game Session 可能会包含登录信息，而 Game Save 可能会包含更多缓存内容
+- **World State**：游戏世界以及玩家角色的状态，简单来讲就是 Game State 去掉对话记录
 - **Visual Description**：用来记录某地范围内，确定性数据（比如 OSM）未呈现而让 LLM 自由发挥的地方。
   - **Outdoor Visual Description**
     - 内容为以列表形式记录某一经纬度半径300米范围内的，OSM 数据未呈现，但在过往 LLM 对话中提及的细节

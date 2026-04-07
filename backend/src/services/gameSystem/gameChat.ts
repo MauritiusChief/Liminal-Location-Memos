@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { RangedPosition } from '@/routes/apiTypes.js';
-import { distanceBetweenCoordinates } from '@/services/geometry.js';
-import { movePosition } from '@/services/gameMovement.js';
+import { degreesToRadians, distanceBetweenCoordinates, EARTH_RADIUS_METERS, normalizeLongitude, radiansToDegrees } from '@/services/geometry.js';
 import { buildSceneFromRequest } from '../scene/sceneObject.js';
 import { buildScenePrompt } from '../scene/scenePrompt.js';
 import {
@@ -42,6 +41,12 @@ const REGULAR_SCENE_RADIUS_METERS = 500;
 const VISUAL_DESCRIPTION_RADIUS_METERS = 300;
 
 //#region 游戏状态工具
+
+type MovePlayerToolCall = {
+  bearingDegrees: number,
+  distanceMeters: number,
+  reason: string,
+}
 
 const MOVE_PLAYER_TOOL: GameStateToolDef = {
   name: 'move_player',
@@ -117,7 +122,7 @@ async function gameStateManager(session: GameSession): Promise<GameStateToolCall
   const systemPrompt = buildGameStateManagerSystemPrompt(toolDefs);
   const messageHistory = session.messageHistory;
   const latestPlayerMessage = messageHistory[messageHistory.length - 1]; // 盲目取最后一个，因此输入时 session 得保证最新一个确实是 Player Message
-  const gameStatePrompt = await toGameStatePrompt(session);
+  const worldStatePrompt = await toWorldStatePrompt(session);
 
   try {
     // 获取 LLM 返回
@@ -126,16 +131,16 @@ async function gameStateManager(session: GameSession): Promise<GameStateToolCall
       [
         '玩家发送的消息：',
         `> ${latestPlayerMessage?.content ?? ''}`,
-        '近期对话历史：', // 保留最近 3 轮 / 6 次对话，因此这里会出现 5 个 message
+        '近期对话历史：', // 保留最近 3 轮 / 6 次对话
         messageHistory
-          .slice(Math.max(0, messageHistory.length - 7), messageHistory.length - 1)
+          .slice(Math.max(0, messageHistory.length - 6), messageHistory.length - 1) // 最新对话已经由 latestPlayerMessage 表示，所以这里其实是 5 个对话
           .map((message) => {
             const hint = message.role === 'book' ? '**游戏输出**' : '**玩家输入**';
             return `> ${hint}：${message.content}\n>`;
           })
           .join('\n'),
         '---',
-        gameStatePrompt,
+        worldStatePrompt,
       ].join('\n'),
     );
     // 解析返回
@@ -153,12 +158,12 @@ async function gameStateManager(session: GameSession): Promise<GameStateToolCall
  * @returns
  */
 async function generateBookMessage(session: GameSession): Promise<string> {
-  const gameState = await toGameStatePrompt(session);
+  const worldStatePrompt = await toWorldStatePrompt(session);
   const messageHistory = session.messageHistory;
   const response = await generateReplyFullMessages(
     REGULAR_BOOK_MESSAGE_SYSTEM,
     messageHistory.slice(Math.max(0, messageHistory.length - 12)),
-    gameState,
+    worldStatePrompt,
   );
   return response.reply;
 }
@@ -225,11 +230,11 @@ export async function runGameTurn(sessionId: string, playerMessage: string): Pro
 
 /**
  * TODO 目前只输入基本信息，建筑内部相关内容后续再加
- * 系统性把 Game State 转化为当前状态的提示词描述
+ * 系统性把 Game State 中除开对话的部分转化为当前状态的提示词描述
  * @param state
  * @returns
  */
-async function toGameStatePrompt(state: GameSession): Promise<string> {
+async function toWorldStatePrompt(state: GameSession): Promise<string> {
   const { lat, lon } = state.playerPosition;
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: REGULAR_SCENE_RADIUS_METERS });
   const scenePrompt = buildScenePrompt(sceneObject);
@@ -256,8 +261,15 @@ function applyGameStateToolCalls(session: GameSession, toolCalls: GameStateToolC
     if (toolCall.name !== MOVE_PLAYER_TOOL.name) {
       continue;
     }
-
-    const nextPosition = toMovePlayerPosition(session.playerPosition, toolCall.arguments);
+    // 清洗 arguments
+    const args = toolCall.arguments
+    const bearingDegrees = Number(args.bearingDegrees);
+    const distanceMeters = Number(args.distanceMeters);
+    if (!Number.isFinite(bearingDegrees) || !Number.isFinite(distanceMeters) || distanceMeters < 0) {
+      continue;
+    }
+    // 实际转移位置函数
+    const nextPosition = movePosition(session.playerPosition, bearingDegrees, distanceMeters);
     if (!nextPosition) {
       continue;
     }
@@ -269,27 +281,30 @@ function applyGameStateToolCalls(session: GameSession, toolCalls: GameStateToolC
 
 /**
  * 把 move_player 工具参数转换为新的玩家坐标。
- * 只接受有限数字，非法参数直接返回 null。
  */
-function toMovePlayerPosition(
+function movePosition(
   position: Position,
-  args: Record<string, unknown>,
-): Position | null {
-  const bearingDegrees = Number(args.bearingDegrees);
-  const distanceMeters = Number(args.distanceMeters);
+  bearingDegrees: number,
+  distanceMeters: number,
+): Position {
+  const bearingRadians = degreesToRadians(bearingDegrees);
+  const latRadians = degreesToRadians(position.lat);
+  const lonRadians = degreesToRadians(position.lon);
+  const angularDistance = distanceMeters / EARTH_RADIUS_METERS;
 
-  if (!Number.isFinite(bearingDegrees) || !Number.isFinite(distanceMeters) || distanceMeters < 0) {
-    return null;
-  }
+  const nextLat = Math.asin(
+    Math.sin(latRadians) * Math.cos(angularDistance)
+      + Math.cos(latRadians) * Math.sin(angularDistance) * Math.cos(bearingRadians),
+  );
+  const nextLon = lonRadians + Math.atan2(
+    Math.sin(bearingRadians) * Math.sin(angularDistance) * Math.cos(latRadians),
+    Math.cos(angularDistance) - Math.sin(latRadians) * Math.sin(nextLat),
+  );
 
-  return movePosition({
-    position: {
-      lat: position.lat,
-      lon: position.lon,
-    },
-    bearingDegrees,
-    distanceMeters,
-  });
+  return {
+    lat: radiansToDegrees(nextLat),
+    lon: normalizeLongitude(radiansToDegrees(nextLon)),
+  };
 }
 
 /**

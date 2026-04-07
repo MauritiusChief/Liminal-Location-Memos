@@ -1,3 +1,5 @@
+export const EARTH_RADIUS_METERS = 6371000
+
 export function distanceBetweenCoordinates(
   left: [number, number],
   right: [number, number],
@@ -48,12 +50,24 @@ export function normalizeBearingDegrees(degrees: number): number {
   return ((degrees % 360) + 360) % 360;
 }
 
-function degreesToRadians(degrees: number): number {
+export function degreesToRadians(degrees: number): number {
   return (degrees * Math.PI) / 180;
 }
 
-function radiansToDegrees(radians: number): number {
+export function radiansToDegrees(radians: number): number {
   return (radians * 180) / Math.PI;
+}
+
+export function normalizeLongitude(value: number): number {
+  if (value > 180) {
+    return value - 360;
+  }
+
+  if (value < -180) {
+    return value + 360;
+  }
+
+  return value;
 }
 
 export function computeCircularMeanDegrees(values: number[]): number {

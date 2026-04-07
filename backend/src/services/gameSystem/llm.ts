@@ -40,13 +40,13 @@ export async function generateReplySingleMessage(
  * 构造传统 messages 数组，并把 Game State 以虚拟 tool call/return 的方式插入。
  * @param systemPrompt
  * @param gameMessages
- * @param gameState
+ * @param worldState
  * @returns
  */
 export async function generateReplyFullMessages(
   systemPrompt: string,
   gameMessages: GameMessage[],
-  gameState: string,
+  worldState: string,
 ): Promise<ResponseWithReasoning> {
   const messages: DeepSeekMessage[] = [{role: 'system', content: systemPrompt}]
   gameMessages.forEach( m => {
@@ -55,21 +55,21 @@ export async function generateReplyFullMessages(
       messages.push({role: 'user', content: m.content})
   })
 
-  const syntheticToolId = 'synthetic_get_game_state'
+  const syntheticToolId = 'synthetic_get_world_state'
   // 填充虚假 tool call
   messages.push({
     role: 'assistant',
     content: '',
     reasoning_content: '',
     tool_calls: [{
-      id: syntheticToolId, type: "function", function: {name: "refresh_game_state", arguments: "{}"}
+      id: syntheticToolId, type: "function", function: {name: "refresh_world_state", arguments: "{}"}
     }]
   })
   // 填充虚假 tool return
   messages.push({
     role: 'tool',
     tool_call_id: syntheticToolId,
-    content: gameState,
+    content: worldState,
   })
   const requestBody: DeepSeekChatRequest = {
     model: config.llmModel,
