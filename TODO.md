@@ -2,6 +2,9 @@
 ## 重构计划
 
 * Visual Dscrption 提示词，明确提示因为 World State 范围窄，描述中必定包含不在 World State 范围内的建筑。因此这部分不在范围内建筑的细节不能记录，避免产生混淆。
+* osmNormalization 的 _note 中记录一下 STRUCTURED_TAG，PRIMARY_LABEL，CLASSIFIER_TAG，RETENTION_TAG 定义
+* 检查一下 RETENTION_TAG 是不是被略掉了
+* 添加 power tag 作为 RETENTION_TAG
 
 ## 近期计划
 
