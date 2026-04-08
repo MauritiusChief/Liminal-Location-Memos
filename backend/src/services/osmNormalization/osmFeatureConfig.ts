@@ -27,8 +27,8 @@ export const BUILDING_RETENTION_TAG_KEYS = [] as const;
 export const POI_STRUCTURED_TAG_KEYS = ['name', 'brand', 'shop', 'amenity', 'office', 'tourism', 'leisure', 'craft', 'healthcare', 'natural', 'man_made'] as const;
 export const POI_PRIMARY_LABEL_KEYS = ['shop', 'amenity', 'office', 'tourism', 'leisure', 'craft', 'healthcare', 'natural', 'man_made'] as const;
 export const POI_CLASSIFIER_TAG_KEYS = POI_PRIMARY_LABEL_KEYS;
-// historic 本身不作为主分类标签，但需要保留在分类判定里避免历史地物被漏掉。
-export const POI_RETENTION_TAG_KEYS = ['historic'] as const;
+// 这些本身不作为主分类标签，但需要保留在分类判定里避免关键地物被漏掉。
+export const POI_RETENTION_TAG_KEYS = ['historic', 'power', 'advertising', 'telecom'] as const;
 
 // 线状地物：道路/铁路/水系/人造线性设施。
 export const LINE_STRUCTURED_TAG_KEYS = ['name', 'highway', 'railway', 'waterway', 'man_made'] as const;

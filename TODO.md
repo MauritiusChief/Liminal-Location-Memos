@@ -2,13 +2,8 @@
 ## 重构计划
 
 * Visual Dscrption 提示词，明确提示因为 World State 范围窄，描述中必定包含不在 World State 范围内的建筑。因此这部分不在范围内建筑的细节不能记录，避免产生混淆。
-* osmNormalization 的 _note 中记录一下 STRUCTURED_TAG，PRIMARY_LABEL，CLASSIFIER_TAG，RETENTION_TAG 定义
-* 检查一下 RETENTION_TAG 是不是被略掉了
 
 ## 近期计划
-
-* 添加 power tag 作为 RETENTION_TAG
-* 检查 [Top-level_keys](https://wiki.openstreetmap.org/wiki/Category:Top-level_keys) 是不是还有其他适合作为 PRIMARY_LABEL / CLASSIFIER_TAG / RETENTION_TAG 的
 
 * 添加玩家的视野朝向功能
   * 这对 Micro Grid 可能很困难，甚至要重写 SQL
