@@ -4,7 +4,7 @@ import { degreesToRadians, distanceBetweenCoordinates, distanceToPosition, EARTH
 import { buildSceneFromRequest } from '../scene/sceneObject.js';
 import { buildScenePrompt } from '../scene/scenePrompt.js';
 import {
-  buildGameStateManagerSystemPrompt,
+  BUILD_GAME_STATE_MANAGER_SYSTEM,
   INITIAL_BOOK_MESSAGE_SYSTEM,
   OUTDOOR_VISUAL_DESCRIPTION_SYSTEM,
   REGULAR_BOOK_MESSAGE_SYSTEM,
@@ -140,7 +140,7 @@ async function gameStateManager(session: GameSession): Promise<GameStateToolCall
   console.log(`[${new Date().toISOString()}] gameStateManager() 触发`);
 
   const toolDefs = [MOVE_PLAYER_TOOL].map((def) => toToolPrompt(def));
-  const systemPrompt = buildGameStateManagerSystemPrompt(toolDefs);
+  const systemPrompt = BUILD_GAME_STATE_MANAGER_SYSTEM(toolDefs);
   const messageHistory = session.messageHistory;
   const latestPlayerMessage = messageHistory[messageHistory.length - 1]; // 盲目取最后一个，因此输入时 session 得保证最新一个确实是 Player Message
   const worldStatePrompt = await toWorldStatePrompt(session);

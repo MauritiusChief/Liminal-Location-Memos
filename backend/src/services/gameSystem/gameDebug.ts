@@ -69,7 +69,7 @@ function formatReply(reply: string | object): string {
     return toMarkdownText(reply);
   }
 
-  return ['```json', JSON.stringify(reply, null, 2), '```'].join('\n');
+  return ['模型返回了 JSON Object：','```json', JSON.stringify(reply, null, 2), '```'].join('\n');
 }
 
 function toMarkdownText(content: string): string {
