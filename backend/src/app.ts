@@ -4,6 +4,8 @@ import { apiRouter } from './routes/api.js';
 export function createApp() {
   const app = express();
 
+  console.log('启动时间:', new Date().toISOString())
+
   app.use(express.json());
   app.use('/api', apiRouter);
 

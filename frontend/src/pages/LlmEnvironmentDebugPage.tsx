@@ -8,8 +8,11 @@ import {
   submitDebugLlmMessage,
 } from '../features/llmDebug/llmDebugSlice';
 
-// 这个页面用于隔离调试 LLM 的输入环境：
-// 一边编辑系统提示词，一边粘贴 normalization 页复制来的用户提示词，直接看模型回复。
+/**
+ * 用于隔离调试单轮 LLM 的输入输出，主要用来调试提示词。
+ * 名叫 environment 是因为早期是用来调试 Summary Preview / Scene Prompt 的
+ */
+
 export function LlmEnvironmentDebugPage() {
   const dispatch = useAppDispatch();
   const { systemPrompt, message, request } = useAppSelector(selectLlmDebugState);
@@ -46,7 +49,7 @@ export function LlmEnvironmentDebugPage() {
           cols={100}
           value={message}
           onChange={(event) => dispatch(setMessage(event.target.value))}
-          placeholder="Paste the prompt preview from debug/normalization here."
+          placeholder="Single message would send to LLM."
         />
         <br />
         <button type="submit" disabled={request.status === 'loading'}>

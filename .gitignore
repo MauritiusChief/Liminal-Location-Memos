@@ -6,4 +6,6 @@ coverage/
 *.log
 _experimental/
 backend/data/game-saves/*.json
-backend/data/game-chat-debug/*.json
+backend/data/game-debug/*.json
+backend/data/game-debug/*.md
+_data_bk/

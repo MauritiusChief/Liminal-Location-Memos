@@ -4,6 +4,7 @@ import { HomeChatPage } from '../pages/HomeChatPage';
 import { LlmEnvironmentDebugPage } from '../pages/LlmEnvironmentDebugPage';
 import { NormalizationDebugPage } from '../pages/NormalizationDebugPage';
 import { RawOverpassDebugPage } from '../pages/RawOverpassDebugPage';
+import { SummaryPreviewPage } from '../pages/SummaryPreviewPage';
 
 export const router = createBrowserRouter([
   {
@@ -21,6 +22,10 @@ export const router = createBrowserRouter([
       {
         path: 'debug/overpass',
         element: <RawOverpassDebugPage />,
+      },
+      {
+        path: 'debug/scene-prompt-preview',
+        element: <SummaryPreviewPage />,
       },
       {
         path: 'debug/llm-environment',

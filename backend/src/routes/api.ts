@@ -1,26 +1,24 @@
 import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
-import type { DbFeatureDetail } from '../services/dbSceneTypes.js';
-import { generateReplyWithSystemPrompt } from '../services/llm.js';
-import { buildNormalizedMicroGrid } from '../services/overpassGrid.js';
+import type { RangedPosition } from './apiTypes.js';
+import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
+import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
+import { buildLabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
+import { fetchSceneFeatureDetailsFromDb, SceneFeatureDetail } from '@/services/scene/sceneUtilFeatureDetail.js';
+import { buildPolarViewFeature, fetchScenePolarFeaturesFromDb } from '@/services/scene/polarViewObject.js';
 import {
-  fetchFeatureDetailsFromDb,
-  fetchMicroGridFromDb,
-  fetchPolarFeaturesFromDb,
-  syncNormalizedFeaturesToDb,
-} from '../services/osmRepository.js';
-import { buildNormalizedPolarView } from '../services/overpassPolar.js';
-import { buildDefaultDebugSystemPrompt, buildNormalizationPrompt } from '../services/overpassPrompt.js';
-import {
-  buildNormalizedOverpassQuery,
-  convertOverpassToNormalizedFeatures,
-  type NormalizedOverpassRequest,
-} from '../services/overpassNormalization.js';
-import { runGameChatTurn } from '../services/gameChat.js';
-import { getSessionSnapshot } from '../services/gameSessionStore.js';
-import type { GameChatRequest } from '../types/game.js';
-import type { NormalizedOverpassRequestBody } from '../types/overpass.js';
+  applyClusterMarkder,
+  buildPolarView,
+  type PolarView,
+} from '@/services/scene/polarViewLabeled.js';
+import { applyVisualFilter } from '@/services/scene/polarViewFilter.js';
+import { buildLeveledPolarView, applyOcclusion } from '@/services/scene/polarViewOcclusion.js';
+import { buildSceneFromRequest } from '@/services/scene/sceneObject.js';
+import { generateReplySingleMessage } from '@/services/gameSystem/llm.js';
+import { buildScenePrompt } from '@/services/scene/scenePrompt.js';
+import { getSession } from '@/services/gameSystem/gameSessionStore.js';
+import { runGameTurn, startGame } from '@/services/gameSystem/gameChat.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -31,15 +29,27 @@ interface OverpassRequestBody {
   query?: string;
 }
 
+interface GameTurnRequestBody {
+  sessionId?: string;
+  message?: string;
+}
+
+const DEBUG_LLM_SYSTEM_PROMPT_PLACEHOLDER = '[debug system prompt placeholder]';
+
 export const apiRouter = Router();
 
+function countPolarFeatures(polarView: PolarView) {
+  return polarView.levels.reduce(
+    (count, level) => count + level.clusters.reduce((clusterCount, cluster) => clusterCount + cluster.features.length, 0),
+    0,
+  );
+}
+
 function buildDbDiagnostics(input: {
-  featureDetails: DbFeatureDetail[];
-  microGrid: ReturnType<typeof buildNormalizedMicroGrid>;
-  polarView: ReturnType<typeof buildNormalizedPolarView>;
+  featureDetails: SceneFeatureDetail[];
+  microGrid: ReturnType<typeof buildLabeledMicroGrid>;
+  polarView: PolarView;
 }) {
-  // 新 diagnostics 改为围绕“DB-native 投影结果”统计，
-  // 这样前端看到的数字就直接对应 grid / polar / prompt 的真实输入。
   const featureCountsByCategory = input.featureDetails.reduce<Record<'building' | 'poi' | 'line' | 'area', number>>(
     (counts, feature) => {
       counts[feature.category] += 1;
@@ -51,42 +61,46 @@ function buildDbDiagnostics(input: {
   return {
     featureCountsByCategory,
     totalFeatures: input.featureDetails.length,
-    populatedMicroGridCellCount: input.microGrid.enabled
-      ? input.microGrid.cells.flat().filter((cell) => cell.sourceFeatureIds.length > 0).length
-      : 0,
-    polarFeatureCount: input.polarView.levels.reduce((count, level) => count + level.features.length, 0),
+    populatedMicroGridCellCount: input.microGrid.cells.flat().filter((cell) => cell.sourceFeatureIds.length > 0).length,
+    polarFeatureCount: countPolarFeatures(input.polarView),
   };
 }
 
-function buildDbFeatureDetailIndex(featureDetails: DbFeatureDetail[]): Map<string, DbFeatureDetail> {
-  // 统一做成 featureId -> detail 索引，避免 grid/polar/prompt 各自重复扫描数组。
+function buildDebugSceneFeatureDetailIndex(featureDetails: SceneFeatureDetail[]): Map<string, SceneFeatureDetail> {
   return new Map(featureDetails.map((feature) => [feature.featureId, feature]));
 }
 
+function buildDebugPolarView(
+  request: RangedPosition,
+  polarRecords: Awaited<ReturnType<typeof fetchScenePolarFeaturesFromDb>>,
+  featureDetailIndex: ReadonlyMap<string, SceneFeatureDetail>,
+): PolarView {
+  const polarFeatures = buildPolarViewFeature(request, polarRecords, featureDetailIndex);
+  const levelMarked = buildLeveledPolarView(request, polarFeatures)
+  const occluded = applyOcclusion(levelMarked)
+  const clusterMarked = applyClusterMarkder(occluded);
+  const clustered = buildPolarView(clusterMarked);
+  return applyVisualFilter('naked_eye', clustered);
+  // return clustered
+}
+
 function buildNormalizationDebugPayload(input: {
-  normalizedRequest: NormalizedOverpassRequest;
-  featureDetails: DbFeatureDetail[];
+  normalizedRequest: RangedPosition;
+  featureDetails: SceneFeatureDetail[];
   microGridRecords: Awaited<ReturnType<typeof fetchMicroGridFromDb>>;
-  polarRecords: Awaited<ReturnType<typeof fetchPolarFeaturesFromDb>>;
-  promptPreview: {
-    detailedUserPrompt1000: string;
-    conciseUserPrompt1000: string;
-    conciseUserPrompt200: string;
-  };
+  polarRecords: Awaited<ReturnType<typeof fetchScenePolarFeaturesFromDb>>;
 }) {
-  const featureDetailIndex = buildDbFeatureDetailIndex(input.featureDetails);
-  // 这里是 DB-native 调试链路的汇合点：
-  // repository 提供三份投影原料，service 层再分别拼出 grid / polar / prompt。
-  const microGrid = buildNormalizedMicroGrid({
-    request: input.normalizedRequest,
-    cells: input.microGridRecords,
-    featureDetails: featureDetailIndex,
-  });
-  const polarView = buildNormalizedPolarView({
-    records: input.polarRecords,
-    featureDetails: featureDetailIndex,
-    request: input.normalizedRequest,
-  });
+  const featureDetailIndex = buildDebugSceneFeatureDetailIndex(input.featureDetails);
+  const microGrid = buildLabeledMicroGrid(buildMicroGrid(
+    input.normalizedRequest,
+    input.microGridRecords,
+    featureDetailIndex,
+  ));
+  const polarView = buildDebugPolarView(
+    input.normalizedRequest,
+    input.polarRecords,
+    featureDetailIndex,
+  );
   const diagnostics = buildDbDiagnostics({
     featureDetails: input.featureDetails,
     microGrid,
@@ -98,67 +112,10 @@ function buildNormalizationDebugPayload(input: {
     diagnostics,
     microGrid,
     polarView,
-    promptPreview: input.promptPreview,
   };
 }
 
-async function buildPromptPreviewBundle(position: Pick<NormalizedOverpassRequest, 'lat' | 'lon'>) {
-  const farRequest: NormalizedOverpassRequest = { ...position, radius: 1000 };
-  const nearRequest: NormalizedOverpassRequest = { ...position, radius: 200 };
-  const [farScene, nearScene] = await Promise.all([
-    loadPromptScene(farRequest),
-    loadPromptScene(nearRequest),
-  ]);
-
-  return {
-    detailedUserPrompt1000: buildNormalizationPrompt({
-      request: farRequest,
-      summaryMode: 'detailed',
-      microGrid: farScene.microGrid,
-      polarView: farScene.polarView,
-      featureDetails: farScene.featureDetailIndex,
-    }),
-    conciseUserPrompt1000: buildNormalizationPrompt({
-      request: farRequest,
-      summaryMode: 'concise',
-      microGrid: farScene.microGrid,
-      polarView: farScene.polarView,
-      featureDetails: farScene.featureDetailIndex,
-    }),
-    conciseUserPrompt200: buildNormalizationPrompt({
-      request: nearRequest,
-      summaryMode: 'concise',
-      microGrid: nearScene.microGrid,
-      polarView: nearScene.polarView,
-      featureDetails: nearScene.featureDetailIndex,
-    }),
-  };
-}
-
-async function loadPromptScene(request: NormalizedOverpassRequest) {
-  const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-    fetchFeatureDetailsFromDb(request),
-    fetchMicroGridFromDb(request),
-    fetchPolarFeaturesFromDb(request),
-  ]);
-  const featureDetailIndex = buildDbFeatureDetailIndex(featureDetails);
-
-  return {
-    featureDetailIndex,
-    microGrid: buildNormalizedMicroGrid({
-      request,
-      cells: microGridRecords,
-      featureDetails: featureDetailIndex,
-    }),
-    polarView: buildNormalizedPolarView({
-      records: polarRecords,
-      featureDetails: featureDetailIndex,
-      request,
-    }),
-  };
-}
-
-function parseNormalizedRequest(body: NormalizedOverpassRequestBody) {
+function parseNormalizedRequest(body: RangedPosition) {
   const { lat, lon, radius } = body;
 
   if (
@@ -185,8 +142,31 @@ function parseNormalizedRequest(body: NormalizedOverpassRequestBody) {
   } as const;
 }
 
+function parsePosition(body: Partial<RangedPosition>) {
+  const { lat, lon } = body;
+
+  if (
+    typeof lat !== 'number'
+    || !Number.isFinite(lat)
+    || typeof lon !== 'number'
+    || !Number.isFinite(lon)
+  ) {
+    return { error: 'lat and lon must be finite numbers.' } as const;
+  }
+
+  return {
+    value: {
+      lat,
+      lon,
+    },
+  } as const;
+}
+
+//#region 常规 API
+
 apiRouter.get('/health', async (_request, response) => {
   const database = await checkDatabaseHealth();
+  // console.log("BE: health");
   response.json({
     ok: database.enabled ? database.ok : true,
     service: 'backend',
@@ -194,29 +174,24 @@ apiRouter.get('/health', async (_request, response) => {
   });
 });
 
-apiRouter.post('/debug/llm', async (request, response) => {
-  const { systemPrompt, message } = request.body as DebugLlmRequestBody;
-
-  if (!message || !message.trim()) {
-    response.status(400).json({ error: 'Message is required.' });
-    return;
-  }
-
+apiRouter.post('/game/start', async (_request, response) => {
   try {
-    const result = await generateReplyWithSystemPrompt(
-      typeof systemPrompt === 'string' ? systemPrompt : buildDefaultDebugSystemPrompt(),
-      message.trim(),
-    );
+    const result = await startGame();
     response.json(result);
   } catch (error) {
     response.status(502).json({
-      error: error instanceof Error ? error.message : 'Unexpected upstream error.',
+      error: error instanceof Error ? error.message : 'Unexpected game start error.',
     });
   }
 });
 
-apiRouter.post('/game/chat', async (request, response) => {
-  const { sessionId, message, isOpeningPrompt } = request.body as GameChatRequest;
+apiRouter.post('/game/turn', async (request, response) => {
+  const { sessionId, message } = request.body as GameTurnRequestBody;
+
+  if (typeof sessionId !== 'string' || !sessionId.trim()) {
+    response.status(400).json({ error: 'sessionId is required.' });
+    return;
+  }
 
   if (!message || !message.trim()) {
     response.status(400).json({ error: 'Message is required.' });
@@ -224,17 +199,16 @@ apiRouter.post('/game/chat', async (request, response) => {
   }
 
   try {
-    // /game/chat 是首页正式入口。
-    // 路由层只做参数校验和错误包装，真正的回合编排在 gameChat service 里。
-    const result = await runGameChatTurn({
-      sessionId: typeof sessionId === 'string' ? sessionId : undefined,
-      message: message.trim(),
-      isOpeningPrompt: isOpeningPrompt === true,
-    });
+    const result = await runGameTurn(sessionId.trim(), message.trim());
+    if (!result) {
+      response.status(404).json({ error: 'Session not found.' });
+      return;
+    }
+
     response.json(result);
   } catch (error) {
     response.status(502).json({
-      error: error instanceof Error ? error.message : 'Unexpected game chat error.',
+      error: error instanceof Error ? error.message : 'Unexpected game turn error.',
     });
   }
 });
@@ -248,13 +222,13 @@ apiRouter.get('/game/session/:sessionId', async (request, response) => {
   }
 
   try {
-    const snapshot = await getSessionSnapshot(sessionId);
-    if (!snapshot) {
+    const session = await getSession(sessionId);
+    if (!session) {
       response.status(404).json({ error: 'Session not found.' });
       return;
     }
 
-    response.json(snapshot);
+    response.json(session);
   } catch (error) {
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected session restore error.',
@@ -262,7 +236,30 @@ apiRouter.get('/game/session/:sessionId', async (request, response) => {
   }
 });
 
-apiRouter.post('/overpass', async (request, response) => {
+//#region DEBUG API
+
+apiRouter.post('/debug/llm', async (request, response) => {
+  const { systemPrompt, message } = request.body as DebugLlmRequestBody;
+
+  if (!message || !message.trim()) {
+    response.status(400).json({ error: 'Message is required.' });
+    return;
+  }
+
+  try {
+    const result = await generateReplySingleMessage(
+      typeof systemPrompt === 'string' ? systemPrompt : DEBUG_LLM_SYSTEM_PROMPT_PLACEHOLDER,
+      message.trim(),
+    );
+    response.json(result);
+  } catch (error) {
+    response.status(502).json({
+      error: error instanceof Error ? error.message : '[未知错误] 发生在 generateReplySingleMessage',
+    });
+  }
+});
+
+apiRouter.post('/debug/overpass', async (request, response) => {
   const { query } = request.body as OverpassRequestBody;
 
   if (!query || !query.trim()) {
@@ -283,8 +280,8 @@ apiRouter.post('/overpass', async (request, response) => {
   }
 });
 
-apiRouter.post('/db/sync-overpass', async (request, response) => {
-  const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
+apiRouter.post('/debug/db/sync-overpass', async (request, response) => {
+  const parsed = parseNormalizedRequest(request.body as RangedPosition);
 
   if ('error' in parsed) {
     response.status(400).json({ error: parsed.error });
@@ -292,19 +289,14 @@ apiRouter.post('/db/sync-overpass', async (request, response) => {
   }
 
   const normalizedRequest = parsed.value;
-  const query = buildNormalizedOverpassQuery(normalizedRequest);
 
   try {
-    const raw = (await overpassJson(query, {
-      endpoint: 'https://overpass-api.de/api/interpreter',
-    })) as Parameters<typeof convertOverpassToNormalizedFeatures>[0];
-    const features = convertOverpassToNormalizedFeatures(raw);
-    const counts = await syncNormalizedFeaturesToDb(features, normalizedRequest);
+    const result = await syncOverpassCoverage(normalizedRequest);
 
     response.json({
-      query,
-      featureCount: features.length,
-      counts,
+      query: result.query,
+      featureCount: result.features.length,
+      counts: result.counts,
       coverageRecorded: true,
     });
   } catch (error) {
@@ -314,8 +306,9 @@ apiRouter.post('/db/sync-overpass', async (request, response) => {
   }
 });
 
-apiRouter.post('/db/normalized-load', async (request, response) => {
-  const parsed = parseNormalizedRequest(request.body as NormalizedOverpassRequestBody);
+apiRouter.post('/debug/db/normalized-load', async (request, response) => {
+  const parsed = parseNormalizedRequest(request.body as RangedPosition);
+  // console.log("BE: normalized-load", parsed);
 
   if ('error' in parsed) {
     response.status(400).json({ error: parsed.error });
@@ -326,17 +319,16 @@ apiRouter.post('/db/normalized-load', async (request, response) => {
 
   try {
     const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-      fetchFeatureDetailsFromDb(normalizedRequest),
+      fetchSceneFeatureDetailsFromDb(normalizedRequest, 'debug'),
       fetchMicroGridFromDb(normalizedRequest),
-      fetchPolarFeaturesFromDb(normalizedRequest),
+      fetchScenePolarFeaturesFromDb(normalizedRequest, 'debug'),
     ]);
-    const promptPreview = await buildPromptPreviewBundle(normalizedRequest);
+
     const debugPayload = buildNormalizationDebugPayload({
       normalizedRequest,
       featureDetails,
       microGridRecords,
       polarRecords,
-      promptPreview,
     });
 
     response.json({
@@ -344,8 +336,47 @@ apiRouter.post('/db/normalized-load', async (request, response) => {
       ...debugPayload,
     });
   } catch (error) {
+    console.log(error);
+
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected database normalized load error.',
+    });
+  }
+});
+
+/**
+ * 预览生成的 Scene Prompt
+ */
+apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
+  const body = request.body as Partial<RangedPosition>;
+  // console.log(body);
+
+  const {value, error} = parsePosition(body);
+  const radius = body.radius;
+
+  if (error) {
+    response.status(400).json({ error });
+    return;
+  }
+
+  if (typeof radius !== 'number' || !Number.isFinite(radius) || radius <= 0) {
+    response.status(400).json({ error: 'radius must be a finite number greater than 0.' });
+    return;
+  }
+
+  try {
+    const {lat, lon} = value
+    const rangedPosition: RangedPosition = {lat, lon, radius}
+    // console.log(rangedPosition);
+    const sceneObject = await buildSceneFromRequest(rangedPosition)
+    const scenePrompt = buildScenePrompt(sceneObject)
+    response.json({
+      radius,
+      scenePrompt,
+    });
+  } catch (error) {
+    response.status(502).json({
+      error: error instanceof Error ? error.message : '[未知错误] 发生在 buildSceneFromRequest',
     });
   }
 });

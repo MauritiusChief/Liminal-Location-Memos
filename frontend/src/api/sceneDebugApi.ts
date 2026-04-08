@@ -1,14 +1,36 @@
-import { postJson } from './http';
-import type { RawOverpassResponse, SceneLoadResponse, SceneQuery, SceneSyncResponse } from './sceneTypes';
+﻿import { postJson } from './http';
+import type {
+  RawOverpassResponse,
+  SceneLoadResponse,
+  SceneQuery,
+  SceneSyncResponse,
+} from './sceneTypes';
+
+export interface debugScenePromptRequest {
+  lat: number;
+  lon: number;
+  radius: number;
+}
+
+export interface debugScenePromptResponse {
+  radius: number;
+  scenePrompt: string;
+}
 
 export function runRawOverpassQuery(input: { query: string }): Promise<RawOverpassResponse> {
-  return postJson<RawOverpassResponse, { query: string }>('/api/overpass', input);
+  return postJson<RawOverpassResponse, { query: string }>('/api/debug/overpass', input);
 }
 
 export function syncSceneFromOverpass(request: SceneQuery): Promise<SceneSyncResponse> {
-  return postJson<SceneSyncResponse, SceneQuery>('/api/db/sync-overpass', request);
+  return postJson<SceneSyncResponse, SceneQuery>('/api/debug/db/sync-overpass', request);
 }
 
 export function loadSceneFromDb(request: SceneQuery): Promise<SceneLoadResponse> {
-  return postJson<SceneLoadResponse, SceneQuery>('/api/db/normalized-load', request);
+  // console.log("FE: loadSceneFromDb", request);
+
+  return postJson<SceneLoadResponse, SceneQuery>('/api/debug/db/normalized-load', request);
+}
+
+export function loadScenePromptPreview(request: debugScenePromptRequest): Promise<debugScenePromptResponse> {
+  return postJson<debugScenePromptResponse, debugScenePromptRequest>('/api/debug/db/scene-prompt-preview', request);
 }

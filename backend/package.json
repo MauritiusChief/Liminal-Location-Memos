@@ -4,25 +4,33 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && node scripts/copy-runtime-sql.mjs",
-    "start": "node dist/index.js"
+    "dev": "tsx watch --tsconfig tsconfig.base.json src/index.ts",
+    "build": "tsc -p src/tsconfig.src.json && tsc-alias -p src/tsconfig.src.json && node scripts/copy-runtime-sql.mjs",
+    "start": "node dist/index.js",
+    "test": "jest",
+    "test:osm-compat": "jest tests/osmNormalizer.compat.test.ts"
   },
   "dependencies": {
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "geokdbush": "^2.0.1",
+    "glob": "^13.0.6",
     "kdbush": "^4.0.2",
-    "osmtogeojson": "^3.0.0-beta.5",
+    "osmtogeojson": "^2.2.12",
     "overpass-ts": "^4.3.8",
     "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",
     "@types/geojson": "^7946.0.16",
-    "@types/node": "^24.10.1",
+    "@types/jest": "^30.0.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^25.5.0",
     "@types/osmtogeojson": "^2.2.34",
     "@types/pg": "^8.15.6",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.6",
+    "tsc-alias": "^1.8.16",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }

@@ -1,10 +1,10 @@
 INSERT INTO osm_buildings (
   osm_type, osm_id, geom, name, building, man_made, height, level, building_levels,
-  tags_extra, relations, meta, tainted, last_synced_at
+  tags_extra, relations, outline_references, meta, tainted, last_synced_at
 )
 VALUES (
   $1, $2, ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($3), 4326)),
-  $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13, now()
+  $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14, now()
 )
 ON CONFLICT (osm_type, osm_id)
 DO UPDATE SET
@@ -17,6 +17,7 @@ DO UPDATE SET
   building_levels = EXCLUDED.building_levels,
   tags_extra = EXCLUDED.tags_extra,
   relations = EXCLUDED.relations,
+  outline_references = EXCLUDED.outline_references,
   meta = EXCLUDED.meta,
   tainted = EXCLUDED.tainted,
   last_synced_at = now();

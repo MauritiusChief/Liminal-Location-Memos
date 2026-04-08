@@ -1,8 +1,22 @@
 
+## 重构计划
+
+* Visual Dscrption 提示词，明确提示因为 World State 范围窄，描述中必定包含不在 World State 范围内的建筑。因此这部分不在范围内建筑的细节不能记录，避免产生混淆。
+* osmNormalization 的 _note 中记录一下 STRUCTURED_TAG，PRIMARY_LABEL，CLASSIFIER_TAG，RETENTION_TAG 定义
+* 检查一下 RETENTION_TAG 是不是被略掉了
+
 ## 近期计划
 
-* 修改目前的粗看、细看功能，粗看只留意显眼的或超大建筑群，细看才囊括所有东西（目前仅仅只是按照距离区分）
+* 添加 power tag 作为 RETENTION_TAG
+* 检查 [Top-level_keys](https://wiki.openstreetmap.org/wiki/Category:Top-level_keys) 是不是还有其他适合作为 PRIMARY_LABEL / CLASSIFIER_TAG / RETENTION_TAG 的
+
+* 添加玩家的视野朝向功能
+  * 这对 Micro Grid 可能很困难，甚至要重写 SQL
+* 对夹角添加程序性的前后左右标识
+* 添加通过海拔高度 API 与 ele 标签计算建筑实际高度的功能
+
 * 添加记忆功能/工具，可以把觉得重要的东西记下来。
+* 范围从小到大依次读取地图，避免一次性读取太多地图，信息量太大。
 * 主对话再调整一下，如果不是特别要求查看周围，就再压缩环境描写、扩充“你”的动作与行为描写，让被压缩的环境描写显得像是匆匆走过没有细看
 * 考虑如何实现汽车这样 10 分钟就能走 10 公里的速度如何实现
   * 大概率得想办法长距离组装线状特征，然后沿着线状特征的坐标行进
@@ -11,4 +25,5 @@
 ## 长远计划
 
 * 改用 stream，避免超长时间等待
-* large description 与 small description 看怎么样也改成 stream，即能与前端互动又能作为总体 chat turn 的一部分
+* 玩家行为反向存入数据库的方法（比如修建某些东西）
+  * 以5m²为尺寸填格子，全球统一网格

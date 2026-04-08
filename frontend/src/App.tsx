@@ -44,9 +44,10 @@ function App() {
           <NavLink to="/" end>
             Chat
           </NavLink>
-          <NavLink to="/debug/normalization">Debug / Normalization</NavLink>
-          <NavLink to="/debug/overpass">Debug / Overpass</NavLink>
-          <NavLink to="/debug/llm-environment">Debug / LLM Environment</NavLink>
+          <NavLink to="/debug/normalization">DEBUG Normalization</NavLink>
+          <NavLink to="/debug/scene-prompt-preview">DEBUG Scene Prompt Preview</NavLink>
+          <NavLink to="/debug/overpass">DEBUG Overpass</NavLink>
+          <NavLink to="/debug/llm-environment">DEBUG LLM Environment</NavLink>
         </nav>
       </header>
       <Outlet />
