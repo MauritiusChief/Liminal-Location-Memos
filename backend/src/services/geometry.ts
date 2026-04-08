@@ -96,3 +96,37 @@ export function computeCircularMeanDegrees(values: number[]): number {
   const radians = Math.atan2(sinSum, cosSum);
   return normalizeBearingDegrees((radians * 180) / Math.PI);
 }
+
+/**
+ * 基于局部东/北偏移量，把某个经纬度点投影到新的经纬度位置。
+ */
+export function projectPositionByMeters(
+  origin: Position,
+  eastMeters: number,
+  northMeters: number,
+): Position {
+  const distanceMeters = Math.hypot(eastMeters, northMeters);
+  if (distanceMeters === 0) {
+    return { ...origin };
+  }
+
+  const bearingDegrees = normalizeBearingDegrees(radiansToDegrees(Math.atan2(eastMeters, northMeters)));
+  const bearingRadians = degreesToRadians(bearingDegrees);
+  const latRadians = degreesToRadians(origin.lat);
+  const lonRadians = degreesToRadians(origin.lon);
+  const angularDistance = distanceMeters / EARTH_RADIUS_METERS;
+
+  const nextLat = Math.asin(
+    Math.sin(latRadians) * Math.cos(angularDistance)
+      + Math.cos(latRadians) * Math.sin(angularDistance) * Math.cos(bearingRadians),
+  );
+  const nextLon = lonRadians + Math.atan2(
+    Math.sin(bearingRadians) * Math.sin(angularDistance) * Math.cos(latRadians),
+    Math.cos(angularDistance) - Math.sin(latRadians) * Math.sin(nextLat),
+  );
+
+  return {
+    lat: radiansToDegrees(nextLat),
+    lon: normalizeLongitude(radiansToDegrees(nextLon)),
+  };
+}

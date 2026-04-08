@@ -1,6 +1,10 @@
+import { createRequire } from "node:module";
 import { Feature, FeatureCollection, Geometry } from "geojson";
-import osmtogeojson from "osmtogeojson";
 import { OverpassJson } from "overpass-ts";
+
+// 兼容旧 JS
+const require = createRequire(import.meta.url);
+const osmtogeojson: typeof import("osmtogeojson").default = require("osmtogeojson");
 
 export interface RelationReference {
   role: string;
@@ -75,6 +79,8 @@ type FeatureTagSource = {
   tags: Record<string, string>;
 };
 
+type OsmToGeoJsonInput = import("osmtogeojson").OsmJSON.OsmJSONObject;
+
 //#region 主函数
 
 /**
@@ -89,7 +95,7 @@ export function convertOverpassToNormalizedFeatures(raw: OverpassJson): Normaliz
   const buildingRelationOutlineIndex = buildIndexBuildingRelationOutline(raw);
 
   // 转化整理原始数据
-  const converted = osmtogeojson(raw, { flatProperties: false }) as FeatureCollection;
+  const converted = osmtogeojson(raw as OsmToGeoJsonInput, { flatProperties: false }) as FeatureCollection;
   const normalizedFeatures = converted.features.map((feature) => normalizeFeature(feature)).filter(f => f !== null);
 
   // 建立规整化信息的索引
