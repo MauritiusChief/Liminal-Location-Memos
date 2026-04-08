@@ -3,6 +3,7 @@ import type { MarkedPolarViewFeature, PolarView } from '../api/sceneTypes';
 interface PolarFanChartProps {
   polarView: PolarView;
   displayRadiusMeters: 1000 | 300 | 100;
+  playerOrientation: number;
   selectedLevel: 'all' | 1 | 2 | 3;
   selectedFeatureId: string | null;
   onFeatureHover: (feature: MarkedPolarViewFeature | null) => void;
@@ -26,6 +27,7 @@ const LEVEL_COLORS: Record<1 | 2 | 3, string> = {
 export function PolarFanChart({
   polarView,
   displayRadiusMeters,
+  playerOrientation,
   selectedLevel,
   selectedFeatureId,
   onFeatureHover,
@@ -95,6 +97,32 @@ export function PolarFanChart({
             </g>
           );
         })}
+        {(() => {
+          const [x, y] = polarToCartesian(displayRadiusMeters, normalizeOrientationDegrees(playerOrientation), displayRadiusMeters);
+          return (
+            <g>
+              <line
+                x1={CENTER}
+                y1={CENTER}
+                x2={x}
+                y2={y}
+                stroke="#111"
+                strokeWidth="2.5"
+                strokeDasharray="8 6"
+              />
+              <text
+                x={x}
+                y={y}
+                dy={-10}
+                textAnchor="middle"
+                fontSize="12"
+                fill="#111"
+              >
+                Facing
+              </text>
+            </g>
+          );
+        })()}
       </g>
 
       {visibleFeatures.map((feature) => {
@@ -229,6 +257,10 @@ function metersToRadiusPx(distanceMeters: number, displayRadiusMeters: number): 
 // SVG/三角函数则默认“正东=0”，所以这里要先减 90 度，把北方旋到画布顶部。
 function bearingDegreesToSvgAngleRadians(bearingDegrees: number): number {
   return ((bearingDegrees - 90) * Math.PI) / 180;
+}
+
+function normalizeOrientationDegrees(degrees: number): number {
+  return ((degrees % 360) + 360) % 360;
 }
 
 // polarToCartesian 把“距离 + bearing”投影到画布坐标系。

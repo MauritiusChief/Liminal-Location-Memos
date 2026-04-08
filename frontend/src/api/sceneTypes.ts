@@ -165,6 +165,7 @@ export interface SceneQuery {
   lat: number;
   lon: number;
   radius: number;
+  playerOrientation?: number;
   includeRaw?: boolean;
 }
 

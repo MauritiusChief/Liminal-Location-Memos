@@ -4,6 +4,7 @@ import {
   fetchSummaryPreview,
   selectSummaryPreviewState,
   setCoordinates,
+  setOrientation,
   setRadius,
 } from '../features/summaryPreview/summaryPreviewSlice';
 
@@ -48,6 +49,14 @@ export function SummaryPreviewPage() {
         id="summaryPreviewRadius"
         value={form.radius}
         onChange={(event) => dispatch(setRadius(event.target.value))}
+      />
+      <br />
+      <label htmlFor="summaryPreviewOrientation">Orientation (degrees, 0 = north)</label>
+      <br />
+      <input
+        id="summaryPreviewOrientation"
+        value={form.orientation}
+        onChange={(event) => dispatch(setOrientation(event.target.value))}
       />
       <br />
       <br />

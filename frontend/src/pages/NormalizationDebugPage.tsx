@@ -12,6 +12,7 @@ import {
   loadScene,
   selectNormalizationDebugState,
   setCoordinates,
+  setOrientation,
   setRadius,
   syncScene,
 } from '../features/normalizationDebug/normalizationDebugSlice';
@@ -150,6 +151,14 @@ export function NormalizationDebugPage() {
           id="radius"
           value={form.radius}
           onChange={(event) => dispatch(setRadius(event.target.value))}
+        />
+        <br />
+        <label htmlFor="orientation">Orientation (degrees, 0 = north)</label>
+        <br />
+        <input
+          id="orientation"
+          value={form.orientation}
+          onChange={(event) => dispatch(setOrientation(event.target.value))}
         />
         <br />
         <br />
@@ -326,6 +335,7 @@ export function NormalizationDebugPage() {
               <PolarFanChart
                 polarView={chartPolarView}
                 displayRadiusMeters={selectedPolarDisplayRange}
+                playerOrientation={Number(form.orientation) || 0}
                 selectedLevel={selectedPolarLevel}
                 selectedFeatureId={selectedPolarFeature?.featureId || null}
                 onFeatureHover={setHoveredPolarFeature}

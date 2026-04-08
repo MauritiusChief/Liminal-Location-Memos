@@ -10,6 +10,7 @@ export interface debugScenePromptRequest {
   lat: number;
   lon: number;
   radius: number;
+  playerOrientation?: number;
 }
 
 export interface debugScenePromptResponse {

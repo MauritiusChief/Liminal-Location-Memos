@@ -8,6 +8,7 @@ type RequestStatus = 'idle' | 'loading' | 'succeeded' | 'failed';
 interface NormalizationFormState {
   coordinates: string;
   radius: string;
+  orientation: string;
 }
 
 interface AsyncRequestState<T> {
@@ -36,6 +37,7 @@ const initialState: NormalizationDebugState = {
   form: {
     coordinates: '39.99952202640245, -83.01270469750418',
     radius: '200',
+    orientation: '0',
   },
   syncRequest: {
     status: 'idle',
@@ -62,9 +64,10 @@ function parseNormalizationForm(form: NormalizationFormState): ParsedNormalizati
   const lat = Number(coordinateParts[0]);
   const lon = Number(coordinateParts[1]);
   const radius = Number(form.radius);
+  const orientation = Number(form.orientation);
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radius)) {
-    return { error: 'Coordinates and radius must be valid numbers.' } as const;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radius) || !Number.isFinite(orientation)) {
+    return { error: 'Coordinates, radius, and orientation must be valid numbers.' } as const;
   }
 
   if (radius <= 0) {
@@ -76,6 +79,7 @@ function parseNormalizationForm(form: NormalizationFormState): ParsedNormalizati
       lat,
       lon,
       radius,
+      playerOrientation: normalizeOrientationDegrees(orientation),
     },
   } as const;
 }
@@ -128,6 +132,9 @@ const normalizationDebugSlice = createSlice({
     setRadius(state, action: PayloadAction<string>) {
       state.form.radius = action.payload;
     },
+    setOrientation(state, action: PayloadAction<string>) {
+      state.form.orientation = action.payload;
+    },
   },
   extraReducers: (builder) => {
     // extraReducers 负责把异步请求阶段映射成页面可读的状态。
@@ -164,5 +171,9 @@ const normalizationDebugSlice = createSlice({
 // 这样页面只知道“我要 normalizationDebug 这一块数据”，不依赖 store 结构细节。
 export const selectNormalizationDebugState = (state: RootState) => state.normalizationDebug;
 
-export const { setCoordinates, setRadius } = normalizationDebugSlice.actions;
+export const { setCoordinates, setRadius, setOrientation } = normalizationDebugSlice.actions;
 export default normalizationDebugSlice.reducer;
+
+function normalizeOrientationDegrees(degrees: number): number {
+  return ((degrees % 360) + 360) % 360;
+}

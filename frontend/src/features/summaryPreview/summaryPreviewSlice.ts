@@ -11,6 +11,7 @@ type RequestStatus = 'idle' | 'loading' | 'succeeded' | 'failed';
 interface SummaryPreviewFormState {
   coordinates: string;
   radius: string;
+  orientation: string;
 }
 
 interface AsyncRequestState<T> {
@@ -28,6 +29,7 @@ const initialState: SummaryPreviewState = {
   form: {
     coordinates: '39.99952202640245, -83.01270469750418',
     radius: '',
+    orientation: '0',
   },
   request: {
     status: 'idle',
@@ -58,7 +60,7 @@ function parseCoordinates(coordinates: string): { lat: number; lon: number } | {
 
 export const fetchSummaryPreview = createAsyncThunk<debugScenePromptResponse, SummaryPreviewFormState, { rejectValue: string }>(
   'summaryPreview/fetchSummaryPreview',
-  async ({ coordinates, radius }, { rejectWithValue }) => {
+  async ({ coordinates, radius, orientation }, { rejectWithValue }) => {
     const parsed = parseCoordinates(coordinates);
     if ('error' in parsed) {
       return rejectWithValue(parsed.error);
@@ -73,10 +75,16 @@ export const fetchSummaryPreview = createAsyncThunk<debugScenePromptResponse, Su
       return rejectWithValue('Radius must be greater than 0.');
     }
 
+    const parsedOrientation = Number(orientation);
+    if (!Number.isFinite(parsedOrientation)) {
+      return rejectWithValue('Orientation must be a valid number.');
+    }
+
     try {
       return await loadScenePromptPreview({
         ...parsed,
         radius: parsedRadius,
+        playerOrientation: normalizeOrientationDegrees(parsedOrientation),
       });
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
@@ -93,6 +101,9 @@ const summaryPreviewSlice = createSlice({
     },
     setRadius(state, action: PayloadAction<string>) {
       state.form.radius = action.payload;
+    },
+    setOrientation(state, action: PayloadAction<string>) {
+      state.form.orientation = action.payload;
     },
   },
   extraReducers: (builder) => {
@@ -114,5 +125,9 @@ const summaryPreviewSlice = createSlice({
 
 export const selectSummaryPreviewState = (state: RootState) => state.summaryPreview;
 
-export const { setCoordinates, setRadius } = summaryPreviewSlice.actions;
+export const { setCoordinates, setRadius, setOrientation } = summaryPreviewSlice.actions;
 export default summaryPreviewSlice.reducer;
+
+function normalizeOrientationDegrees(degrees: number): number {
+  return ((degrees % 360) + 360) % 360;
+}

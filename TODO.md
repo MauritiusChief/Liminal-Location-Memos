@@ -11,9 +11,11 @@
 ## 重构计划
 
 * Visual Dscrption 提示词，明确提示因为 World State 范围窄，描述中必定包含不在 World State 范围内的建筑。因此这部分不在范围内建筑的细节不能记录，避免产生混淆。
+* backend/routes/api.ts 拆分为小的文件，不要全挤在一起
 
 ## 近期计划
 
+* 前端继续游戏、重开游戏时的UI bug
 * 添加通过海拔高度 API 与 ele 标签计算建筑实际高度的功能
 
 * 添加建筑生成功能，具体在 gameSystem/_note 中

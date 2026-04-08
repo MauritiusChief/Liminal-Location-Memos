@@ -34,6 +34,10 @@ interface GameTurnRequestBody {
   message?: string;
 }
 
+interface OrientedDebugRequestBody extends Partial<RangedPosition> {
+  playerOrientation?: number;
+}
+
 const DEBUG_LLM_SYSTEM_PROMPT_PLACEHOLDER = '[debug system prompt placeholder]';
 
 export const apiRouter = Router();
@@ -140,6 +144,19 @@ function parseNormalizedRequest(body: RangedPosition) {
       radius,
     },
   } as const;
+}
+
+function parseOptionalOrientation(body: { playerOrientation?: unknown }): { value: number } | { error: string } {
+  const { playerOrientation } = body;
+  if (typeof playerOrientation === 'undefined') {
+    return { value: 0 };
+  }
+
+  if (typeof playerOrientation !== 'number' || !Number.isFinite(playerOrientation)) {
+    return { error: 'playerOrientation must be a finite number.' };
+  }
+
+  return { value: playerOrientation };
 }
 
 function parsePosition(body: Partial<RangedPosition>) {
@@ -307,20 +324,27 @@ apiRouter.post('/debug/db/sync-overpass', async (request, response) => {
 });
 
 apiRouter.post('/debug/db/normalized-load', async (request, response) => {
-  const parsed = parseNormalizedRequest(request.body as RangedPosition);
+  const body = request.body as OrientedDebugRequestBody;
+  const parsed = parseNormalizedRequest(body as RangedPosition);
+  const orientationParsed = parseOptionalOrientation(body);
   // console.log("BE: normalized-load", parsed);
 
   if ('error' in parsed) {
     response.status(400).json({ error: parsed.error });
     return;
   }
+  if ('error' in orientationParsed) {
+    response.status(400).json({ error: orientationParsed.error });
+    return;
+  }
 
   const normalizedRequest = parsed.value;
+  const playerOrientation = orientationParsed.value;
 
   try {
     const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
       fetchSceneFeatureDetailsFromDb(normalizedRequest, 'debug'),
-      fetchMicroGridFromDb(normalizedRequest),
+      fetchMicroGridFromDb(normalizedRequest, playerOrientation),
       fetchScenePolarFeaturesFromDb(normalizedRequest, 'debug'),
     ]);
 
@@ -348,14 +372,19 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
  * 预览生成的 Scene Prompt
  */
 apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
-  const body = request.body as Partial<RangedPosition>;
+  const body = request.body as OrientedDebugRequestBody;
   // console.log(body);
 
   const {value, error} = parsePosition(body);
+  const orientationParsed = parseOptionalOrientation(body);
   const radius = body.radius;
 
   if (error) {
     response.status(400).json({ error });
+    return;
+  }
+  if ('error' in orientationParsed) {
+    response.status(400).json({ error: orientationParsed.error });
     return;
   }
 
@@ -367,9 +396,10 @@ apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
   try {
     const {lat, lon} = value
     const rangedPosition: RangedPosition = {lat, lon, radius}
+    const playerOrientation = orientationParsed.value;
     // console.log(rangedPosition);
-    const sceneObject = await buildSceneFromRequest(rangedPosition)
-    const scenePrompt = buildScenePrompt(sceneObject)
+    const sceneObject = await buildSceneFromRequest(rangedPosition, playerOrientation)
+    const scenePrompt = buildScenePrompt(sceneObject, playerOrientation)
     response.json({
       radius,
       scenePrompt,
