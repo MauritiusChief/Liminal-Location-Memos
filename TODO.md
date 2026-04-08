@@ -1,3 +1,12 @@
+## 进行中计划
+
+* Game State 添加玩家当前朝向 playerOrientation
+* 生成 Micro Grid Object 与 Polar View Object 时，添加 playerOrientation 作为参数，但不参与后续 Xxx Prompt
+  * Micro Grid Object 生成时可能需要重写 SQL
+* sql/osmRepository 当中，有些文件已过时，把没过时的文件转移到 osmNormalization/sql 中，其他的删除
+* Polar Prompt 生成时，根据极坐标数值标注前后左右以及其正组合与偏组合，共计16个方向（比如“前”，“左前”，“左偏前”）
+* 根据最新的 Scene Prompt 调整 test 脚本断言
+* 把所有提示词当中提示东南西北的内容换为前后左右以适应最新的形式
 
 ## 重构计划
 
@@ -5,10 +14,9 @@
 
 ## 近期计划
 
-* 添加玩家的视野朝向功能
-  * 这对 Micro Grid 可能很困难，甚至要重写 SQL
-* 对夹角添加程序性的前后左右标识
 * 添加通过海拔高度 API 与 ele 标签计算建筑实际高度的功能
+
+* 添加建筑生成功能，具体在 gameSystem/_note 中
 
 * 添加记忆功能/工具，可以把觉得重要的东西记下来。
 * 范围从小到大依次读取地图，避免一次性读取太多地图，信息量太大。
