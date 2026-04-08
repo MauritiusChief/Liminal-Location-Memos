@@ -131,6 +131,7 @@ async function chatCompletionDeepSeek(requestBody: DeepSeekChatRequest): Promise
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${config.llmApiKey}`,
+      'X-OpenRouter-Title': 'Liminal Location Memo',
     },
     body: JSON.stringify(requestBody),
   });

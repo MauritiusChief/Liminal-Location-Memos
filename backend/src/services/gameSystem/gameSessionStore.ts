@@ -107,7 +107,8 @@ export interface PlayerIndoorLocation {
 
 //#region 常量
 
-const testPosition = [39.90310484384369, -83.44964892561046]
+// const testPosition = [39.90310484384369, -83.44964892561046]
+const testPosition = [39.99952202640245, -83.01270469750418]
 
 const DEFAULT_START_POSITION: Position = {
   // lat: 33.83653441683847,

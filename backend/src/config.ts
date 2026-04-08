@@ -27,6 +27,7 @@ function readOptionalEnv(...names: string[]): string | undefined {
 
 function readLlmProvider(): LlmProvider {
   const provider = readRequiredEnv('LLM_PROVIDER').trim().toLowerCase();
+  console.log(`模型供应商：${provider}`);
 
   if (provider === 'deepseek' || provider === 'openrouter') {
     return provider;
@@ -45,10 +46,12 @@ function readProviderConfig(provider: LlmProvider): { apiKey: string; baseUrl: s
     };
   }
 
+  const model =readRequiredEnv('OPENROUTER_MODEL')
+  console.log(`所选模型：${model}`)
   return {
     apiKey: readRequiredEnv('OPENROUTER_API_KEY'),
     baseUrl: readRequiredEnv('OPENROUTER_URL'),
-    model: readRequiredEnv('OPENROUTER_MODEL'),
+    model,
     reasoningMode: 'openrouter-reasoning',
   };
 }
