@@ -62,6 +62,7 @@ export interface PlayerIndoorLocation {
 export interface GameSession {
   sessionId: string;
   playerPosition: Position;
+  playerOrientation: number;
   playerIndoorLocation: PlayerIndoorLocation | null;
   messageHistory: GameMessage[];
   activeOutdoorVisualDescriptions: string[];

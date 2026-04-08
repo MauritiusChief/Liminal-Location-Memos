@@ -148,17 +148,17 @@ describe("buildPolarViewPrompt", () => {
       ],
     });
 
-    const prompt = buildPolarViewPrompt(polarView);
+    const prompt = buildPolarViewPrompt(polarView, 0);
 
     expect(prompt).toContain("## 极坐标摘要");
     expect(prompt).toContain("North Building | building:");
     expect(prompt).toContain("Coffee Lab - amenity:cafe:");
     expect(prompt).toContain("Main St - highway:residential:");
     expect(prompt).toContain("Central Park - leisure:park:");
-    expect(prompt).toContain("最近点距离60m / 方位20°");
-    expect(prompt).toContain("线顶点抽样：点1距离61m / 方位20°");
-    expect(prompt).toContain("主走向90°");
-    expect(prompt).toContain("起终点开角：边界点1距离60m / 方位20°");
+    expect(prompt).toContain("最近点距离60m / 前偏右(20°)");
+    expect(prompt).toContain("线顶点抽样：点1距离61m / 前偏右(20°)");
+    expect(prompt).toContain("主走向右(90°)");
+    expect(prompt).toContain("起终点开角：边界点1距离60m / 前偏右(20°)");
     expect(prompt).toContain("name: Main St");
     expect(prompt).toContain("highway: residential");
   });
@@ -215,11 +215,11 @@ describe("buildPolarViewPrompt", () => {
       ],
     });
 
-    const prompt = buildPolarViewPrompt(polarView);
+    const prompt = buildPolarViewPrompt(polarView, 0);
 
     expect(prompt).toContain("## 等级1到等级2（30米到300米极坐标摘要）");
     expect(prompt).toContain("Tower Cluster | building:");
-    expect(prompt).toContain("群中心方位48°，共4个要素，展示3个代表要素，其余1个仅保留数量");
+    expect(prompt).toContain("群中心方向右前(48°)，共4个要素，展示3个代表要素，其余1个仅保留数量");
     expect(prompt).toContain("(id=building/b)");
     expect(prompt).toContain("(id=building/c)");
     expect(prompt).toContain("(id=building/d)");
@@ -254,20 +254,42 @@ describe("buildPolarViewPrompt", () => {
       ],
     });
 
-    const prompt = buildPolarViewPrompt(polarView);
+    const prompt = buildPolarViewPrompt(polarView, 0);
 
     expect(prompt).toContain("## 等级1到等级3（30米到1公里极坐标摘要）");
-    expect(prompt).toContain("群中心方位210°，共2个要素，展示1个代表要素，其余1个仅保留数量");
+    expect(prompt).toContain("群中心方向后偏左(210°)，共2个要素，展示1个代表要素，其余1个仅保留数量");
     expect(prompt).toContain("(id=area/a)");
     expect(prompt).not.toContain("(id=area/b)");
   });
 
+  it("rotates relative direction labels with player orientation", () => {
+    const polarView = buildPolarView({
+      1: [
+        buildCluster("cluster/building", 0, [
+          buildFeature({
+            featureId: "building/north",
+            osmId: 30,
+            category: "building",
+            distanceMeters: 60,
+            bearingDegrees: 0,
+            baseLabel: "North Building | building",
+            tags: { name: "North Building", building: "yes" },
+          }),
+        ]),
+      ],
+    });
+
+    const prompt = buildPolarViewPrompt(polarView, 90);
+
+    expect(prompt).toContain("最近点距离60m / 左(270°)");
+  });
+
   it("renders information-insufficient blocks when a level/category has no content", () => {
-    const prompt = buildPolarViewPrompt(buildPolarView({}));
+    const prompt = buildPolarViewPrompt(buildPolarView({}), 0);
 
     expect(prompt).toContain("## 极坐标摘要：无");
-    expect(prompt).toContain("#### 等级1(100m~30m)：\n信息不足，未生成极坐标摘要");
-    expect(prompt).toContain("#### 等级2(300m~100m)：\n信息不足，未生成极坐标摘要");
-    expect(prompt).toContain("#### 等级3(1km~300m)：\n信息不足，未生成极坐标摘要");
+    expect(prompt).toContain("#### 等级1(30m~100m)：\n信息不足，未生成极坐标摘要");
+    expect(prompt).toContain("#### 等级2(100m~300m)：\n信息不足，未生成极坐标摘要");
+    expect(prompt).toContain("#### 等级3(300m~1km)：\n信息不足，未生成极坐标摘要");
   });
 });

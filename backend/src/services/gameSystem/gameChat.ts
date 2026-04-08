@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { RangedPosition } from '@/routes/apiTypes.js';
-import { degreesToRadians, distanceBetweenCoordinates, distanceToPosition, EARTH_RADIUS_METERS, normalizeLongitude, radiansToDegrees } from '@/services/geometry.js';
+import { degreesToRadians, distanceBetweenCoordinates, distanceToPosition, EARTH_RADIUS_METERS, normalizeBearingDegrees, normalizeLongitude, radiansToDegrees } from '@/services/geometry.js';
 import { buildSceneFromRequest } from '../scene/sceneObject.js';
 import { buildScenePrompt } from '../scene/scenePrompt.js';
 import {
@@ -70,11 +70,11 @@ const MOVE_PLAYER_TOOL: GameStateToolDef = {
  * @param request
  * @returns 整个游戏的第一条描述周遭状况的 Book Message
  */
-async function initialBookMessage(request: RangedPosition): Promise<string> {
+async function initialBookMessage(request: RangedPosition, playerOrientation: number = 0): Promise<string> {
   console.log(`[${new Date().toISOString()}] initialBookMessage() 触发`);
 
-  const sceneObject = await buildSceneFromRequest(request);
-  const scenePrompt = buildScenePrompt(sceneObject);
+  const sceneObject = await buildSceneFromRequest(request, playerOrientation);
+  const scenePrompt = buildScenePrompt(sceneObject, playerOrientation);
   const generated = await generateReplySingleMessage(
     INITIAL_BOOK_MESSAGE_SYSTEM,
     scenePrompt,
@@ -98,13 +98,14 @@ async function initialBookMessage(request: RangedPosition): Promise<string> {
 async function extractOutdoorVisualDescription(
   bookMessage: string,
   pos: Position,
+  playerOrientation: number,
   oldVisualDescription?: string,
 ): Promise<string> {
   console.log(`[${new Date().toISOString()}] 开始 extractOutdoorVisualDescription()`);
 
   const { lat, lon } = pos;
-  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: VISUAL_DESCRIPTION_RADIUS_METERS });
-  const scenePrompt = buildScenePrompt(sceneObject);
+  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: VISUAL_DESCRIPTION_RADIUS_METERS }, playerOrientation);
+  const scenePrompt = buildScenePrompt(sceneObject, playerOrientation);
 
   const message = [
     'OpenStreetMap 数据摘要：',
@@ -226,7 +227,7 @@ export async function startGame(): Promise<GameSession> {
     lat,
     lon,
     radius: INITIAL_SCENE_RADIUS_METERS,
-  });
+  }, session.playerOrientation);
 
   session.messageHistory.push({
     role: 'book',
@@ -284,8 +285,8 @@ export async function runGameTurn(sessionId: string, playerMessage: string): Pro
  */
 async function toWorldStatePrompt(state: GameSession): Promise<string> {
   const { lat, lon } = state.playerPosition;
-  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: REGULAR_SCENE_RADIUS_METERS });
-  const scenePrompt = buildScenePrompt(sceneObject);
+  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: REGULAR_SCENE_RADIUS_METERS }, state.playerOrientation);
+  const scenePrompt = buildScenePrompt(sceneObject, state.playerOrientation);
   const outdoorVisualDescriptions = Object.entries(state.outdoorVisualDescriptions)
     .filter(([id]) => state.activeOutdoorVisualDescriptions.includes(id))
     .map(([, record]) => record.content)
@@ -304,7 +305,7 @@ async function toWorldStatePrompt(state: GameSession): Promise<string> {
  * 执行 Game State Manager 给出的工具调用。
  * 最小可跑阶段只接 move_player，其他工具名一律忽略。
  */
-function applyGameStateToolCalls(session: GameSession, toolCalls: GameStateToolCall[]): void {
+export function applyGameStateToolCalls(session: GameSession, toolCalls: GameStateToolCall[]): void {
   for (const toolCall of toolCalls) {
     console.log(`[${new Date().toISOString()}] 开始解析 ${toolCall.name} 工具参数：`, toolCall.arguments);
 
@@ -327,6 +328,7 @@ function applyGameStateToolCalls(session: GameSession, toolCalls: GameStateToolC
     console.log(`[${new Date().toISOString()}] 移动玩家工具完成`);
 
     session.playerPosition = nextPosition;
+    session.playerOrientation = normalizeBearingDegrees(bearingDegrees);
     session.playerIndoorLocation = null;
   }
 }
@@ -368,6 +370,7 @@ async function upsertOutdoorVisualDescription(session: GameSession, bookMessage:
   const extracted = await extractOutdoorVisualDescription(
     bookMessage,
     session.playerPosition,
+    session.playerOrientation,
     matchedRecord?.content,
   );
   const now = new Date().toISOString();

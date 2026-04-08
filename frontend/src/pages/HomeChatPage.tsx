@@ -98,6 +98,10 @@ export function HomeChatPage() {
               ? `${session.playerPosition.lat.toFixed(6)}, ${session.playerPosition.lon.toFixed(6)}`
               : 'Unknown'}
           </p>
+          <p>
+            Current orientation:{' '}
+            {session ? `${Math.round(session.playerOrientation)}°` : 'Unknown'}
+          </p>
           <h4>Active Outdoor Visual Descriptions</h4>
           <div>
             {activeOutdoorVisualDescriptions.length ? activeOutdoorVisualDescriptions.map((record) => (

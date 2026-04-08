@@ -27,6 +27,7 @@ export type GameMessage =
 export interface GameSession {
   sessionId: string;
   playerPosition: Position;
+  playerOrientation: number;
   playerIndoorLocation: PlayerIndoorLocation | null;
   messageHistory: GameMessage[];
   activeOutdoorVisualDescriptions: string[]; // 记录 outdoorVisualDescriptions id
@@ -142,7 +143,7 @@ export async function getSession(sessionId: string): Promise<GameSession | undef
   const save = await loadSaveDocument(sessionId)
   if (!save) return undefined // 没有找到 Game Session
 
-  const loadedSession: GameSession = save
+  const loadedSession = save;
   sessions.set(sessionId, loadedSession); // 把文件存档态的 Game Session 存入内存缓存
   return loadedSession;
 }
@@ -154,7 +155,7 @@ export async function getSession(sessionId: string): Promise<GameSession | undef
 export async function createSession(): Promise<GameSession> {
   const nextSessionId = randomUUID();
   const save = createSaveDocument(nextSessionId);
-  const loadedSession: GameSession = save
+  const loadedSession = save;
 
   sessions.set(nextSessionId, loadedSession);
   return loadedSession;
@@ -193,6 +194,7 @@ function createSaveDocument(sessionId: string): GameSession {
   return {
     sessionId,
     playerPosition: { ...DEFAULT_START_POSITION },
+    playerOrientation: Math.floor(Math.random() * 360),
     playerIndoorLocation: null,
     messageHistory: [],
     activeOutdoorVisualDescriptions: [],

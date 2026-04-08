@@ -1,6 +1,5 @@
 import { RangedPosition } from "@/routes/apiTypes.js";
-import { buildMicroGridPrompt, LabeledMicroGrid } from "./microGridPrompt.js";
-import { PolarView } from "./polarViewLabeled.js";
+import { buildMicroGridPrompt } from "./microGridPrompt.js";
 import { buildPolarViewPrompt } from "./polarViewPrompt.js";
 import { SceneObject } from "./sceneObject.js";
 
@@ -8,7 +7,7 @@ import { SceneObject } from "./sceneObject.js";
  * 从 Scene Object 生成 Scene Prompt
  * @returns
  */
-export function buildScenePrompt(scene: SceneObject): string {
+export function buildScenePrompt(scene: SceneObject, playerOrientation: number = 0): string {
 
   const {largestLevel, microGrid, polarView} = scene
   // console.log(largestLevel);
@@ -22,7 +21,7 @@ export function buildScenePrompt(scene: SceneObject): string {
   const sections = [
     buildPromptIntro(rangedPosision, largestLevel),
     buildMicroGridPrompt(microGrid),
-    polarView ? buildPolarViewPrompt(polarView) : '',
+    polarView ? buildPolarViewPrompt(polarView, playerOrientation) : '',
   ];
 
   return sections.join('\n\n');
@@ -51,5 +50,7 @@ function buildPromptIntro(rangedPosision: RangedPosition, largestLevel: 0|1|2|3 
     '请根据以下空间结构信息理解查询点周边环境。',
     `查询点：纬度 ${rangedPosision.lat}，经度 ${rangedPosision.lon}，原始查询半径 ${rangedPosision.radius} 米。`,
     intruduceOfLevel,
+    '微网格 1 至 6 行代表玩家前方，7 至 12 行代表玩家后方；1 至 6 列代表玩家左侧，7 至 12 列代表玩家右侧。',
+    '极坐标中的方向文案（若有）以玩家当前朝向为正前，使用前后左右及其组合来描述；括号中的角度为实际极坐标角度（正前方为0度，顺时针增加）',
   ].join('\n');
 }

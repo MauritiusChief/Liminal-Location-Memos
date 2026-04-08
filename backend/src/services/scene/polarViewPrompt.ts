@@ -41,16 +41,19 @@ const PROMPT_TAG_KEYS_BY_CATEGORY: Record<PolarFeatureCategory, readonly string[
  * @param polarView 已经过滤好的 Polar View
  * @returns
  */
-export function buildPolarViewPrompt(polarView: PolarView): string {
-  const largestLevel = getLargestLevel(polarView) ?? 3
-  const buildingAndPoiBlocks = polarView.levels.filter(l => l.level <= largestLevel).map((level) =>
-    buildPolarLevelBlock(level, ["building", "poi"]),
+export function buildPolarViewPrompt(polarView: PolarView, playerOrientation: number = 0): string {
+  const largestLevel = getLargestLevel(polarView);
+  const levelsToRender = largestLevel
+    ? polarView.levels.filter((level) => level.level <= largestLevel)
+    : polarView.levels;
+  const buildingAndPoiBlocks = levelsToRender.map((level) =>
+    buildPolarLevelBlock(level, ["building", "poi"], playerOrientation),
   );
-  const lineBlocks = polarView.levels.filter(l => l.level <= largestLevel).map((level) =>
-    buildPolarLevelBlock(level, ["line"]),
+  const lineBlocks = levelsToRender.map((level) =>
+    buildPolarLevelBlock(level, ["line"], playerOrientation),
   );
-  const areaBlocks = polarView.levels.filter(l => l.level <= largestLevel).map((level) =>
-    buildPolarLevelBlock(level, ["area"]),
+  const areaBlocks = levelsToRender.map((level) =>
+    buildPolarLevelBlock(level, ["area"], playerOrientation),
   );
 
   let hintOfLevel = "## 极坐标摘要：无";
@@ -83,6 +86,7 @@ export function buildPolarViewPrompt(polarView: PolarView): string {
 function buildPolarLevelBlock(
   level: PolarViewLevel,
   includedCategories: PolarFeatureCategory[],
+  playerOrientation: number,
 ): string {
   const levelDesc = { 1: "30m~100m", 2: "100m~300m", 3: "300m~1km" };
   const clusters = level.clusters.filter((cluster) =>
@@ -90,12 +94,12 @@ function buildPolarLevelBlock(
   );
 
   if (clusters.length === 0) {
-    return '';
+    return `#### 等级${level.level}(${levelDesc[level.level]})：\n信息不足，未生成极坐标摘要`;
   }
 
   let noGroupLines = true
   const groupLines = clusters.map((cluster) => {
-    const groupBlock = buildPolarGroupBlock(level.level, cluster);
+    const groupBlock = buildPolarGroupBlock(level.level, cluster, playerOrientation);
     if (!groupBlock) return ''
     noGroupLines = false
     return [groupBlock.title + ":", "", ...groupBlock.lines, ""].join("\n");
@@ -109,6 +113,7 @@ function buildPolarLevelBlock(
 function buildPolarGroupBlock(
   level: 1 | 2 | 3,
   cluster: PolarViewCluster,
+  playerOrientation: number,
 ): {
   title: string;
   lines: string[];
@@ -122,19 +127,20 @@ function buildPolarGroupBlock(
   if (cluster.features.length === 1) {
     return {
       title: firstFeature.baseLabel,
-      lines: buildPolarFeatureLines(level, firstFeature),
+      lines: buildPolarFeatureLines(level, firstFeature, playerOrientation),
     };
   }
 
   return {
     title: firstFeature.baseLabel,
-    lines: buildPolarClusterSummaryLines(level, cluster),
+    lines: buildPolarClusterSummaryLines(level, cluster, playerOrientation),
   };
 }
 
 function buildPolarClusterSummaryLines(
   level: 1 | 2 | 3,
   cluster: PolarViewCluster,
+  playerOrientation: number,
 ): string[] {
   const features: MarkedPolarViewFeature[] = cluster.features
   const config = POLAR_LEVEL_CLUSTER_PROMPT_CONFIG[level];
@@ -158,10 +164,10 @@ function buildPolarClusterSummaryLines(
   const hint = shouldShowOmissionSummary
     ? `，共${cluster.memberCount}个要素，展示${resolvedRepresentativeFeatures.length}个代表要素，其余${omittedCount}个仅保留数量`
     : "";
-  const lines = [`* 群中心方位${formatAngle(cluster.centerBearingDegrees)}${hint}`];
+  const lines = [`* 群中心方向${formatRelativeDirection(cluster.centerBearingDegrees, playerOrientation)}${hint}`];
 
   for (const anchor of resolvedRepresentativeFeatures) {
-    lines.push(...buildPolarFeatureLines(level, anchor));
+    lines.push(...buildPolarFeatureLines(level, anchor, playerOrientation));
   }
 
   return lines;
@@ -169,7 +175,8 @@ function buildPolarClusterSummaryLines(
 
 function buildPolarFeatureLines(
   level: 1 | 2 | 3,
-  feature: MarkedPolarViewFeature
+  feature: MarkedPolarViewFeature,
+  playerOrientation: number,
 ): string[] {
   const detailTags = collectPromptTags(level, feature).map((tag) => `${tag.key}: ${tag.value}`);
   const baseLines = [
@@ -178,14 +185,14 @@ function buildPolarFeatureLines(
 
   if (feature.category === "line" && feature.linePoints && feature.linePoints.length > 0) {
     const pointText = feature.linePoints
-      .map((point, index) => `点${index + 1}${formatPolarSample(point)}`)
+      .map((point, index) => `点${index + 1}${formatPolarSample(point, playerOrientation)}`)
       .join("，");
     return [
       ...baseLines,
-      `  * 中心点${formatPolarSample(feature.centerPoint)}`,
+      `  * 中心点${formatPolarSample(feature.centerPoint, playerOrientation)}`,
       `  * 线顶点抽样：${pointText}`,
-      `  * 主走向${formatAngle(feature.orientationDegrees || 0)}`,
-      `  * 起终点开角：边界点1${formatPolarSample(feature.widestSpan.clockwiseEarlyPoint)}，边界点2${formatPolarSample(feature.widestSpan.clockwiseLatePoint)}，角宽${formatAngle(feature.widestSpan.angleWidthDegrees)}`,
+      `  * 主走向${formatRelativeDirection(feature.orientationDegrees || 0, playerOrientation)}`,
+      `  * 起终点开角：边界点1${formatPolarSample(feature.widestSpan.clockwiseEarlyPoint, playerOrientation)}，边界点2${formatPolarSample(feature.widestSpan.clockwiseLatePoint, playerOrientation)}，角宽${formatAngle(feature.widestSpan.angleWidthDegrees)}`,
       ...detailTags.map((tag) => `  * ${tag}`),
     ];
   }
@@ -193,15 +200,15 @@ function buildPolarFeatureLines(
     if ( level === 3) return [] // 在此处应用 level 3 的 POI 完全不显示的限制
     return [
       ...baseLines,
-      `  * 坐标${formatPolarSample(feature.centerPoint)}`,
+      `  * 坐标${formatPolarSample(feature.centerPoint, playerOrientation)}`,
       ...detailTags.map((tag) => `  * ${tag}`),
     ];
   }
 
   return [
     ...baseLines,
-    `  * 最近点${formatPolarSample(feature.nearestPoint)}，最远点${formatPolarSample(feature.farthestPoint)}，中心点${formatPolarSample(feature.centerPoint)}`,
-    `  * 边界点1${formatPolarSample(feature.widestSpan.clockwiseEarlyPoint)}，边界点2${formatPolarSample(feature.widestSpan.clockwiseLatePoint)}，视野角宽${formatAngle(feature.widestSpan.angleWidthDegrees)}`,
+    `  * 最近点${formatPolarSample(feature.nearestPoint, playerOrientation)}，最远点${formatPolarSample(feature.farthestPoint, playerOrientation)}，中心点${formatPolarSample(feature.centerPoint, playerOrientation)}`,
+    `  * 边界点1${formatPolarSample(feature.widestSpan.clockwiseEarlyPoint, playerOrientation)}，边界点2${formatPolarSample(feature.widestSpan.clockwiseLatePoint, playerOrientation)}，视野角宽${formatAngle(feature.widestSpan.angleWidthDegrees)}`,
     ...detailTags.map((tag) => `  * ${tag}`),
   ];
 }
@@ -253,12 +260,43 @@ function collectPromptTags(level: 1|2|3, feature: MarkedPolarViewFeature): Array
   }
 }
 
-function formatPolarSample(sample: { distanceMeters: number; bearingDegrees: number }): string {
-  return `距离${Math.round(sample.distanceMeters)}m / 方位${Math.round(sample.bearingDegrees)}°`;
+function formatPolarSample(
+  sample: { distanceMeters: number; bearingDegrees: number },
+  playerOrientation: number,
+): string {
+  return `距离${Math.round(sample.distanceMeters)}m / ${formatRelativeDirection(sample.bearingDegrees, playerOrientation)}`;
 }
 
 function formatAngle(angleDegrees: number): string {
   return `${Math.round(angleDegrees)}°`;
+}
+
+function formatRelativeDirection(bearingDegrees: number, playerOrientation: number): string {
+  const relativeDegrees = normalizeRelativeDegrees(bearingDegrees - playerOrientation);
+  const labels = [
+    "前",
+    "前偏右",
+    "右前",
+    "右偏前",
+    "右",
+    "右偏后",
+    "右后",
+    "后偏右",
+    "后",
+    "后偏左",
+    "左后",
+    "左偏后",
+    "左",
+    "左偏前",
+    "左前",
+    "前偏左",
+  ] as const;
+  const index = Math.floor((relativeDegrees + 11.25) / 22.5) % labels.length;
+  return `${labels[index]}(${Math.round(relativeDegrees)}°)`;
+}
+
+function normalizeRelativeDegrees(angleDegrees: number): number {
+  return ((angleDegrees % 360) + 360) % 360;
 }
 
 function getLargestLevel(polarView: PolarView): 1 | 2 | 3 | undefined {

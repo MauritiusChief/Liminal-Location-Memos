@@ -23,10 +23,10 @@ export interface SceneObject {
  * @param request
  * @returns
  */
-export async function buildSceneFromRequest(request: RangedPosition): Promise<SceneObject> {
+export async function buildSceneFromRequest(request: RangedPosition, playerOrientation: number = 0): Promise<SceneObject> {
   const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
     fetchSceneFeatureDetailsFromDb(request),
-    fetchMicroGridFromDb(request),
+    fetchMicroGridFromDb(request, playerOrientation),
     fetchScenePolarFeaturesFromDb(request),
   ]);
 

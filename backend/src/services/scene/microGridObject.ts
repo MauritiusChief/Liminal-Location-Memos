@@ -66,14 +66,13 @@ const fetchMicroGridFromDbSqlPromise = loadServiceSql('osmRepository/fetchMicroG
 
 /**
  * grid 的空间命中全部下沉到 PostGIS：
- * 1. 生成 12x12 固定网格
+ * 1. 生成 12x12 可按玩家朝向旋转的网格
  * 2. 用 cell center 判定 building/area 基底
  * 3. 用 cell bbox 收集 poi / road 叠加层
- * TODO: 未来可能要添加根据视野朝向不同而转向的内容
  * @param request
  * @returns
  */
-export async function fetchMicroGridFromDb(request: RangedPosition): Promise<IdReferedMicroGridCell[]> {
+export async function fetchMicroGridFromDb(request: RangedPosition, playerOrientation: number = 0): Promise<IdReferedMicroGridCell[]> {
   if (request.radius <= 50) {
     return [];
   }
@@ -81,7 +80,7 @@ export async function fetchMicroGridFromDb(request: RangedPosition): Promise<IdR
   const sql = await fetchMicroGridFromDbSqlPromise;
   const result = await query<DbMicroGridCellTableRow>(
     sql,
-    [request.lon, request.lat],
+    [request.lon, request.lat, playerOrientation],
   );
 
   return result.rows.map((row) => ({
