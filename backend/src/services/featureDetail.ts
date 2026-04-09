@@ -25,9 +25,9 @@ interface DbBuildingDetailTableRow extends DbFeatureDetailTableRow {
 }
 
 /**
- * 描绘 Scene 所用的地物细节数据，不包含几何形状数据
+ * 以 featureId 为指数记录地物细节数据，不包含几何形状数据（用与描绘 Scene、生成 Building Schema 等）
  */
-export interface SceneFeatureDetail {
+export interface FeatureDetail {
   featureId: string;
   osmId: number;
   osmType?: string;
@@ -44,7 +44,7 @@ export interface SceneFeatureDetail {
 //#region 主函数
 
 /**
- * 这个函数把“后续文案与调试真正会消费的要素字段”统一取回。
+ * 这个函数取回以 featureId 为指数的一列记录，包含所有细节。
  * 建筑单独走一条查询，是为了顺手把 containedPois 一并在 SQL 里算好。
  * @param request
  * @param _profile 暂时没用，未来可区分 debug 模式和常规模式的 SQL
@@ -53,7 +53,7 @@ export interface SceneFeatureDetail {
 export async function fetchSceneFeatureDetailsFromDb(
   request: RangedPosition,
   _profile: string = 'debug',
-): Promise<SceneFeatureDetail[]> {
+): Promise<FeatureDetail[]> {
   const [buildingRows, otherRows] = await Promise.all([
     fetchBuildingDetails(request),
     fetchNonBuildingDetails(request),
@@ -89,8 +89,8 @@ export async function fetchSceneFeatureDetailsFromDb(
 
 //#region 辅助函数
 
-const fetchSceneBuildingDetailsSqlPromise = loadServiceSql('scene/sql/fetchSceneBuildingDetails.sql');
-const fetchSceneNonBuildingDetailsSqlPromise = loadServiceSql('scene/sql/fetchSceneNonBuildingDetails.sql');
+const fetchSceneBuildingDetailsSqlPromise = loadServiceSql('fetchSceneBuildingDetails.sql');
+const fetchSceneNonBuildingDetailsSqlPromise = loadServiceSql('fetchSceneNonBuildingDetails.sql');
 
 /**
  * 这里取的是“建筑详情 + 建筑内 POI”，供标签、grid 补充细节、prompt 共用。

@@ -2,7 +2,7 @@
 
 jest.mock("@/routes/apiTypes.js", () => ({}), { virtual: true });
 
-import type { SceneFeatureDetail } from "../src/services/scene/sceneUtilFeatureDetail";
+import type { FeatureDetail } from "../src/services/featureDetail";
 import type { PolarView, PolarViewCluster } from "../src/services/scene/polarViewLabeled";
 import { buildPolarViewPrompt } from "../src/services/scene/polarViewPrompt";
 
@@ -12,7 +12,7 @@ type MarkedPolarViewFeature = PolarViewCluster["features"][number];
 function buildDetail(
   category: PolarFeatureCategory,
   tags: Record<string, string> = {},
-): SceneFeatureDetail {
+): FeatureDetail {
   return {
     featureId: `${category}/detail`,
     osmId: 1,

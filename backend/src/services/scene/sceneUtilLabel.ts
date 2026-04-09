@@ -4,8 +4,8 @@ import {
   LINE_PRIMARY_LABEL_KEYS,
   POI_PRIMARY_LABEL_KEYS,
 } from '@/services/osmNormalization/osmFeatureConfig.js';
-import { SceneFeatureDetail } from './sceneUtilFeatureDetail.js';
 import { ContainedPoiReference } from '@/services/osmNormalization/osmNormalizer.js';
+import { FeatureDetail } from '../featureDetail.js';
 
 export const BUILDING_TAG_KEYS = BUILDING_PRIMARY_LABEL_KEYS;
 export const POI_TAG_KEYS = POI_PRIMARY_LABEL_KEYS;
@@ -130,7 +130,7 @@ export function getAreaPrimaryLabel(tags: Record<string, string>): string {
  * @returns 字符串标签
  */
 export function buildBuildingBaseLabel(
-  feature: SceneFeatureDetail,
+  feature: FeatureDetail,
 ): string {
   const buildingName = trimTagValue(feature.tags.name);
   const fallbackBuildingLabel = getFallbackBuildingLabel(feature.tags);

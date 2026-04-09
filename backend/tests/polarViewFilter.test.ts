@@ -10,14 +10,14 @@ jest.mock("@/db/sqlLoader.js", () => ({
 
 jest.mock("@/routes/apiTypes.js", () => ({}), { virtual: true });
 
-import type { SceneFeatureDetail } from "../src/services/scene/sceneUtilFeatureDetail";
+import type { FeatureDetail } from "../src/services/featureDetail";
 import type { PolarView } from "../src/services/scene/polarViewLabeled";
 import { applyVisualFilter } from "../src/services/scene/polarViewFilter";
 
 function buildDetail(
-  category: SceneFeatureDetail["category"],
+  category: FeatureDetail["category"],
   tags: Record<string, string> = {},
-): SceneFeatureDetail {
+): FeatureDetail {
   return {
     featureId: `${category}/detail`,
     osmId: 1,

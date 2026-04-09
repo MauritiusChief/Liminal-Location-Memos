@@ -14,7 +14,6 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "geokdbush": "^2.0.1",
-    "glob": "^13.0.6",
     "kdbush": "^4.0.2",
     "osmtogeojson": "^2.2.12",
     "overpass-ts": "^4.3.8",

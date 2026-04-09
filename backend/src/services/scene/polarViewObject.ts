@@ -7,7 +7,7 @@ import {
   distanceBetweenCoordinates,
   normalizeBearingDegrees,
 } from "../geometry.js";
-import { SceneFeatureDetail } from "./sceneUtilFeatureDetail.js";
+import { FeatureDetail } from "../featureDetail.js";
 
 /**
  * 与 SQL 查询结果表一致的扁平类型
@@ -59,7 +59,7 @@ export interface PolarViewFeature {
   category: "building" | "area" | "poi" | "line";
   geometryType: string;
   osmType?: string;
-  featureDetail: SceneFeatureDetail;
+  featureDetail: FeatureDetail;
   centerPoint: PolarCoordinateSample;
   widestSpan: PolarAngularSpan;
   nearestPoint: PolarCoordinateSample;
@@ -117,7 +117,7 @@ export async function fetchScenePolarFeaturesFromDb(
 export function buildPolarViewFeature(
   request: RangedPosition,
   polarViewFeatures: SampledPolarViewFeature[],
-  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
+  featureDetails: ReadonlyMap<string, FeatureDetail>,
 ): PolarViewFeature[] {
   const origin: [number, number] = [request.lon, request.lat];
 
@@ -186,7 +186,7 @@ function buildCommonPolarViewFeature(
   polarViewFeature: SampledPolarViewFeature,
   coordinates: [number, number][],
   centerCoordinate: [number, number],
-  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
+  featureDetails: ReadonlyMap<string, FeatureDetail>,
 ): PolarViewFeature | null {
   if (coordinates.length === 0) {
     return null;

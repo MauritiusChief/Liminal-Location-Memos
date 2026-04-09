@@ -10,7 +10,7 @@ jest.mock("@/db/sqlLoader.js", () => ({
 
 jest.mock("@/routes/apiTypes.js", () => ({}), { virtual: true });
 
-import type { SceneFeatureDetail } from "../src/services/scene/sceneUtilFeatureDetail";
+import type { FeatureDetail } from "../src/services/featureDetail";
 import {
   type SampledPolarViewFeature,
   buildPolarViewFeature
@@ -31,8 +31,8 @@ function buildTestRequest() {
 
 function buildFeatureDetailsMap(
   features: SampledPolarViewFeature[],
-  overrides: Partial<Record<string, Partial<SceneFeatureDetail>>> = {},
-): ReadonlyMap<string, SceneFeatureDetail> {
+  overrides: Partial<Record<string, Partial<FeatureDetail>>> = {},
+): ReadonlyMap<string, FeatureDetail> {
   return new Map(
     features.map((feature) => {
       const override = overrides[feature.featureId] || {};
@@ -53,7 +53,7 @@ function buildFeatureDetailsMap(
         relationReferences: override.relationReferences,
         outlineReferences: override.outlineReferences,
         containedPoisReferences: override.containedPoisReferences,
-      } satisfies SceneFeatureDetail];
+      } satisfies FeatureDetail];
     }),
   );
 }

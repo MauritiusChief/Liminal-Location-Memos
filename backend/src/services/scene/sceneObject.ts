@@ -1,7 +1,7 @@
 import { RangedPosition } from "@/routes/apiTypes.js";
 import { buildLabeledMicroGrid, LabeledMicroGrid } from "./microGridPrompt.js";
 import { applyClusterMarkder, buildPolarView, PolarView } from "./polarViewLabeled.js";
-import { fetchSceneFeatureDetailsFromDb } from "./sceneUtilFeatureDetail.js";
+import { fetchSceneFeatureDetailsFromDb } from "../featureDetail.js";
 import { buildMicroGrid, fetchMicroGridFromDb } from "./microGridObject.js";
 import { buildPolarViewFeature, fetchScenePolarFeaturesFromDb } from "./polarViewObject.js";
 import { applyOcclusion, buildLeveledPolarView } from "./polarViewOcclusion.js";
