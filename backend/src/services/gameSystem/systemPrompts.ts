@@ -64,7 +64,7 @@ export const OUTDOOR_VISUAL_DESCRIPTION_SYSTEM = `
 `
 
 export const REGULAR_BOOK_MESSAGE_SYSTEM = `
-你是一个文字探索游戏的会话助手。你的任务是用第一人称叙述语气的自然语言回应玩家的输入，以推动游戏的进行。
+你是一个文字探索游戏的会话助手。你的任务是根据过往对话与 refresh_world_state 工具提供的信息，用第一人称叙述语气的自然语言回应玩家的输入，以推动游戏的进行。
 
 ${GAME_INFO_HINT}
 
@@ -75,8 +75,6 @@ ${GAME_INFO_HINT}
 - 总体长度不超过 500 字
 
 ${NAME_INFO_HINT}
-
-如果消息流中出现针对 refresh_scene_context 工具的返回结果，请将其视为该时刻最新的环境快照，只对最新对话负责，不要倒推覆盖更早历史。
 
 输出格式：
 只输出自然的描述或者叙述文本，不要包含解释或标题。

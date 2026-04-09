@@ -19,8 +19,6 @@ type ReplyFormat = 'text' | 'json';
 
 //#region 主函数
 
-// TODO 添加其他模型供应商支持，比如 Openrouter
-
 /**
  * 仅输入 system prompt 和单个 use message 的单一回合 LLM call
  * @param systemPrompt
@@ -51,6 +49,13 @@ export async function generateJsonReplySingleMessage(
   return extractResponseWithReasoning(payload);
 }
 
+/**
+ * 组装单个 request，必定是 Reasoning Request
+ * @param systemPrompt
+ * @param message
+ * @param replyFormat
+ * @returns
+ */
 function buildSingleMessageRequest(
   systemPrompt: string,
   message: string,
@@ -101,17 +106,14 @@ export async function generateReplyFullMessages(
   const requestBody = buildReasoningRequest(messages, 'text')
   // 真正发送给模型
   const payload = await chatCompletion(requestBody);
-  console.log('generateReplyFullMessages() 函数中 Deepseek 返回 message：',payload.choices[0].message);
 
   return extractResponseWithReasoning(payload);
 }
 
 //#region 帮助函数
 
-// TODO 添加其他模型供应商支持，比如 Openrouter
-
 /**
- * 通用的 Deepseek 沟通函数
+ * 通用的沟通函数
  * @param messages
  * @returns
  */
@@ -164,6 +166,12 @@ async function chatCompletionOpenRouter(requestBody: OpenRouterChatRequest): Pro
   return payload;
 }
 
+/**
+ * 组装 reasoning request
+ * @param messages
+ * @param replyFormat 生成纯文本或者 json
+ * @returns
+ */
 function buildReasoningRequest(
   messages: DeepSeekMessage[] | OpenRouterMessage[],
   replyFormat: ReplyFormat,
