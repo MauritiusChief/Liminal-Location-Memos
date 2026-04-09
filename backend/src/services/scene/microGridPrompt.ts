@@ -1,6 +1,6 @@
 import { AREA_PRIMARY_LABEL_KEYS, BUILDING_PRIMARY_LABEL_KEYS, LINE_PRIMARY_LABEL_KEYS, POI_PRIMARY_LABEL_KEYS } from "@/services/osmNormalization/osmFeatureConfig.js";
 import { MicroGrid, MicroGridCell } from "./microGridObject.js";
-import { SceneFeatureDetail } from "./sceneUtilFeatureDetail.js";
+import { FeatureDetail } from "@/services/featureDetail.js";
 import { buildBuildingBaseLabel, getAreaDisplayLabel, getPoiDisplayLabel, getRoadDisplayLabel, trimTagValue } from "./sceneUtilLabel.js";
 
 export interface LabeledMicroGridCell {
@@ -120,7 +120,7 @@ function buildCellLabel(
 }
 
 function buildGridDetailEntries(cells: MicroGridCell[][]): string[] {
-  const featureDetailGroups = new Map<string, { feature: SceneFeatureDetail; ids: string[] }>()
+  const featureDetailGroups = new Map<string, { feature: FeatureDetail; ids: string[] }>()
   cells.forEach(row => row.forEach(
     cell => {
       const details = [
@@ -156,7 +156,7 @@ function buildGridDetailEntries(cells: MicroGridCell[][]): string[] {
 }
 
 
-function buildFeatureDetailEntry(feature: SceneFeatureDetail, featureIds: string[] = [feature.featureId]): string {
+function buildFeatureDetailEntry(feature: FeatureDetail, featureIds: string[] = [feature.featureId]): string {
   const detailTags = Object.keys(feature.tags).sort().map( key => {
     const value = trimTagValue(feature.tags[key]);
     return `${key}: ${value}`}
@@ -172,7 +172,7 @@ function buildFeatureDetailEntry(feature: SceneFeatureDetail, featureIds: string
 
 //#region 辅助填标签函数
 
-function getFeatureDisplayTitle(feature: SceneFeatureDetail): string {
+function getFeatureDisplayTitle(feature: FeatureDetail): string {
   const name = trimTagValue(feature.tags.name);
   const brand = trimTagValue(feature.tags.brand);
 

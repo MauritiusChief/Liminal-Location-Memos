@@ -6,6 +6,7 @@ import { buildMicroGrid, fetchMicroGridFromDb } from "./microGridObject.js";
 import { buildPolarViewFeature, fetchScenePolarFeaturesFromDb } from "./polarViewObject.js";
 import { applyOcclusion, buildLeveledPolarView } from "./polarViewOcclusion.js";
 import { applyVisualFilter } from "./polarViewFilter.js";
+import { ensureOsmCoverageForRequest } from "../osmNormalization/osmGate.js";
 
 /**
  * 专门用来生成 Scene Prompt 的类
@@ -24,6 +25,8 @@ export interface SceneObject {
  * @returns
  */
 export async function buildSceneFromRequest(request: RangedPosition, playerOrientation: number = 0): Promise<SceneObject> {
+  await ensureOsmCoverageForRequest(request);
+
   const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
     fetchFeatureDetailsFromDb(request),
     fetchMicroGridFromDb(request, playerOrientation),

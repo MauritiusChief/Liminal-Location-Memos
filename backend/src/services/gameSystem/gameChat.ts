@@ -38,7 +38,7 @@ interface GameStateToolDef {
 }
 
 const INITIAL_SCENE_RADIUS_METERS = 1000;
-const REGULAR_SCENE_RADIUS_METERS = 500;
+const WORLD_STATE_RADIUS_METERS = 500;
 const VISUAL_DESCRIPTION_RADIUS_METERS = 300;
 
 //#region 游戏状态工具
@@ -221,7 +221,8 @@ async function generateBookMessage(session: GameSession): Promise<string> {
 export async function startGame(): Promise<GameSession> {
   console.log(`[${new Date().toISOString()}] 开始游戏`);
 
-  const session = await createSession();
+  const createdSession = await createSession();
+  const session = cloneGameSession(createdSession);
   const { lat, lon } = session.playerPosition;
   const openingMessage = await initialBookMessage({
     lat,
@@ -248,10 +249,11 @@ export async function startGame(): Promise<GameSession> {
 export async function runGameTurn(sessionId: string, playerMessage: string): Promise<GameSession | undefined> {
   console.log(`[${new Date().toISOString()}] 运行回合...`);
 
-  const session = await getSession(sessionId);
-  if (!session) {
+  const existingSession = await getSession(sessionId);
+  if (!existingSession) {
     return undefined;
   }
+  const session = cloneGameSession(existingSession);
 
   session.playerIndoorLocation = null;
   session.messageHistory.push({
@@ -285,7 +287,7 @@ export async function runGameTurn(sessionId: string, playerMessage: string): Pro
  */
 async function toWorldStatePrompt(state: GameSession): Promise<string> {
   const { lat, lon } = state.playerPosition;
-  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: REGULAR_SCENE_RADIUS_METERS }, state.playerOrientation);
+  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: WORLD_STATE_RADIUS_METERS }, state.playerOrientation);
   const scenePrompt = buildScenePrompt(sceneObject, state.playerOrientation);
   const outdoorVisualDescriptions = Object.entries(state.outdoorVisualDescriptions)
     .filter(([id]) => state.activeOutdoorVisualDescriptions.includes(id))
@@ -450,4 +452,8 @@ function toToolPrompt(toolDef: GameStateToolDef): string {
     '参数：',
     argsStringArray.join('\n'),
   ].join('\n');
+}
+
+function cloneGameSession(session: GameSession): GameSession {
+  return structuredClone(session);
 }

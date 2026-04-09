@@ -5,9 +5,13 @@ export default {
     "^.+\\.tsx?$": ["ts-jest", { tsconfig: "<rootDir>/tests/tsconfig.test.json" }],
   },
   moduleNameMapper: {
+    "^\\.\\./config\\.js$": "<rootDir>/src/config.ts",
     "^\\.\\./geometry\\.js$": "<rootDir>/src/services/geometry.ts",
     "^\\.\\./scene/sceneObject\\.js$": "<rootDir>/src/services/scene/sceneObject.ts",
     "^\\.\\./scene/scenePrompt\\.js$": "<rootDir>/src/services/scene/scenePrompt.ts",
+    "^\\./osmGate\\.js$": "<rootDir>/src/services/osmNormalization/osmGate.ts",
+    "^\\./osmNormalizer\\.js$": "<rootDir>/src/services/osmNormalization/osmNormalizer.ts",
+    "^\\./osmNormalizedToDb\\.js$": "<rootDir>/src/services/osmNormalization/osmNormalizedToDb.ts",
     "^\\./polarViewObject\\.js$": "<rootDir>/src/services/scene/polarViewObject.ts",
     "^\\./polarViewOcclusion\\.js$": "<rootDir>/src/services/scene/polarViewOcclusion.ts",
     "^\\./sceneUtilLabel\\.js$": "<rootDir>/src/services/scene/sceneUtilLabel.ts",

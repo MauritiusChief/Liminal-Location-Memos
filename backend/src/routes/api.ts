@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
 import type { RangedPosition } from './apiTypes.js';
-import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
+import { OsmCoverageSyncRetryExhaustedError, syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
 import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
 import { buildLabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
 import { fetchFeatureDetailsFromDb, FeatureDetail } from '@/services/featureDetail.js';
@@ -196,6 +196,11 @@ apiRouter.post('/game/start', async (_request, response) => {
     const result = await startGame();
     response.json(result);
   } catch (error) {
+    if (error instanceof OsmCoverageSyncRetryExhaustedError) {
+      response.status(502).json({ error: error.message });
+      return;
+    }
+
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected game start error.',
     });
@@ -224,6 +229,11 @@ apiRouter.post('/game/turn', async (request, response) => {
 
     response.json(result);
   } catch (error) {
+    if (error instanceof OsmCoverageSyncRetryExhaustedError) {
+      response.status(502).json({ error: error.message });
+      return;
+    }
+
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected game turn error.',
     });
