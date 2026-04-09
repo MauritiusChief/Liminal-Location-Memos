@@ -10,10 +10,10 @@ const POI_TAG_COLUMNS = getStructuredTagColumns('poi');
 const ROAD_TAG_COLUMNS = getStructuredTagColumns('line');
 const AREA_TAG_COLUMNS = getStructuredTagColumns('area');
 
-const upsertBuildingFeatureSqlPromise = loadServiceSql('osmRepository/upsertBuildingFeature.sql');
-const upsertPoiFeatureSqlPromise = loadServiceSql('osmRepository/upsertPoiFeature.sql');
-const upsertLineFeatureSqlPromise = loadServiceSql('osmRepository/upsertLineFeature.sql');
-const upsertAreaFeatureSqlPromise = loadServiceSql('osmRepository/upsertAreaFeature.sql');
+const upsertBuildingFeatureSqlPromise = loadServiceSql('osmNormalization/sql/upsertBuildingFeature.sql');
+const upsertPoiFeatureSqlPromise = loadServiceSql('osmNormalization/sql/upsertPoiFeature.sql');
+const upsertLineFeatureSqlPromise = loadServiceSql('osmNormalization/sql/upsertLineFeature.sql');
+const upsertAreaFeatureSqlPromise = loadServiceSql('osmNormalization/sql/upsertAreaFeature.sql');
 
 //#region 主函数
 

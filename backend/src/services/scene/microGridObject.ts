@@ -79,7 +79,7 @@ export interface ComputedMicroGridCellInput {
 
 //#region 主函数
 
-const fetchMicroGridFromDbSqlPromise = loadServiceSql('osmRepository/fetchMicroGridFromDb.sql');
+const fetchMicroGridFromDbSqlPromise = loadServiceSql('scene/sql/fetchMicroGridFromDb.sql');
 const MICRO_GRID_HALF_EXTENT_METERS = 30;
 const MICRO_GRID_CELL_SIZE_METERS = 5;
 const MICRO_GRID_DIMENSION = 12;

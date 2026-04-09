@@ -72,7 +72,7 @@ export interface PolarViewFeature {
 
 //#region 主函数
 
-const fetchScenePolarFeaturesFromDbSqlPromise = loadServiceSql('osmRepository/fetchScenePolarFeaturesFromDb.sql');
+const fetchScenePolarFeaturesFromDbSqlPromise = loadServiceSql('scene/sql/fetchScenePolarFeaturesFromDb.sql');
 
 /**
  * polar 的 DB 查询只做“取候选 + 裁剪几何 + 导出坐标样本”。

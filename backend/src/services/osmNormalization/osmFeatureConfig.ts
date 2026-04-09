@@ -5,7 +5,7 @@ export type OsmFeatureCategory = 'building' | 'poi' | 'line' | 'area';
 type GeometryFamily = 'point' | 'line' | 'polygon';
 
 // 每个类别的统一配置：
-// 1) structuredTagKeys: 决定入库时哪些 tag 单独落结构化列（osmNormalizedToDb / osmRepository）
+// 1) structuredTagKeys: 决定入库时哪些 tag 单独落结构化列（osmNormalizedToDb）
 // 2) primaryLabelKeys: 决定标签文案主分类优先级（overpassLabels / overpassGrid / overpassPolar）
 // 3) classifierTagKeys + retentionTagKeys: 决定 feature 是否可归入该类别（matchFeatureCategory）
 type CategoryConfig = {

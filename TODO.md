@@ -1,12 +1,6 @@
 ## 进行中计划
 
-* Game State 添加玩家当前朝向 playerOrientation
-* 生成 Micro Grid Object 与 Polar View Object 时，添加 playerOrientation 作为参数，但不参与后续 Xxx Prompt
-  * Micro Grid Object 生成时可能需要重写 SQL
 * sql/osmRepository 当中，有些文件已过时，把没过时的文件转移到 osmNormalization/sql 中，其他的删除
-* Polar Prompt 生成时，根据极坐标数值标注前后左右以及其正组合与偏组合，共计16个方向（比如“前”，“左前”，“左偏前”）
-* 根据最新的 Scene Prompt 调整 test 脚本断言
-* 把所有提示词当中提示东南西北的内容换为前后左右以适应最新的形式
 
 ## 重构计划
 

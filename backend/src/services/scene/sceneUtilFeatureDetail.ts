@@ -89,8 +89,8 @@ export async function fetchSceneFeatureDetailsFromDb(
 
 //#region 辅助函数
 
-const fetchSceneBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneBuildingDetails.sql');
-const fetchSceneNonBuildingDetailsSqlPromise = loadServiceSql('osmRepository/fetchSceneNonBuildingDetails.sql');
+const fetchSceneBuildingDetailsSqlPromise = loadServiceSql('scene/sql/fetchSceneBuildingDetails.sql');
+const fetchSceneNonBuildingDetailsSqlPromise = loadServiceSql('scene/sql/fetchSceneNonBuildingDetails.sql');
 
 /**
  * 这里取的是“建筑详情 + 建筑内 POI”，供标签、grid 补充细节、prompt 共用。
