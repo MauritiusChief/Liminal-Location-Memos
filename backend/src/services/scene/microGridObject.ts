@@ -1,9 +1,9 @@
 import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { RangedPosition } from "@/routes/apiTypes.js";
+import { FeatureDetail } from "../featureDetail.js";
 import { Position } from "../gameSystem/gameSessionStore.js";
 import { degreesToRadians, normalizeBearingDegrees, projectPositionByMeters } from "../geometry.js";
-import { SceneFeatureDetail } from "./sceneUtilFeatureDetail.js";
 
 /**
  * 与 SQL 查询结果表一致的扁平类型
@@ -50,9 +50,9 @@ export interface MicroGridCell {
   col: number;
   center: [number, number];
   baseKind: 'building' | 'area' | 'empty';
-  baseFeatureDetail: SceneFeatureDetail | null,
-  poiFeatureDetails: SceneFeatureDetail[];
-  roadFeatureDetails: SceneFeatureDetail[];
+  baseFeatureDetail: FeatureDetail | null,
+  poiFeatureDetails: FeatureDetail[];
+  roadFeatureDetails: FeatureDetail[];
 }
 
 /**
@@ -120,7 +120,7 @@ export async function fetchMicroGridFromDb(request: RangedPosition, playerOrient
 export function buildMicroGrid(
   request: { lat: number; lon: number; radius: number },
   cellRecords: IdReferedMicroGridCell[],
-  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
+  featureDetails: ReadonlyMap<string, FeatureDetail>,
 ): MicroGrid {
 
   const cells: MicroGridCell[][] = Array.from({ length: 12 }, (_, row) =>
@@ -192,7 +192,7 @@ export function buildComputedMicroGridCells(
 
 function buildMicroGridCell(
   record: IdReferedMicroGridCell,
-  featureDetails: ReadonlyMap<string, SceneFeatureDetail>,
+  featureDetails: ReadonlyMap<string, FeatureDetail>,
 ): MicroGridCell {
   // 这一层只根据 feature id 回表拿标签，不再接触几何。
   const baseFeatureDetail = record.baseFeatureId ? featureDetails.get(record.baseFeatureId) || null : null;

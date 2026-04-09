@@ -5,7 +5,7 @@ import type { RangedPosition } from './apiTypes.js';
 import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
 import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
 import { buildLabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
-import { fetchSceneFeatureDetailsFromDb, SceneFeatureDetail } from '@/services/scene/sceneUtilFeatureDetail.js';
+import { fetchSceneFeatureDetailsFromDb, FeatureDetail } from '@/services/featureDetail.js';
 import { buildPolarViewFeature, fetchScenePolarFeaturesFromDb } from '@/services/scene/polarViewObject.js';
 import {
   applyClusterMarkder,
@@ -50,7 +50,7 @@ function countPolarFeatures(polarView: PolarView) {
 }
 
 function buildDbDiagnostics(input: {
-  featureDetails: SceneFeatureDetail[];
+  featureDetails: FeatureDetail[];
   microGrid: ReturnType<typeof buildLabeledMicroGrid>;
   polarView: PolarView;
 }) {
@@ -70,14 +70,14 @@ function buildDbDiagnostics(input: {
   };
 }
 
-function buildDebugSceneFeatureDetailIndex(featureDetails: SceneFeatureDetail[]): Map<string, SceneFeatureDetail> {
+function buildDebugFeatureDetailIndex(featureDetails: FeatureDetail[]): Map<string, FeatureDetail> {
   return new Map(featureDetails.map((feature) => [feature.featureId, feature]));
 }
 
 function buildDebugPolarView(
   request: RangedPosition,
   polarRecords: Awaited<ReturnType<typeof fetchScenePolarFeaturesFromDb>>,
-  featureDetailIndex: ReadonlyMap<string, SceneFeatureDetail>,
+  featureDetailIndex: ReadonlyMap<string, FeatureDetail>,
 ): PolarView {
   const polarFeatures = buildPolarViewFeature(request, polarRecords, featureDetailIndex);
   const levelMarked = buildLeveledPolarView(request, polarFeatures)
@@ -90,11 +90,11 @@ function buildDebugPolarView(
 
 function buildNormalizationDebugPayload(input: {
   normalizedRequest: RangedPosition;
-  featureDetails: SceneFeatureDetail[];
+  featureDetails: FeatureDetail[];
   microGridRecords: Awaited<ReturnType<typeof fetchMicroGridFromDb>>;
   polarRecords: Awaited<ReturnType<typeof fetchScenePolarFeaturesFromDb>>;
 }) {
-  const featureDetailIndex = buildDebugSceneFeatureDetailIndex(input.featureDetails);
+  const featureDetailIndex = buildDebugFeatureDetailIndex(input.featureDetails);
   const microGrid = buildLabeledMicroGrid(buildMicroGrid(
     input.normalizedRequest,
     input.microGridRecords,

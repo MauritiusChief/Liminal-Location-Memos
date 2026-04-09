@@ -1,10 +1,8 @@
-import { createRequire } from "node:module";
 import { Feature, FeatureCollection, Geometry } from "geojson";
 import { OverpassJson } from "overpass-ts";
+import osmtogeojsonModule, { type OsmToGeoJSON } from "osmtogeojson";
 
-// 兼容旧 JS
-const require = createRequire(import.meta.url);
-const osmtogeojson: typeof import("osmtogeojson").default = require("osmtogeojson");
+const osmtogeojson = osmtogeojsonModule as unknown as OsmToGeoJSON;
 
 export interface RelationReference {
   role: string;
@@ -93,16 +91,18 @@ export function convertOverpassToNormalizedFeatures(raw: OverpassJson): Normaliz
   // 建立原始信息索引
   const rawWayTagIndex = buildIndexRawWayTag(raw);
   const buildingRelationOutlineIndex = buildIndexBuildingRelationOutline(raw);
+  const lineRelationIds = buildLineRelationIndex(raw);
 
   // 转化整理原始数据
   const converted = osmtogeojson(raw as OsmToGeoJsonInput, { flatProperties: false }) as FeatureCollection;
-  const normalizedFeatures = converted.features.map((feature) => normalizeFeature(feature)).filter(f => f !== null);
+  const normalizedFeatures = dedupeNormalizedFeatures(
+    converted.features.map((feature) => normalizeFeature(feature)).filter(f => f !== null),
+  );
 
   // 建立规整化信息的索引
   const featureTagIndex = buildIndexFeatureTag(normalizedFeatures);
   const buildingRelationIndex = buildIndexBuildingRelation(buildingRelationOutlineIndex, featureTagIndex, rawWayTagIndex);
   const areaRelationIds = buildAreaRelationIndex(normalizedFeatures);
-  const lineRelationIds = buildLineRelationIndex(normalizedFeatures);
 
   return normalizedFeatures
   .filter((feature) => {
@@ -363,12 +363,17 @@ function buildAreaRelationIndex(features: NormalizedFeature[]): Set<number> {
  * @param features 全量规整化候选地物
  * @returns 线状 relation id 集合
  */
-function buildLineRelationIndex(features: NormalizedFeature[]): Set<number> {
+function buildLineRelationIndex(raw: OverpassJson): Set<number> {
   const relationIds = new Set<number>();
 
-  for (const feature of features) {
-    if (isLineRelationFeature(feature)) {
-      relationIds.add(feature.properties.osmId);
+  for (const element of raw.elements) {
+    if (element.type !== 'relation' || typeof element.id !== 'number') {
+      continue;
+    }
+
+    const relationType = toStringRecord(element.tags).type;
+    if (relationType === 'route' || relationType === 'waterway') {
+      relationIds.add(element.id);
     }
   }
 
@@ -629,6 +634,42 @@ function mergeTagsPreferPrimary(
   return merged;
 }
 
+function dedupeNormalizedFeatures(features: NormalizedFeature[]): NormalizedFeature[] {
+  const byId = new Map<string, NormalizedFeature>();
+
+  for (const feature of features) {
+    const existing = byId.get(String(feature.id));
+    if (!existing) {
+      byId.set(String(feature.id), feature);
+      continue;
+    }
+
+    byId.set(String(feature.id), {
+      ...existing,
+      properties: {
+        ...existing.properties,
+        tags: mergeTagsPreferPrimary(existing.properties.tags, feature.properties.tags),
+        meta: { ...existing.properties.meta, ...feature.properties.meta },
+        tainted: existing.properties.tainted || feature.properties.tainted,
+        relationReferences: dedupeRelationReferences([
+          ...existing.properties.relationReferences,
+          ...feature.properties.relationReferences,
+        ]),
+        outlineReferences: dedupeOutlineReferences([
+          ...existing.properties.outlineReferences,
+          ...feature.properties.outlineReferences,
+        ]),
+        containedPoiReferences: [
+          ...(existing.properties.containedPoiReferences || []),
+          ...(feature.properties.containedPoiReferences || []),
+        ],
+      },
+    });
+  }
+
+  return Array.from(byId.values());
+}
+
 //#region 清洗函数
 
 /**
@@ -641,7 +682,7 @@ function toRelationReferences(value: unknown): RelationReference[] {
     return [];
   }
 
-  return value.flatMap((entry) => {
+  return dedupeRelationReferences(value.flatMap((entry) => {
     if (!isRecord(entry) || typeof entry.role !== 'string' || typeof entry.rel !== 'number') {
       return [];
     }
@@ -653,7 +694,24 @@ function toRelationReferences(value: unknown): RelationReference[] {
         reltags: toStringRecord(entry.reltags),
       },
     ];
-  });
+  }));
+}
+
+function dedupeRelationReferences(references: RelationReference[]): RelationReference[] {
+  const seen = new Set<string>();
+  const deduped: RelationReference[] = [];
+
+  for (const reference of references) {
+    const key = `${reference.rel}:${reference.role}:${JSON.stringify(reference.reltags)}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(reference);
+  }
+
+  return deduped;
 }
 
 /**
@@ -733,20 +791,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 //#region 判断函数
-
-/**
- * 判断一个 relation feature 是否代表线状 relation 本体。
- * @param feature 待判断地物
- * @returns 仅当 line relation 且 type 为 route / waterway 时返回 true
- */
-function isLineRelationFeature(feature: NormalizedFeature): boolean {
-  if (!isLinearGeometry(feature) || feature.properties.osmType !== 'relation') {
-    return false;
-  }
-
-  const relationType = feature.properties.tags.type;
-  return relationType === 'route' || relationType === 'waterway';
-}
 
 /**
  * 判断一个 relation feature 是否代表面状 relation 本体。
