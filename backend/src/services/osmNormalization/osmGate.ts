@@ -4,10 +4,8 @@ import { convertOverpassToNormalizedFeatures } from "./osmNormalizer.js";
 import { syncNormalizedFeaturesToDb } from "./osmNormalizedToDb.js";
 
 /**
- *
- * @param lat Overpass Query 中心经度
- * @param lon Overpass Query 中心维度
- * @param radius Overpass Query 半径
+ * 从 open street map 查询数据
+ * @param request Overpass Query
  * @param includeRaw debug 是否返回原始的 OverpassJson
  * @returns debug 用的参数
  */

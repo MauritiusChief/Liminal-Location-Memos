@@ -50,7 +50,7 @@ export interface FeatureDetail {
  * @param _profile 暂时没用，未来可区分 debug 模式和常规模式的 SQL
  * @returns
  */
-export async function fetchSceneFeatureDetailsFromDb(
+export async function fetchFeatureDetailsFromDb(
   request: RangedPosition,
   _profile: string = 'debug',
 ): Promise<FeatureDetail[]> {

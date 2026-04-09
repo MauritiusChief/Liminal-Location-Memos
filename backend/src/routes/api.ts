@@ -5,7 +5,7 @@ import type { RangedPosition } from './apiTypes.js';
 import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
 import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
 import { buildLabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
-import { fetchSceneFeatureDetailsFromDb, FeatureDetail } from '@/services/featureDetail.js';
+import { fetchFeatureDetailsFromDb, FeatureDetail } from '@/services/featureDetail.js';
 import { buildPolarViewFeature, fetchScenePolarFeaturesFromDb } from '@/services/scene/polarViewObject.js';
 import {
   applyClusterMarkder,
@@ -343,7 +343,7 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
 
   try {
     const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-      fetchSceneFeatureDetailsFromDb(normalizedRequest, 'debug'),
+      fetchFeatureDetailsFromDb(normalizedRequest, 'debug'),
       fetchMicroGridFromDb(normalizedRequest, playerOrientation),
       fetchScenePolarFeaturesFromDb(normalizedRequest, 'debug'),
     ]);

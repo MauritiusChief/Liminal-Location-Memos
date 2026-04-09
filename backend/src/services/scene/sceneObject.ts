@@ -1,7 +1,7 @@
 import { RangedPosition } from "@/routes/apiTypes.js";
 import { buildLabeledMicroGrid, LabeledMicroGrid } from "./microGridPrompt.js";
 import { applyClusterMarkder, buildPolarView, PolarView } from "./polarViewLabeled.js";
-import { fetchSceneFeatureDetailsFromDb } from "../featureDetail.js";
+import { fetchFeatureDetailsFromDb } from "../featureDetail.js";
 import { buildMicroGrid, fetchMicroGridFromDb } from "./microGridObject.js";
 import { buildPolarViewFeature, fetchScenePolarFeaturesFromDb } from "./polarViewObject.js";
 import { applyOcclusion, buildLeveledPolarView } from "./polarViewOcclusion.js";
@@ -25,7 +25,7 @@ export interface SceneObject {
  */
 export async function buildSceneFromRequest(request: RangedPosition, playerOrientation: number = 0): Promise<SceneObject> {
   const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-    fetchSceneFeatureDetailsFromDb(request),
+    fetchFeatureDetailsFromDb(request),
     fetchMicroGridFromDb(request, playerOrientation),
     fetchScenePolarFeaturesFromDb(request),
   ]);
