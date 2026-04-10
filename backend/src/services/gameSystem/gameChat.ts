@@ -16,7 +16,7 @@ import {
   OUTDOOR_VISUAL_DESCRIPTION_SYSTEM,
   REGULAR_BOOK_MESSAGE_SYSTEM,
 } from './systemPrompts.js';
-import { writeGameDebugMarkdown } from './gameDebug.js';
+import { writeGameDebugRequest, writeGameDebugResult } from './gameDebug.js';
 import {
   generateJsonReplySingleMessage,
   generateReplySingleMessage,
@@ -327,27 +327,40 @@ async function streamInitialBookMessage(
 
   const sceneObject = await buildSceneFromRequest(request, playerOrientation);
   const scenePrompt = buildScenePrompt(sceneObject, playerOrientation);
+  await writeGameDebugRequest({
+    mode: 'user-message',
+    functionName: 'initialBookMessage',
+    systemPrompt: INITIAL_BOOK_MESSAGE_SYSTEM,
+    userMessage: scenePrompt,
+  });
+
   let reply = '';
   let reasoning = '';
 
-  for await (const event of streamReplySingleMessage(INITIAL_BOOK_MESSAGE_SYSTEM, scenePrompt)) {
-    if (event.replyDelta) {
-      reply += event.replyDelta;
-      await emit({ type: 'book_reply_delta', text: event.replyDelta });
+  try {
+    for await (const event of streamReplySingleMessage(INITIAL_BOOK_MESSAGE_SYSTEM, scenePrompt)) {
+      if (event.replyDelta) {
+        reply += event.replyDelta;
+        await emit({ type: 'book_reply_delta', text: event.replyDelta });
+      }
+      if (event.reasoningDelta) {
+        reasoning += event.reasoningDelta;
+      }
     }
-    if (event.reasoningDelta) {
-      reasoning += event.reasoningDelta;
-    }
-  }
 
-  await writeGameDebugMarkdown({
-    functionName: 'initialBookMessage',
-    systemPrompt: INITIAL_BOOK_MESSAGE_SYSTEM,
-    input: scenePrompt,
-    reply,
-    reasoning,
-  });
-  return reply;
+    await writeGameDebugResult({
+      functionName: 'initialBookMessage',
+      reply,
+      reasoning,
+    });
+    return reply;
+  } catch (error) {
+    await writeGameDebugResult({
+      functionName: 'initialBookMessage',
+      error,
+    });
+    throw error;
+  }
 }
 
 /**
@@ -368,27 +381,40 @@ async function streamRegularBookMessage(
 
   const worldStatePrompt = await toWorldStatePrompt(state);
   const messageHistory = state.messageHistory.slice(Math.max(0, state.messageHistory.length - 12));
-  let reply = '';
-
-  for await (const event of streamReplyFullMessages(
-    REGULAR_BOOK_MESSAGE_SYSTEM,
-    messageHistory,
-    worldStatePrompt,
-  )) {
-    if (event.replyDelta) {
-      reply += event.replyDelta;
-      await emit({ type: 'book_reply_delta', text: event.replyDelta });
-    }
-  }
-
-  await writeGameDebugMarkdown({
+  await writeGameDebugRequest({
+    mode: 'full-messages',
     functionName: 'generateBookMessage',
     systemPrompt: REGULAR_BOOK_MESSAGE_SYSTEM,
-    input: messageHistory,
+    gameMessages: messageHistory,
     worldStatePrompt,
-    reply,
   });
-  return reply;
+
+  let reply = '';
+
+  try {
+    for await (const event of streamReplyFullMessages(
+      REGULAR_BOOK_MESSAGE_SYSTEM,
+      messageHistory,
+      worldStatePrompt,
+    )) {
+      if (event.replyDelta) {
+        reply += event.replyDelta;
+        await emit({ type: 'book_reply_delta', text: event.replyDelta });
+      }
+    }
+
+    await writeGameDebugResult({
+      functionName: 'generateBookMessage',
+      reply,
+    });
+    return reply;
+  } catch (error) {
+    await writeGameDebugResult({
+      functionName: 'generateBookMessage',
+      error,
+    });
+    throw error;
+  }
 }
 
 //#region 游戏状态函数
@@ -423,22 +449,29 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
     '---',
     worldStatePrompt,
   ].join('\n');
+  await writeGameDebugRequest({
+    mode: 'user-message',
+    functionName: 'gameStateManager',
+    systemPrompt,
+    userMessage: message,
+  });
 
   try {
     // 获取 LLM 返回
     const response = await generateJsonReplySingleMessage(systemPrompt, message);
     // 解析返回
     const parsedToolCall: GameStateToolCall[] = JSON.parse(response.reply);
-    await writeGameDebugMarkdown({
+    await writeGameDebugResult({
       functionName: 'gameStateManager',
-      systemPrompt,
-      input: message,
-      worldStatePrompt,
       reply: parsedToolCall,
       reasoning: response.reasoning,
     });
     return parsedToolCall;
   } catch (error) {
+    await writeGameDebugResult({
+      functionName: 'gameStateManager',
+      error,
+    });
     console.error(error);
     return [];
   }
@@ -475,7 +508,7 @@ async function toWorldStatePrompt(state: GameState): Promise<string> {
  * - 成功移动后，玩家朝向也会改成这次移动方向；
  * - indoorLocation 会被清空，因为当前最小实现里移动后默认回到室外语境。
  */
-function applyGameStateToolCalls(state: GameState, toolCalls: GameStateToolCall[]): void {
+export function applyGameStateToolCalls(state: GameState, toolCalls: GameStateToolCall[]): void {
   for (const toolCall of toolCalls) {
     console.log(`[${new Date().toISOString()}] 开始解析 ${toolCall.name} 工具参数：`, toolCall.arguments);
 
@@ -573,19 +606,31 @@ async function extractOutdoorVisualDescription(
     '文本描述：',
     bookMessage,
   ].join('\n');
-
-  const response = await generateReplySingleMessage(
-    OUTDOOR_VISUAL_DESCRIPTION_SYSTEM,
-    message,
-  );
-  await writeGameDebugMarkdown({
+  await writeGameDebugRequest({
+    mode: 'user-message',
     functionName: 'extractOutdoorVisualDescription',
     systemPrompt: OUTDOOR_VISUAL_DESCRIPTION_SYSTEM,
-    input: message,
-    reply: response.reply,
-    reasoning: response.reasoning,
+    userMessage: message,
   });
-  return response.reply;
+
+  try {
+    const response = await generateReplySingleMessage(
+      OUTDOOR_VISUAL_DESCRIPTION_SYSTEM,
+      message,
+    );
+    await writeGameDebugResult({
+      functionName: 'extractOutdoorVisualDescription',
+      reply: response.reply,
+      reasoning: response.reasoning,
+    });
+    return response.reply;
+  } catch (error) {
+    await writeGameDebugResult({
+      functionName: 'extractOutdoorVisualDescription',
+      error,
+    });
+    throw error;
+  }
 }
 
 /**

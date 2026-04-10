@@ -70,15 +70,25 @@ export async function generateJsonReplySingleMessage(
  * @param replyFormat
  * @returns
  */
+export function buildSingleMessageRequestMessages(
+  systemPrompt: string,
+  message: string,
+): ChatMessage {
+  return [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: message },
+  ];
+}
+
 function buildSingleMessageRequest(
   systemPrompt: string,
   message: string,
   replyFormat: ReplyFormat,
 ): ChatRequestBody {
-  return buildReasoningRequest([
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: message }
-  ], replyFormat);
+  return buildReasoningRequest(
+    buildSingleMessageRequestMessages(systemPrompt, message),
+    replyFormat,
+  );
 }
 
 /**
@@ -131,7 +141,7 @@ export async function generateReplyFullMessages(
  * @param worldState
  * @returns
  */
-function buildFullMessagesRequestMessages(
+export function buildFullMessagesRequestMessages(
   systemPrompt: string,
   gameMessages: GameMessage[],
   worldState: string,

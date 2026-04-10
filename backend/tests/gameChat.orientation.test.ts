@@ -16,7 +16,8 @@ jest.mock("../src/services/gameSystem/systemPrompts", () => ({
 }));
 
 jest.mock("../src/services/gameSystem/gameDebug", () => ({
-  writeGameDebugMarkdown: jest.fn(),
+  writeGameDebugRequest: jest.fn(),
+  writeGameDebugResult: jest.fn(),
 }));
 
 jest.mock("../src/services/gameSystem/llm", () => ({
@@ -55,6 +56,10 @@ import {
   generateReplySingleMessage,
   streamReplyFullMessages,
 } from "../src/services/gameSystem/llm";
+import {
+  writeGameDebugRequest,
+  writeGameDebugResult,
+} from "../src/services/gameSystem/gameDebug";
 import {
   getRuntimeSession,
   updateRuntimeSession,
@@ -130,6 +135,8 @@ describe("streamGameTurn", () => {
   const mockedGenerateJsonReplySingleMessage = jest.mocked(generateJsonReplySingleMessage);
   const mockedGenerateReplySingleMessage = jest.mocked(generateReplySingleMessage);
   const mockedStreamReplyFullMessages = jest.mocked(streamReplyFullMessages);
+  const mockedWriteGameDebugRequest = jest.mocked(writeGameDebugRequest);
+  const mockedWriteGameDebugResult = jest.mocked(writeGameDebugResult);
   const mockedGetRuntimeSession = jest.mocked(getRuntimeSession);
   const mockedUpdateRuntimeSession = jest.mocked(updateRuntimeSession);
 
@@ -149,6 +156,8 @@ describe("streamGameTurn", () => {
     expect(session.gameState.messageHistory).toEqual([]);
     expect(session.gameState.playerIndoorLocation).toBeNull();
     expect(mockedUpdateRuntimeSession).not.toHaveBeenCalled();
+    expect(mockedWriteGameDebugRequest).not.toHaveBeenCalled();
+    expect(mockedWriteGameDebugResult).not.toHaveBeenCalled();
   });
 
   it("streams book message, commits session, and finishes visual description", async () => {
@@ -195,6 +204,20 @@ describe("streamGameTurn", () => {
       "visual_description_done",
     ]);
     expect(mockedUpdateRuntimeSession).toHaveBeenCalledTimes(2);
+    expect(mockedWriteGameDebugRequest).toHaveBeenCalledTimes(3);
+    expect(mockedWriteGameDebugResult).toHaveBeenCalledTimes(3);
+    expect(mockedWriteGameDebugRequest.mock.invocationCallOrder[0]).toBeLessThan(
+      mockedGenerateJsonReplySingleMessage.mock.invocationCallOrder[0],
+    );
+    expect(mockedWriteGameDebugResult.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockedGenerateJsonReplySingleMessage.mock.invocationCallOrder[0],
+    );
+    expect(mockedWriteGameDebugRequest.mock.invocationCallOrder[1]).toBeLessThan(
+      mockedStreamReplyFullMessages.mock.invocationCallOrder[0],
+    );
+    expect(mockedWriteGameDebugResult.mock.invocationCallOrder[1]).toBeGreaterThan(
+      mockedStreamReplyFullMessages.mock.invocationCallOrder[0],
+    );
   });
 
   it("queues one next turn while visual description is pending", async () => {
