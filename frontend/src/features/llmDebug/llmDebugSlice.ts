@@ -1,6 +1,6 @@
-import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { submitDebugLlm, type DebugLlmRequest, type DebugLlmResponse } from '../../api/llmDebugApi';
-import type { RootState } from '../../app/store';
+import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { streamDebugLlm, type DebugLlmRequest, type DebugLlmStreamEvent } from '../../api/llmDebugApi';
+import type { AppDispatch, RootState } from '../../app/store';
 import { DEFAULT_LLM_DEBUG_SYSTEM_PROMPT, DEFAULT_BUILDING_SCHEMA_SYSTEM_PROMPT } from './defaultSystemPrompt';
 
 type RequestStatus = 'idle' | 'loading' | 'succeeded' | 'failed';
@@ -10,11 +10,12 @@ interface LlmDebugRequestState {
   error: string | null;
   reply: string | null;
   reasoning: string | null;
+  hasReceivedAnyChunk: boolean;
 }
 
 // 这个 slice 只服务 LLM 环境调试页。
-// 把 system prompt、user message 和请求结果都放进 Redux 后，
-// 页面切换时调试上下文不会丢，便于反复对比 prompt 与模型输出。
+// 把 system prompt、user message 和流式请求结果都放进 Redux 后，
+// 页面切换时调试上下文不会丢，后续若把主游戏回合也接成 stream，也能复用同样的状态机思路。
 interface LlmDebugState {
   systemPrompt: string;
   message: string;
@@ -30,28 +31,9 @@ const initialState: LlmDebugState = {
     error: null,
     reply: null,
     reasoning: null,
+    hasReceivedAnyChunk: false,
   },
 };
-
-// 这个 thunk 负责把调试页里的 system prompt + user message 一起提交给后端。
-// 它和首页 chat 的区别是：首页只有普通 message，而这里还要保留可编辑的系统提示词。
-export const submitDebugLlmMessage = createAsyncThunk<DebugLlmResponse, DebugLlmRequest, { rejectValue: string }>(
-  'llmDebug/submitDebugLlmMessage',
-  async (input, { rejectWithValue }) => {
-    if (!input.message.trim()) {
-      return rejectWithValue('Message is required.');
-    }
-
-    try {
-      return await submitDebugLlm({
-        systemPrompt: input.systemPrompt,
-        message: input.message.trim(),
-      });
-    } catch (error) {
-      return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
-    }
-  },
-);
 
 const llmDebugSlice = createSlice({
   name: 'llmDebug',
@@ -67,32 +49,100 @@ const llmDebugSlice = createSlice({
     resetSystemPrompt(state) {
       state.systemPrompt = DEFAULT_LLM_DEBUG_SYSTEM_PROMPT;
     },
-  },
-  extraReducers: (builder) => {
-    // 请求开始时进入 loading，并清掉上一次错误与 reasoning；
-    // 请求成功后写入 reply / reasoning；失败后只保留错误信息。
-    builder
-      .addCase(submitDebugLlmMessage.pending, (state) => {
-        state.request.status = 'loading';
-        state.request.error = null;
-        state.request.reasoning = null;
-      })
-      .addCase(submitDebugLlmMessage.fulfilled, (state, action) => {
-        state.request.status = 'succeeded';
-        state.request.reply = action.payload.reply;
-        state.request.reasoning = action.payload.reasoning;
-      })
-      .addCase(submitDebugLlmMessage.rejected, (state, action) => {
-        state.request.status = 'failed';
-        state.request.reasoning = null;
-        state.request.error = action.payload || 'Unknown error.';
-      });
+
+    // streamStarted / deltaReceived / streamFinished / streamFailed 这组 action
+    // 是一个显式的流式状态机。
+    // createAsyncThunk 更适合“最后一次性拿到 payload”的请求；
+    // 这里如果继续用 fulfilled 才落结果的模式，就无法在 token 到达时持续刷新 UI。
+    streamStarted(state) {
+      state.request.status = 'loading';
+      state.request.error = null;
+      state.request.reply = null;
+      state.request.reasoning = null;
+      state.request.hasReceivedAnyChunk = false;
+    },
+    replyDeltaReceived(state, action: PayloadAction<string>) {
+      state.request.reply = `${state.request.reply ?? ''}${action.payload}`;
+      state.request.hasReceivedAnyChunk = true;
+    },
+    reasoningDeltaReceived(state, action: PayloadAction<string>) {
+      state.request.reasoning = `${state.request.reasoning ?? ''}${action.payload}`;
+      state.request.hasReceivedAnyChunk = true;
+    },
+    streamFinished(state) {
+      state.request.status = 'succeeded';
+    },
+    streamFailed(state, action: PayloadAction<string>) {
+      state.request.status = 'failed';
+      state.request.error = action.payload;
+    },
   },
 });
+
+/**
+ * 手写 thunk 的原因是：stream 请求不是“等 Promise resolve 后写最终结果”，
+ * 而是需要在请求过程中不断 dispatch 增量 action。
+ * 这里先明确采用单飞行策略，loading 中重复点击直接忽略，避免本阶段就引入取消/并发的复杂度。
+ */
+export function submitDebugLlmMessage(input: DebugLlmRequest) {
+  return async (dispatch: AppDispatch, getState: () => RootState): Promise<void> => {
+    const beforeSubmit = getState().llmDebug;
+    if (beforeSubmit.request.status === 'loading') {
+      return;
+    }
+
+    if (!input.message.trim()) {
+      dispatch(streamFailed('Message is required.'));
+      return;
+    }
+
+    dispatch(streamStarted());
+
+    try {
+      let hasFinished = false;
+
+      await streamDebugLlm({
+        systemPrompt: input.systemPrompt,
+        message: input.message.trim(),
+      }, (event: DebugLlmStreamEvent) => {
+        switch (event.type) {
+          case 'reply_delta':
+            dispatch(replyDeltaReceived(event.text));
+            return;
+          case 'reasoning_delta':
+            dispatch(reasoningDeltaReceived(event.text));
+            return;
+          case 'done':
+            hasFinished = true;
+            dispatch(streamFinished());
+            return;
+          case 'error':
+            throw new Error(event.message);
+        }
+      });
+
+      if (!hasFinished) {
+        dispatch(streamFinished());
+      }
+    } catch (error) {
+      dispatch(streamFailed(error instanceof Error ? error.message : 'Unknown error.'));
+    }
+  };
+}
 
 // selector 把页面需要读取的状态出口固定下来，
 // 组件不必关心 reducer key 以外的实现细节。
 export const selectLlmDebugState = (state: RootState) => state.llmDebug;
 
-export const { resetSystemPrompt, setMessage, setSystemPrompt } = llmDebugSlice.actions;
+export const {
+  replyDeltaReceived,
+  reasoningDeltaReceived,
+  resetSystemPrompt,
+  setMessage,
+  setSystemPrompt,
+  streamFailed,
+  streamFinished,
+  streamStarted,
+} = llmDebugSlice.actions;
+
 export default llmDebugSlice.reducer;

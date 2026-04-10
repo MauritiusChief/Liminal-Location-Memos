@@ -5,6 +5,9 @@ export default {
     "^.+\\.tsx?$": ["ts-jest", { tsconfig: "<rootDir>/tests/tsconfig.test.json" }],
   },
   moduleNameMapper: {
+    "^\\./routes/api\\.js$": "<rootDir>/src/routes/api.ts",
+    "^\\.\\./db/client\\.js$": "<rootDir>/src/db/client.ts",
+    "^\\./apiTypes\\.js$": "<rootDir>/src/routes/apiTypes.ts",
     "^\\.\\./config\\.js$": "<rootDir>/src/config.ts",
     "^\\.\\./geometry\\.js$": "<rootDir>/src/services/geometry.ts",
     "^\\.\\./scene/sceneObject\\.js$": "<rootDir>/src/services/scene/sceneObject.ts",

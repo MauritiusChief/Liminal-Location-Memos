@@ -29,6 +29,7 @@ export type DeepSeekChatRequest = {
   messages: DeepSeekMessage[]
   thinking?: { type: "enabled" | "disabled"}  // thinking 模式控制
   response_format?: {  type: "json_object" }  // JSON Output 控制
+  stream?: boolean
   tools?: DeepSeekTool[]
   tool_choice?: "auto" | "none" | { type: "function"; function: { name: string } }
 }
@@ -72,6 +73,7 @@ export type OpenRouterMessage = {
 export type OpenRouterChatRequest = {
   model: string
   messages: OpenRouterMessage[]
+  stream?: boolean
   tools?: OpenRouterTool[]
   tool_choice?: "auto" | "none" | { type: "function"; function: { name: string } }
   reasoning?: { enabled: boolean }
@@ -106,4 +108,10 @@ export type NormalizedLlmResponse = {
     }
     finish_reason?: "stop" | "tool_calls" | string
   }[]
+}
+
+export type NormalizedLlmStreamEvent = {
+  replyDelta?: string
+  reasoningDelta?: string
+  done: boolean
 }

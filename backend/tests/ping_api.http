@@ -39,11 +39,15 @@ Accept: application/json
 }
 
 ###
-# 4. 测试 /debug/llm 的当前默认占位 system prompt 路径
+# 4. 测试 /debug/llm 的流式输出
+#    响应现在是 NDJSON，每行一个事件：
+#    - {"type":"reply_delta","text":"..."}
+#    - {"type":"reasoning_delta","text":"..."}
+#    - {"type":"done"}
 #    如果想测自定义 prompt，把 systemPrompt 改成你自己的文本
 POST {{host}}/api/debug/llm
 Content-Type: {{contentType}}
-Accept: application/json
+Accept: application/x-ndjson
 
 {
   "message": "Ping from REST Client. Reply with one short sentence."

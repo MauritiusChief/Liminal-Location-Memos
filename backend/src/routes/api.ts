@@ -15,10 +15,11 @@ import {
 import { applyVisualFilter } from '@/services/scene/polarViewFilter.js';
 import { buildLeveledPolarView, applyOcclusion } from '@/services/scene/polarViewOcclusion.js';
 import { buildSceneFromRequest } from '@/services/scene/sceneObject.js';
-import { generateReplySingleMessage } from '@/services/gameSystem/llm.js';
+import { streamReplySingleMessage } from '@/services/gameSystem/llm.js';
 import { buildScenePrompt } from '@/services/scene/scenePrompt.js';
 import { getSession } from '@/services/gameSystem/gameSessionStore.js';
 import { runGameTurn, startGame } from '@/services/gameSystem/gameChat.js';
+import type { Response } from 'express';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -41,6 +42,12 @@ interface OrientedDebugRequestBody extends Partial<RangedPosition> {
 const DEBUG_LLM_SYSTEM_PROMPT_PLACEHOLDER = '[debug system prompt placeholder]';
 
 export const apiRouter = Router();
+
+type NdjsonStreamEvent =
+  | { type: 'reply_delta'; text: string }
+  | { type: 'reasoning_delta'; text: string }
+  | { type: 'done' }
+  | { type: 'error'; message: string };
 
 function countPolarFeatures(polarView: PolarView) {
   return polarView.levels.reduce(
@@ -179,6 +186,23 @@ function parsePosition(body: Partial<RangedPosition>) {
   } as const;
 }
 
+/**
+ * debug/llm 先使用 NDJSON 而不是一次性 JSON：
+ * 1. fetch + ReadableStream 直接可消费，前端不需要额外引入 SSE 客户端；
+ * 2. 每行一个最小事件，后续 game turn 也可以复用同一套写流工具。
+ */
+function startNdjsonStream(response: Response): void {
+  response.status(200);
+  response.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  response.setHeader('Cache-Control', 'no-cache, no-transform');
+  response.setHeader('Connection', 'keep-alive');
+  response.flushHeaders();
+}
+
+function writeNdjsonEvent(response: Response, event: NdjsonStreamEvent): void {
+  response.write(`${JSON.stringify(event)}\n`);
+}
+
 //#region 常规 API
 
 apiRouter.get('/health', async (_request, response) => {
@@ -273,16 +297,33 @@ apiRouter.post('/debug/llm', async (request, response) => {
     return;
   }
 
+  startNdjsonStream(response);
+
   try {
-    const result = await generateReplySingleMessage(
+    for await (const event of streamReplySingleMessage(
       typeof systemPrompt === 'string' ? systemPrompt : DEBUG_LLM_SYSTEM_PROMPT_PLACEHOLDER,
       message.trim(),
-    );
-    response.json(result);
+    )) {
+      // 这里仍然只向前端发最小事件集合。
+      // debug 页面现在只关心 reply/reasoning 双流，未来 game turn 也可以沿用这种 route 只做“转发领域事件”的职责边界。
+      if (event.replyDelta) {
+        writeNdjsonEvent(response, { type: 'reply_delta', text: event.replyDelta });
+      }
+      if (event.reasoningDelta) {
+        writeNdjsonEvent(response, { type: 'reasoning_delta', text: event.reasoningDelta });
+      }
+      if (event.done) {
+        writeNdjsonEvent(response, { type: 'done' });
+      }
+    }
+
+    response.end();
   } catch (error) {
-    response.status(502).json({
-      error: error instanceof Error ? error.message : '[未知错误] 发生在 generateReplySingleMessage',
+    writeNdjsonEvent(response, {
+      type: 'error',
+      message: error instanceof Error ? error.message : '[未知错误] 发生在 streamReplySingleMessage',
     });
+    response.end();
   }
 });
 

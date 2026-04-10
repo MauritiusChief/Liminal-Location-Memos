@@ -11,6 +11,10 @@ import {
 /**
  * 用于隔离调试单轮 LLM 的输入输出，主要用来调试提示词。
  * 名叫 environment 是因为早期是用来调试 Summary Preview / Scene Prompt 的
+ *
+ * 页面本身仍然只关心 reply / reasoning 两个结果区。
+ * 原始 stream 读取与状态累积都放在 API + Redux 层，这样未来若主游戏回合也改成流式，
+ * 页面组件依然只负责渲染，而不用重复处理传输层细节。
  */
 
 export function LlmEnvironmentDebugPage() {
@@ -53,7 +57,7 @@ export function LlmEnvironmentDebugPage() {
         />
         <br />
         <button type="submit" disabled={request.status === 'loading'}>
-          {request.status === 'loading' ? 'Sending...' : 'Send to LLM'}
+          {request.status === 'loading' ? 'Streaming...' : 'Send to LLM'}
         </button>
       </form>
 
