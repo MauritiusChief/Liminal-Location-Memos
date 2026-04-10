@@ -9,7 +9,6 @@
 * 某一地物出现在 Micro Grid 时，如果是较长的线或者较大的面（最远点不在 30m 范围内），那么需要其不仅出现在 Micro Grid，也要出现在 30m - 100m 的等级1 Polar View 中
   * 这样可以复用一些 Polar View 计算方位的逻辑，以提供方位信息
 * Book Message 生成函数不知道为什么没有 debug 保存 reasoning 内容，要修
-* 把工具单独分到文件中
 * 前端继续游戏、重开游戏时的UI bug
 * 添加通过海拔高度 API 与 ele 标签计算建筑实际高度的功能
 

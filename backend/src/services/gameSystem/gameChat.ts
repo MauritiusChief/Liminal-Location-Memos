@@ -35,6 +35,7 @@ import {
   toClientGameSessionSnapshot,
   updateRuntimeSession,
 } from './gameSessionStore.js';
+import { applyMovePlayerTool } from './toolMovePlayer.js';
 
 interface GameStateToolCall {
   name: string;
@@ -511,41 +512,27 @@ async function toWorldStatePrompt(state: GameState): Promise<string> {
 /**
  * 执行 Game State Manager 给出的工具调用。
  *
- * TODO 当前只支持 move_player：
+ * 当前只支持 move_player：
  * - 参数合法才会执行；
  * - 成功移动后，玩家朝向也会改成这次移动方向；
- * - indoorLocation 会被清空，因为当前最小实现里移动后默认回到室外语境。
  */
 export function applyGameStateToolCalls(state: GameState, toolCalls: GameStateToolCall[]): void {
   for (const toolCall of toolCalls) {
     console.log(`[${new Date().toISOString()}] 开始解析 ${toolCall.name} 工具参数：`, toolCall.arguments);
 
-    if (toolCall.name !== MOVE_PLAYER_TOOL.name) {
-      continue;
-    }
-
     const args = toolCall.arguments;
-    const bearingDegrees = Number(args.bearingDegrees);
-    const distanceMeters = Number(args.distanceMeters);
-    if (!Number.isFinite(bearingDegrees) || !Number.isFinite(distanceMeters) || distanceMeters < 0) {
-      continue;
-    }
-    const actualDirectionDegrees = state.playerOrientation + bearingDegrees;
 
-    const nextPosition = movePosition(state.playerPosition, actualDirectionDegrees, distanceMeters);
-    if (!nextPosition) {
-      continue;
+    switch (toolCall.name) {
+      case MOVE_PLAYER_TOOL.name:
+        applyMovePlayerTool(state, args)
+        break
     }
 
-    console.log(`[${new Date().toISOString()}] 移动玩家工具完成`);
-
-    state.playerPosition = nextPosition;
-    state.playerOrientation = normalizeBearingDegrees(bearingDegrees);
-    state.playerIndoorLocation = null;
   }
 }
 
 //#region O-VD 函数
+// O-VD: Outdoor Visual Description
 
 /**
  * 为当前位置补写或更新 Outdoor Visual Description。
@@ -679,41 +666,6 @@ function findNearestOutdoorVisualDescription(
 }
 
 //#region 帮助函数
-
-/**
- * 根据“起点经纬度 + 朝向 + 距离”计算移动后的新经纬度。
- *
- * 这里使用球面坐标公式，而不是把经纬度简单当作平面坐标，
- * 这样在地理位置计算上更稳妥。
- * @param position
- * @param bearingDegrees 以北面为 0 度、顺时针增加的绝对朝向
- * @param distanceMeters
- * @returns
- */
-function movePosition(
-  position: Position,
-  bearingDegrees: number,
-  distanceMeters: number,
-): Position {
-  const bearingRadians = degreesToRadians(bearingDegrees);
-  const latRadians = degreesToRadians(position.lat);
-  const lonRadians = degreesToRadians(position.lon);
-  const angularDistance = distanceMeters / EARTH_RADIUS_METERS;
-
-  const nextLat = Math.asin(
-    Math.sin(latRadians) * Math.cos(angularDistance)
-      + Math.cos(latRadians) * Math.sin(angularDistance) * Math.cos(bearingRadians),
-  );
-  const nextLon = lonRadians + Math.atan2(
-    Math.sin(bearingRadians) * Math.sin(angularDistance) * Math.cos(latRadians),
-    Math.cos(angularDistance) - Math.sin(latRadians) * Math.sin(nextLat),
-  );
-
-  return {
-    lat: radiansToDegrees(nextLat),
-    lon: normalizeLongitude(radiansToDegrees(nextLon)),
-  };
-}
 
 /**
  * 把工具定义转成提示词中的纯文本说明，供 Game State Manager 阅读。
