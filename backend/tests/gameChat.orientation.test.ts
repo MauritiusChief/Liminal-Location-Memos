@@ -21,14 +21,17 @@ jest.mock("../src/services/gameSystem/gameDebug", () => ({
 
 jest.mock("../src/services/gameSystem/llm", () => ({
   generateJsonReplySingleMessage: jest.fn(),
-  generateReplyFullMessages: jest.fn(),
   generateReplySingleMessage: jest.fn(),
+  streamReplyFullMessages: jest.fn(),
+  streamReplySingleMessage: jest.fn(),
 }));
 
 jest.mock("../src/services/gameSystem/gameSessionStore", () => ({
-  createSession: jest.fn(),
-  getSession: jest.fn(),
-  updateSession: jest.fn(),
+  cloneGameState: jest.requireActual("../src/services/gameSystem/gameSessionStore").cloneGameState,
+  createRuntimeSession: jest.fn(),
+  getRuntimeSession: jest.fn(),
+  toClientGameSessionSnapshot: jest.requireActual("../src/services/gameSystem/gameSessionStore").toClientGameSessionSnapshot,
+  updateRuntimeSession: jest.fn(),
 }));
 
 jest.mock("../src/services/osmNormalization/osmGate", () => {
@@ -47,15 +50,21 @@ jest.mock("../src/services/osmNormalization/osmGate", () => {
 });
 
 import { buildSceneFromRequest } from "../src/services/scene/sceneObject";
-import { generateJsonReplySingleMessage, generateReplyFullMessages, generateReplySingleMessage } from "../src/services/gameSystem/llm";
-import { getSession, updateSession } from "../src/services/gameSystem/gameSessionStore";
+import {
+  generateJsonReplySingleMessage,
+  generateReplySingleMessage,
+  streamReplyFullMessages,
+} from "../src/services/gameSystem/llm";
+import {
+  getRuntimeSession,
+  updateRuntimeSession,
+} from "../src/services/gameSystem/gameSessionStore";
 import { OsmCoverageSyncRetryExhaustedError } from "../src/services/osmNormalization/osmGate";
-import { applyGameStateToolCalls, runGameTurn } from "../src/services/gameSystem/gameChat";
-import type { GameSession } from "../src/services/gameSystem/gameSessionStore";
+import { applyGameStateToolCalls, streamGameTurn } from "../src/services/gameSystem/gameChat";
+import type { GameSession, GameState } from "../src/services/gameSystem/gameSessionStore";
 
-function buildSession(): GameSession {
+function buildGameState(): GameState {
   return {
-    sessionId: "session-1",
     playerPosition: { lat: 0, lon: 0 },
     playerOrientation: 15,
     playerIndoorLocation: null,
@@ -67,11 +76,24 @@ function buildSession(): GameSession {
   };
 }
 
+function buildSession(): GameSession {
+  return {
+    sessionId: "session-1",
+    gameState: buildGameState(),
+    runtime: {
+      pendingVisualDescription: false,
+      queuedPlayerMessage: null,
+      activeTurnId: null,
+      pendingVisualDescriptionTask: null,
+    },
+  };
+}
+
 describe("applyGameStateToolCalls", () => {
   it("updates player orientation to the move bearing after a valid move", () => {
-    const session = buildSession();
+    const gameState = buildGameState();
 
-    applyGameStateToolCalls(session, [
+    applyGameStateToolCalls(gameState, [
       {
         name: "move_player",
         arguments: {
@@ -81,14 +103,14 @@ describe("applyGameStateToolCalls", () => {
       },
     ]);
 
-    expect(session.playerPosition).not.toEqual({ lat: 0, lon: 0 });
-    expect(session.playerOrientation).toBe(90);
+    expect(gameState.playerPosition).not.toEqual({ lat: 0, lon: 0 });
+    expect(gameState.playerOrientation).toBe(90);
   });
 
   it("does not update orientation when move_player arguments are invalid", () => {
-    const session = buildSession();
+    const gameState = buildGameState();
 
-    applyGameStateToolCalls(session, [
+    applyGameStateToolCalls(gameState, [
       {
         name: "move_player",
         arguments: {
@@ -98,18 +120,18 @@ describe("applyGameStateToolCalls", () => {
       },
     ]);
 
-    expect(session.playerPosition).toEqual({ lat: 0, lon: 0 });
-    expect(session.playerOrientation).toBe(15);
+    expect(gameState.playerPosition).toEqual({ lat: 0, lon: 0 });
+    expect(gameState.playerOrientation).toBe(15);
   });
 });
 
-describe("runGameTurn", () => {
+describe("streamGameTurn", () => {
   const mockedBuildSceneFromRequest = jest.mocked(buildSceneFromRequest);
   const mockedGenerateJsonReplySingleMessage = jest.mocked(generateJsonReplySingleMessage);
-  const mockedGenerateReplyFullMessages = jest.mocked(generateReplyFullMessages);
   const mockedGenerateReplySingleMessage = jest.mocked(generateReplySingleMessage);
-  const mockedGetSession = jest.mocked(getSession);
-  const mockedUpdateSession = jest.mocked(updateSession);
+  const mockedStreamReplyFullMessages = jest.mocked(streamReplyFullMessages);
+  const mockedGetRuntimeSession = jest.mocked(getRuntimeSession);
+  const mockedUpdateRuntimeSession = jest.mocked(updateRuntimeSession);
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -117,21 +139,23 @@ describe("runGameTurn", () => {
 
   it("does not mutate the cached session when coverage sync fails", async () => {
     const session = buildSession();
-    mockedGetSession.mockResolvedValue(session);
+    mockedGetRuntimeSession.mockResolvedValue(session);
     mockedBuildSceneFromRequest.mockRejectedValue(new OsmCoverageSyncRetryExhaustedError());
 
-    await expect(runGameTurn(session.sessionId, "向前走")).rejects.toThrow(
+    await expect(streamGameTurn(session.sessionId, "向前走", jest.fn())).rejects.toThrow(
       "地图数据同步失败，请再次发送上一条消息重试。",
     );
 
-    expect(session.messageHistory).toEqual([]);
-    expect(session.playerIndoorLocation).toBeNull();
-    expect(mockedUpdateSession).not.toHaveBeenCalled();
+    expect(session.gameState.messageHistory).toEqual([]);
+    expect(session.gameState.playerIndoorLocation).toBeNull();
+    expect(mockedUpdateRuntimeSession).not.toHaveBeenCalled();
   });
 
-  it("updates and persists a cloned session after a successful turn", async () => {
+  it("streams book message, commits session, and finishes visual description", async () => {
     const session = buildSession();
-    mockedGetSession.mockResolvedValue(session);
+    const emitted: string[] = [];
+
+    mockedGetRuntimeSession.mockResolvedValue(session);
     mockedBuildSceneFromRequest.mockResolvedValue({
       largestLevel: 0,
       microGrid: { cells: [] } as never,
@@ -141,24 +165,82 @@ describe("runGameTurn", () => {
       reply: "[]",
       reasoning: "",
     });
-    mockedGenerateReplyFullMessages.mockResolvedValue({
-      reply: "book reply",
-      reasoning: "",
+    mockedStreamReplyFullMessages.mockImplementation(async function* () {
+      yield { replyDelta: "book ", done: false };
+      yield { replyDelta: "reply", done: false };
+      yield { done: true };
     });
     mockedGenerateReplySingleMessage.mockResolvedValue({
       reply: "visual notes",
       reasoning: "",
     });
 
-    const result = await runGameTurn(session.sessionId, "观察四周");
+    const result = await streamGameTurn(session.sessionId, "观察四周", async (event) => {
+      emitted.push(event.type);
+    });
 
-    expect(result).toBeDefined();
-    expect(result).not.toBe(session);
-    expect(result?.messageHistory).toEqual([
+    expect(result).toBe(session);
+    expect(session.gameState.messageHistory).toEqual([
       { role: "player", content: "观察四周" },
       { role: "book", content: "book reply" },
     ]);
-    expect(session.messageHistory).toEqual([]);
-    expect(mockedUpdateSession).toHaveBeenCalledWith(result);
+    expect(session.gameState.activeOutdoorVisualDescriptions).toHaveLength(1);
+    expect(emitted).toEqual([
+      "player_message_accepted",
+      "book_reply_delta",
+      "book_reply_delta",
+      "book_done",
+      "session_committed",
+      "visual_description_started",
+      "visual_description_done",
+    ]);
+    expect(mockedUpdateRuntimeSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("queues one next turn while visual description is pending", async () => {
+    const session = buildSession();
+    const events: string[] = [];
+    let resolvePending!: () => void;
+
+    session.runtime.pendingVisualDescription = true;
+    session.runtime.pendingVisualDescriptionTask = new Promise<void>((resolve) => {
+      resolvePending = resolve;
+    });
+
+    mockedGetRuntimeSession.mockResolvedValue(session);
+    mockedBuildSceneFromRequest.mockResolvedValue({
+      largestLevel: 0,
+      microGrid: { cells: [] } as never,
+      polarView: undefined,
+    });
+    mockedGenerateJsonReplySingleMessage.mockResolvedValue({
+      reply: "[]",
+      reasoning: "",
+    });
+    mockedStreamReplyFullMessages.mockImplementation(async function* () {
+      yield { replyDelta: "queued reply", done: false };
+      yield { done: true };
+    });
+    mockedGenerateReplySingleMessage.mockResolvedValue({
+      reply: "visual notes",
+      reasoning: "",
+    });
+
+    const turnPromise = streamGameTurn(session.sessionId, "排队消息", async (event) => {
+      events.push(event.type);
+      if (event.type === "queued_next_turn") {
+        session.runtime.pendingVisualDescription = false;
+        session.runtime.pendingVisualDescriptionTask = null;
+        resolvePending();
+      }
+    });
+
+    await turnPromise;
+
+    expect(events[0]).toBe("queued_next_turn");
+    expect(session.gameState.messageHistory.at(-1)).toEqual({
+      role: "book",
+      content: "queued reply",
+    });
   });
 });

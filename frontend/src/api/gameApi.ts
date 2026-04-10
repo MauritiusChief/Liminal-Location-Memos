@@ -1,14 +1,31 @@
-import { getJson, postJson } from './http';
-import type { GameSession, GameTurnRequest } from './gameTypes';
+import { getJson, streamNdjson } from './http';
+import type { GameSessionSnapshot, GameStreamEvent, GameTurnRequest } from './gameTypes';
 
-export function startGame(): Promise<GameSession> {
-  return postJson<GameSession, Record<string, never>>('/api/game/start', {});
+export async function streamGameStart(
+  onEvent: (event: GameStreamEvent) => void,
+): Promise<void> {
+  await streamNdjson<GameStreamEvent>('/api/game/start', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({}),
+  }, onEvent);
 }
 
-export function submitGameTurn(input: GameTurnRequest): Promise<GameSession> {
-  return postJson<GameSession, GameTurnRequest>('/api/game/turn', input);
+export async function streamGameTurn(
+  input: GameTurnRequest,
+  onEvent: (event: GameStreamEvent) => void,
+): Promise<void> {
+  await streamNdjson<GameStreamEvent>('/api/game/turn', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  }, onEvent);
 }
 
-export function fetchGameSession(sessionId: string): Promise<GameSession> {
-  return getJson<GameSession>(`/api/game/session/${encodeURIComponent(sessionId)}`);
+export function fetchGameSession(sessionId: string): Promise<GameSessionSnapshot> {
+  return getJson<GameSessionSnapshot>(`/api/game/session/${encodeURIComponent(sessionId)}`);
 }

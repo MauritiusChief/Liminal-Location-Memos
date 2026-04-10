@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { overpassJson } from 'overpass-ts';
 import { checkDatabaseHealth } from '../db/client.js';
 import type { RangedPosition } from './apiTypes.js';
-import { OsmCoverageSyncRetryExhaustedError, syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
+import { syncOverpassCoverage } from '@/services/osmNormalization/osmGate.js';
 import { buildMicroGrid, fetchMicroGridFromDb } from '@/services/scene/microGridObject.js';
 import { buildLabeledMicroGrid } from '@/services/scene/microGridPrompt.js';
 import { fetchFeatureDetailsFromDb, FeatureDetail } from '@/services/featureDetail.js';
@@ -17,8 +17,8 @@ import { buildLeveledPolarView, applyOcclusion } from '@/services/scene/polarVie
 import { buildSceneFromRequest } from '@/services/scene/sceneObject.js';
 import { streamReplySingleMessage } from '@/services/gameSystem/llm.js';
 import { buildScenePrompt } from '@/services/scene/scenePrompt.js';
-import { getSession } from '@/services/gameSystem/gameSessionStore.js';
-import { runGameTurn, startGame } from '@/services/gameSystem/gameChat.js';
+import { getRuntimeSession, toClientGameSessionSnapshot } from '@/services/gameSystem/gameSessionStore.js';
+import { streamGameStart, streamGameTurn, type GameStreamEvent } from '@/services/gameSystem/gameChat.js';
 import type { Response } from 'express';
 
 interface DebugLlmRequestBody {
@@ -203,6 +203,10 @@ function writeNdjsonEvent(response: Response, event: NdjsonStreamEvent): void {
   response.write(`${JSON.stringify(event)}\n`);
 }
 
+function writeGameStreamEvent(response: Response, event: GameStreamEvent): void {
+  response.write(`${JSON.stringify(event)}\n`);
+}
+
 //#region 常规 API
 
 apiRouter.get('/health', async (_request, response) => {
@@ -216,18 +220,19 @@ apiRouter.get('/health', async (_request, response) => {
 });
 
 apiRouter.post('/game/start', async (_request, response) => {
-  try {
-    const result = await startGame();
-    response.json(result);
-  } catch (error) {
-    if (error instanceof OsmCoverageSyncRetryExhaustedError) {
-      response.status(502).json({ error: error.message });
-      return;
-    }
+  startNdjsonStream(response);
 
-    response.status(502).json({
-      error: error instanceof Error ? error.message : 'Unexpected game start error.',
+  try {
+    await streamGameStart(async (event) => {
+      writeGameStreamEvent(response, event);
     });
+    response.end();
+  } catch (error) {
+    writeGameStreamEvent(response, {
+      type: 'error',
+      message: error instanceof Error ? error.message : 'Unexpected game start error.',
+    });
+    response.end();
   }
 });
 
@@ -244,23 +249,25 @@ apiRouter.post('/game/turn', async (request, response) => {
     return;
   }
 
+  startNdjsonStream(response);
+
   try {
-    const result = await runGameTurn(sessionId.trim(), message.trim());
-    if (!result) {
-      response.status(404).json({ error: 'Session not found.' });
-      return;
-    }
-
-    response.json(result);
-  } catch (error) {
-    if (error instanceof OsmCoverageSyncRetryExhaustedError) {
-      response.status(502).json({ error: error.message });
-      return;
-    }
-
-    response.status(502).json({
-      error: error instanceof Error ? error.message : 'Unexpected game turn error.',
+    const result = await streamGameTurn(sessionId.trim(), message.trim(), async (event) => {
+      writeGameStreamEvent(response, event);
     });
+    if (!result) {
+      writeGameStreamEvent(response, { type: 'error', message: 'Session not found.' });
+      response.end();
+      return;
+    }
+
+    response.end();
+  } catch (error) {
+    writeGameStreamEvent(response, {
+      type: 'error',
+      message: error instanceof Error ? error.message : 'Unexpected game turn error.',
+    });
+    response.end();
   }
 });
 
@@ -273,13 +280,13 @@ apiRouter.get('/game/session/:sessionId', async (request, response) => {
   }
 
   try {
-    const session = await getSession(sessionId);
+    const session = await getRuntimeSession(sessionId);
     if (!session) {
       response.status(404).json({ error: 'Session not found.' });
       return;
     }
 
-    response.json(session);
+    response.json(toClientGameSessionSnapshot(session));
   } catch (error) {
     response.status(502).json({
       error: error instanceof Error ? error.message : 'Unexpected session restore error.',

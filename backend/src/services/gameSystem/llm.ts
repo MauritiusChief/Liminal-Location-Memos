@@ -94,6 +94,16 @@ export async function* streamReplySingleMessage(
   yield* streamChatCompletion(requestBody);
 }
 
+export async function* streamReplyFullMessages(
+  systemPrompt: string,
+  gameMessages: GameMessage[],
+  worldState: string,
+): AsyncGenerator<NormalizedLlmStreamEvent> {
+  const messages = buildFullMessagesRequestMessages(systemPrompt, gameMessages, worldState);
+  const requestBody = buildReasoningRequest(messages, 'text');
+  yield* streamChatCompletion(requestBody);
+}
+
 /**
  * 专门给 generateBookMessage() 用的，生成常规回合 Book Message 的函数。
  * 构造传统 messages 数组，并把 Game State 以虚拟 tool call/return 的方式插入。
@@ -153,7 +163,7 @@ function buildFullMessagesRequestMessages(
   return messages;
 }
 
-//#region 帮助函数
+//#region Provider 分支
 
 /**
  * 通用的沟通函数
@@ -248,6 +258,8 @@ async function* streamChatCompletionOpenRouter(requestBody: OpenRouterChatReques
 
   yield* streamSseResponse(response);
 }
+
+//#region 共用帮助函数
 
 function buildRequestHeaders(): Record<string, string> {
   const headers: Record<string, string> = {

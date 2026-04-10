@@ -60,12 +60,13 @@ jest.mock("../src/services/scene/scenePrompt", () => ({
 }));
 
 jest.mock("../src/services/gameSystem/gameSessionStore", () => ({
-  getSession: jest.fn(),
+  getRuntimeSession: jest.fn(),
+  toClientGameSessionSnapshot: jest.fn(),
 }));
 
 jest.mock("../src/services/gameSystem/gameChat", () => ({
-  runGameTurn: jest.fn(),
-  startGame: jest.fn(),
+  streamGameStart: jest.fn(),
+  streamGameTurn: jest.fn(),
 }));
 
 jest.mock("../src/services/gameSystem/llm", () => ({
