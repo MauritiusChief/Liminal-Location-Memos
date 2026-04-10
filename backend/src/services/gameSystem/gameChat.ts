@@ -92,7 +92,7 @@ const MOVE_PLAYER_TOOL: GameStateToolDef = {
   },
 };
 
-//#region 主函数
+//#region 出口函数
 
 /**
  * 开局主流程。
@@ -192,6 +192,8 @@ export async function streamGameTurn(
   await executeTurnStream(session, playerMessage, emit);
   return session;
 }
+
+//#region 内部逻辑函数
 
 /**
  * 执行“真正的一回合”。
@@ -389,49 +391,7 @@ async function streamRegularBookMessage(
   return reply;
 }
 
-/**
- * 从某个 Book Message 里提取事实性细节供记录，以维持事实一致性
- *
- * 这里的目标是把 Book 里已经说出的、之后应该继续视为事实的细节抽出来保存。
- * @param bookMessage
- * @returns
- */
-async function extractOutdoorVisualDescription(
-  bookMessage: string,
-  pos: Position,
-  playerOrientation: number,
-  oldVisualDescription?: string,
-): Promise<string> {
-  console.log(`[${new Date().toISOString()}] 开始 extractOutdoorVisualDescription()`);
-
-  const { lat, lon } = pos;
-  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: VISUAL_DESCRIPTION_RADIUS_METERS }, playerOrientation);
-  const scenePrompt = buildScenePrompt(sceneObject, playerOrientation);
-
-  const message = [
-    'OpenStreetMap 数据摘要：',
-    scenePrompt,
-    '---',
-    '旧的事实性细节记录：',
-    oldVisualDescription ?? '（暂无）',
-    '---',
-    '文本描述：',
-    bookMessage,
-  ].join('\n');
-
-  const response = await generateReplySingleMessage(
-    OUTDOOR_VISUAL_DESCRIPTION_SYSTEM,
-    message,
-  );
-  await writeGameDebugMarkdown({
-    functionName: 'extractOutdoorVisualDescription',
-    systemPrompt: OUTDOOR_VISUAL_DESCRIPTION_SYSTEM,
-    input: message,
-    reply: response.reply,
-    reasoning: response.reasoning,
-  });
-  return response.reply;
-}
+//#region 游戏状态函数
 
 /**
  * 从 Game State 获取所需信息，尤其是玩家最新的消息，然后单独给一个 agent，令其返回该玩家行为将导致的游戏状态变化
@@ -515,7 +475,7 @@ async function toWorldStatePrompt(state: GameState): Promise<string> {
  * - 成功移动后，玩家朝向也会改成这次移动方向；
  * - indoorLocation 会被清空，因为当前最小实现里移动后默认回到室外语境。
  */
-export function applyGameStateToolCalls(state: GameState, toolCalls: GameStateToolCall[]): void {
+function applyGameStateToolCalls(state: GameState, toolCalls: GameStateToolCall[]): void {
   for (const toolCall of toolCalls) {
     console.log(`[${new Date().toISOString()}] 开始解析 ${toolCall.name} 工具参数：`, toolCall.arguments);
 
@@ -543,36 +503,7 @@ export function applyGameStateToolCalls(state: GameState, toolCalls: GameStateTo
   }
 }
 
-/**
- * 根据“起点经纬度 + 朝向 + 距离”计算移动后的新经纬度。
- *
- * 这里使用球面坐标公式，而不是把经纬度简单当作平面坐标，
- * 这样在地理位置计算上更稳妥。
- */
-function movePosition(
-  position: Position,
-  bearingDegrees: number,
-  distanceMeters: number,
-): Position {
-  const bearingRadians = degreesToRadians(bearingDegrees);
-  const latRadians = degreesToRadians(position.lat);
-  const lonRadians = degreesToRadians(position.lon);
-  const angularDistance = distanceMeters / EARTH_RADIUS_METERS;
-
-  const nextLat = Math.asin(
-    Math.sin(latRadians) * Math.cos(angularDistance)
-      + Math.cos(latRadians) * Math.sin(angularDistance) * Math.cos(bearingRadians),
-  );
-  const nextLon = lonRadians + Math.atan2(
-    Math.sin(bearingRadians) * Math.sin(angularDistance) * Math.cos(latRadians),
-    Math.cos(angularDistance) - Math.sin(latRadians) * Math.sin(nextLat),
-  );
-
-  return {
-    lat: radiansToDegrees(nextLat),
-    lon: normalizeLongitude(radiansToDegrees(nextLon)),
-  };
-}
+//#region O-VD 函数
 
 /**
  * 为当前位置补写或更新 Outdoor Visual Description。
@@ -614,6 +545,50 @@ async function upsertOutdoorVisualDescription(state: GameState, bookMessage: str
 }
 
 /**
+ * 从某个 Book Message 里提取事实性细节供记录，以维持事实一致性
+ *
+ * 这里的目标是把 Book 里已经说出的、之后应该继续视为事实的细节抽出来保存。
+ * @param bookMessage
+ * @returns
+ */
+async function extractOutdoorVisualDescription(
+  bookMessage: string,
+  pos: Position,
+  playerOrientation: number,
+  oldVisualDescription?: string,
+): Promise<string> {
+  console.log(`[${new Date().toISOString()}] 开始 extractOutdoorVisualDescription()`);
+
+  const { lat, lon } = pos;
+  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: VISUAL_DESCRIPTION_RADIUS_METERS }, playerOrientation);
+  const scenePrompt = buildScenePrompt(sceneObject, playerOrientation);
+
+  const message = [
+    'OpenStreetMap 数据摘要：',
+    scenePrompt,
+    '---',
+    '旧的事实性细节记录：',
+    oldVisualDescription ?? '（暂无）',
+    '---',
+    '文本描述：',
+    bookMessage,
+  ].join('\n');
+
+  const response = await generateReplySingleMessage(
+    OUTDOOR_VISUAL_DESCRIPTION_SYSTEM,
+    message,
+  );
+  await writeGameDebugMarkdown({
+    functionName: 'extractOutdoorVisualDescription',
+    systemPrompt: OUTDOOR_VISUAL_DESCRIPTION_SYSTEM,
+    input: message,
+    reply: response.reply,
+    reasoning: response.reasoning,
+  });
+  return response.reply;
+}
+
+/**
  * 根据当前玩家位置，重新计算哪些 Outdoor Visual Description 处于激活状态。
  *
  * 当前最小规则很直白：只要中心点在玩家 300m 范围内，就算 active。
@@ -647,6 +622,39 @@ function findNearestOutdoorVisualDescription(
     .sort((left, right) => left.distanceMeters - right.distanceMeters);
 
   return records[0]?.record || null;
+}
+
+//#region 帮助函数
+
+/**
+ * 根据“起点经纬度 + 朝向 + 距离”计算移动后的新经纬度。
+ *
+ * 这里使用球面坐标公式，而不是把经纬度简单当作平面坐标，
+ * 这样在地理位置计算上更稳妥。
+ */
+function movePosition(
+  position: Position,
+  bearingDegrees: number,
+  distanceMeters: number,
+): Position {
+  const bearingRadians = degreesToRadians(bearingDegrees);
+  const latRadians = degreesToRadians(position.lat);
+  const lonRadians = degreesToRadians(position.lon);
+  const angularDistance = distanceMeters / EARTH_RADIUS_METERS;
+
+  const nextLat = Math.asin(
+    Math.sin(latRadians) * Math.cos(angularDistance)
+      + Math.cos(latRadians) * Math.sin(angularDistance) * Math.cos(bearingRadians),
+  );
+  const nextLon = lonRadians + Math.atan2(
+    Math.sin(bearingRadians) * Math.sin(angularDistance) * Math.cos(latRadians),
+    Math.cos(angularDistance) - Math.sin(latRadians) * Math.sin(nextLat),
+  );
+
+  return {
+    lat: radiansToDegrees(nextLat),
+    lon: normalizeLongitude(radiansToDegrees(nextLon)),
+  };
 }
 
 /**
