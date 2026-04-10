@@ -47,13 +47,9 @@ export interface FeatureDetail {
  * 这个函数取回以 featureId 为指数的一列记录，包含所有细节。
  * 建筑单独走一条查询，是为了顺手把 containedPois 一并在 SQL 里算好。
  * @param request
- * @param _profile 暂时没用，未来可区分 debug 模式和常规模式的 SQL
  * @returns
  */
-export async function fetchFeatureDetailsFromDb(
-  request: RangedPosition,
-  _profile: string = 'debug',
-): Promise<FeatureDetail[]> {
+export async function fetchFeatureDetailsFromDb(request: RangedPosition): Promise<FeatureDetail[]> {
   const [buildingRows, otherRows] = await Promise.all([
     fetchBuildingDetails(request),
     fetchNonBuildingDetails(request),

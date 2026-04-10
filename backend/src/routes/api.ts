@@ -401,9 +401,9 @@ apiRouter.post('/debug/db/normalized-load', async (request, response) => {
 
   try {
     const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
-      fetchFeatureDetailsFromDb(normalizedRequest, 'debug'),
+      fetchFeatureDetailsFromDb(normalizedRequest),
       fetchMicroGridFromDb(normalizedRequest, playerOrientation),
-      fetchScenePolarFeaturesFromDb(normalizedRequest, 'debug'),
+      fetchScenePolarFeaturesFromDb(normalizedRequest),
     ]);
 
     const debugPayload = buildNormalizationDebugPayload({

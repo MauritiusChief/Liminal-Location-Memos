@@ -38,6 +38,7 @@ Game State 术语：
   - **Room Schema**
   - **Suite Schema**
   - **Subroom Schema**
+- **Category**：建筑的大的类型，比如图书馆 Category，独栋房屋 Category
 - **Pattern**：预设的建筑里的主要功能房间或主要楼层，可以认为是 Building Schema 的前体。每个大类的建筑都有一套 Pattern，比如图书馆大类包含藏书室、电脑房、讨论室等各种房间，以及楼层上的 Pattern 比如高层酒店大类有地面层、住房层等。
   如果建筑本身较标准，那么可以直接用程序从 Pattern 生成 Building Schema，否则就需要把 Pattern、建筑本身 OSM 信息发给 LLM，进行分配。
   - **Pattern Distribution**：如果建筑本身是多体建筑，或者建筑因面积很大拆分为了多个 Sector，每个子建筑/Sector肯定不会包含 Pattern 中的全部功能。因此就需要这个 Pattern Distribution 指定各个子建筑/Sector中没有哪些功能
@@ -65,7 +66,7 @@ Game State 术语：
   - 如果是非常标准的独栋建筑，比如独栋酒店、办公楼，不存在分配问题，可以直接下一步程序生成 Building Schema
   - 如果是多体建筑，则需要让 LLM 把基础 Pattern 中的功能分配到多个建筑中（会提供各个建筑的 OSM tags 与所含 POI 作为参考）
   - 如果是超大的楼层建筑，则需要按六边形网格切分 Sector，然后类似多体建筑那样把 Pattern 中的功能进行分配（会提供各个 Sector 所含的 POI 作为参考）
-3. Pattern Distribution 便可以直接用程序生成 Building Schema 了：
+3. Pattern 或 Pattern Distribution 便可以直接用程序生成 Building Schema 了：
   - 添加随机的 Suite Schema，比如仅仅指定为公寓或酒店后，内部的套房
   - 添加零碎 Room Schema，比如办公室、厕所、清洁室、储藏室等
   - 添加出入口和楼层间通道、多体建筑之间的通道
