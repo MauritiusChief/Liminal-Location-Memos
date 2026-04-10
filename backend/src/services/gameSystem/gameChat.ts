@@ -460,7 +460,14 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
     // 获取 LLM 返回
     const response = await generateJsonReplySingleMessage(systemPrompt, message);
     // 解析返回
-    const parsedToolCall: GameStateToolCall[] = JSON.parse(response.reply);
+    const unparsedToolCall: any = JSON.parse(response.reply);
+    let parsedToolCall: GameStateToolCall[]
+    // 以防只回一个单独的 object
+    if (Array.isArray(unparsedToolCall)) {
+      parsedToolCall = unparsedToolCall
+    } else {
+      parsedToolCall = [unparsedToolCall]
+    }
     await writeGameDebugResult({
       functionName: 'gameStateManager',
       reply: parsedToolCall,
