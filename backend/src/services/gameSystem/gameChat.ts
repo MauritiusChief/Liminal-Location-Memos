@@ -391,6 +391,7 @@ async function streamRegularBookMessage(
   });
 
   let reply = '';
+  let reasoning = '';
 
   try {
     for await (const event of streamReplyFullMessages(
@@ -402,11 +403,15 @@ async function streamRegularBookMessage(
         reply += event.replyDelta;
         await emit({ type: 'book_reply_delta', text: event.replyDelta });
       }
+      if (event.reasoningDelta) {
+        reasoning += event.reasoningDelta;
+      }
     }
 
     await writeGameDebugResult({
       functionName: 'generateBookMessage',
       reply,
+      reasoning,
     });
     return reply;
   } catch (error) {

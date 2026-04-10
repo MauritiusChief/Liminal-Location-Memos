@@ -23,7 +23,7 @@ export function applyMovePlayerTool(
     return;
   }
 
-  console.log(`[${new Date().toISOString()}] 移动玩家工具完成`);
+  console.log(`[${new Date().toISOString()}] 移动玩家工具完成，绝对方位 ${actualDirectionDegrees}° ${distanceMeters}m`);
   state.playerPosition = nextPosition;
   state.playerOrientation = normalizeBearingDegrees(bearingDegrees);
 }
