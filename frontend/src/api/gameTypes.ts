@@ -59,7 +59,7 @@ export interface PlayerIndoorLocation {
   roomKey: string;
 }
 
-export interface GameSession {
+export interface GameSessionSnapshot {
   sessionId: string;
   playerPosition: Position;
   playerOrientation: number;
@@ -70,9 +70,49 @@ export interface GameSession {
   buildingSchemas: Record<string, BuildingSchema>;
   levelVisualDescriptions: Record<string, LevelVisualDescriptionRecord>;
   llmProvider?: string;
+  pendingVisualDescription: boolean;
+  hasQueuedPlayerMessage: boolean;
 }
 
 export interface GameTurnRequest {
   sessionId: string;
   message: string;
 }
+
+export type GameStreamEvent =
+  | {
+      type: 'player_message_accepted';
+      text: string;
+    }
+  | {
+      type: 'book_reply_delta';
+      text: string;
+    }
+  | {
+      type: 'book_done';
+    }
+  | {
+      type: 'session_committed';
+      session: GameSessionSnapshot;
+    }
+  | {
+      type: 'visual_description_started';
+    }
+  | {
+      type: 'visual_description_done';
+      session: GameSessionSnapshot;
+    }
+  | {
+      type: 'queued_next_turn';
+      queuedMessage: string;
+      session: GameSessionSnapshot;
+    }
+  | {
+      type: 'queue_rejected';
+      message: string;
+      session: GameSessionSnapshot;
+    }
+  | {
+      type: 'error';
+      message: string;
+    };

@@ -1,6 +1,6 @@
 /// <reference types="jest" />
 
-import { createSession } from "../src/services/gameSystem/gameSessionStore";
+import { createRuntimeSession } from "../src/services/gameSystem/gameSessionStore";
 
 describe("gameSessionStore", () => {
   afterEach(() => {
@@ -10,10 +10,11 @@ describe("gameSessionStore", () => {
   it("creates a session with a normalized random player orientation", async () => {
     jest.spyOn(Math, "random").mockReturnValue(0.5);
 
-    const session = await createSession();
+    const session = await createRuntimeSession();
 
-    expect(session.playerOrientation).toBe(180);
-    expect(session.playerOrientation).toBeGreaterThanOrEqual(0);
-    expect(session.playerOrientation).toBeLessThan(360);
+    expect(session.gameState.playerOrientation).toBe(180);
+    expect(session.gameState.playerOrientation).toBeGreaterThanOrEqual(0);
+    expect(session.gameState.playerOrientation).toBeLessThan(360);
+    expect(session.runtime.pendingVisualDescription).toBe(false);
   });
 });

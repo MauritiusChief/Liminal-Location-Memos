@@ -1,87 +1,229 @@
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
-import { GameMessage } from './gameSessionStore.js';
+import { buildFullMessagesRequestMessages, buildSingleMessageRequestMessages } from './llm.js';
+import type { LlmProviderMessage } from './llmTypes.js';
+import type { GameMessage } from './gameSessionStore.js';
 
-type DebugInput = string | GameMessage[];
+type DebugReply = string | object;
 
-type WriteGameDebugParams = {
-  functionName: string;
-  systemPrompt: string;
-  input: DebugInput;
-  worldStatePrompt?: string;
-  reply: string | object;
-  reasoning?: string;
+type DebugArtifact = {
+  suffix: 'system' | 'user-message' | 'full-messages' | 'text-response' | 'json-response' | 'reasoning' | 'error';
+  extension: 'md' | 'json';
+  content: string;
 };
 
-const CURRENT_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
-const DEBUG_DIRECTORY = path.resolve(CURRENT_DIRECTORY, '../../../data/game-debug');
+type WriteGameDebugRequestParams =
+  | {
+      mode: 'user-message';
+      functionName: string;
+      systemPrompt: string;
+      userMessage: string;
+    }
+  | {
+      mode: 'full-messages';
+      functionName: string;
+      systemPrompt: string;
+      gameMessages: GameMessage[];
+      worldStatePrompt: string;
+    };
 
-export async function writeGameDebugMarkdown({
-  functionName,
-  systemPrompt,
-  input,
-  worldStatePrompt,
-  reply,
-  reasoning,
-}: WriteGameDebugParams): Promise<void> {
+type WriteGameDebugResultParams =
+  | {
+      functionName: string;
+      reply: DebugReply;
+      reasoning?: string;
+    }
+  | {
+      functionName: string;
+      error: unknown;
+    };
+
+const DEBUG_DIRECTORY = resolveDebugDirectory();
+
+export async function writeGameDebugRequest(params: WriteGameDebugRequestParams): Promise<void> {
   try {
-    await mkdir(DEBUG_DIRECTORY, { recursive: true });
-
-    const timestamp = new Date().toISOString().replaceAll(':', '-').replace('.', '-');
-    const filename = `${timestamp}_${functionName}.md`;
-    const filePath = path.join(DEBUG_DIRECTORY, filename);
-    const sections = [
-      buildSection('系统提示词', toMarkdownText(systemPrompt)),
-      Array.isArray(input)
-        ? buildSection('全部消息', formatGameMessages(input))
-        : buildSection('单条消息', toMarkdownText(input)),
-      worldStatePrompt ? buildSection('worldStatePrompt', toMarkdownText(worldStatePrompt)) : null,
-      buildSection('返回的直接回复', formatReply(reply)),
-      reasoning ? buildSection('返回的思索内容', toMarkdownText(reasoning)) : null,
-    ].filter((section): section is string => section !== null);
-
-    await writeFile(filePath, `${sections.join('\n\n')}\n`, 'utf8');
+    await writeArtifacts(params.functionName, buildGameDebugRequestArtifacts(params));
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] 写入 game debug 文件失败`, error);
+    console.error(`[${new Date().toISOString()}] 写入 game debug request 文件失败`, error);
   }
 }
 
-function buildSection(title: string, content: string): string {
-  return `## ${title}\n\n${content}`;
+export async function writeGameDebugResult(params: WriteGameDebugResultParams): Promise<void> {
+  try {
+    await writeArtifacts(params.functionName, buildGameDebugResultArtifacts(params));
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] 写入 game debug result 文件失败`, error);
+  }
 }
 
-function formatGameMessages(messages: GameMessage[]): string {
+export function buildGameDebugRequestArtifacts(params: WriteGameDebugRequestParams): DebugArtifact[] {
+  const artifacts: DebugArtifact[] = [{
+    suffix: 'system',
+    extension: 'md',
+    content: toMarkdownText(params.systemPrompt),
+  }];
+
+  if (params.mode === 'user-message') {
+    const requestMessages = buildSingleMessageRequestMessages(params.systemPrompt, params.userMessage);
+    artifacts.push({
+      suffix: 'user-message',
+      extension: 'md',
+      content: toMarkdownText(requestMessages[1]?.content ?? ''),
+    });
+    return artifacts;
+  }
+
+  const requestMessages = buildFullMessagesRequestMessages(
+    params.systemPrompt,
+    params.gameMessages,
+    params.worldStatePrompt,
+  );
+
+  artifacts.push({
+    suffix: 'full-messages',
+    extension: 'md',
+    content: formatFullMessagesDebugSnapshot(requestMessages.slice(1), params.worldStatePrompt),
+  });
+
+  return artifacts;
+}
+
+export function buildGameDebugResultArtifacts(params: WriteGameDebugResultParams): DebugArtifact[] {
+  if ('error' in params) {
+    return [{
+      suffix: 'error',
+      extension: 'md',
+      content: formatError(params.error),
+    }];
+  }
+
+  const artifacts: DebugArtifact[] = [];
+  if (typeof params.reply === 'string') {
+    artifacts.push({
+      suffix: 'text-response',
+      extension: 'md',
+      content: toMarkdownText(params.reply),
+    });
+  } else {
+    artifacts.push({
+      suffix: 'json-response',
+      extension: 'json',
+      content: JSON.stringify(params.reply, null, 2),
+    });
+  }
+
+  if (params.reasoning) {
+    artifacts.push({
+      suffix: 'reasoning',
+      extension: 'md',
+      content: toMarkdownText(params.reasoning),
+    });
+  }
+
+  return artifacts;
+}
+
+async function writeArtifacts(functionName: string, artifacts: DebugArtifact[]): Promise<void> {
+  await mkdir(DEBUG_DIRECTORY, { recursive: true });
+
+  const timestamp = new Date().toISOString().replaceAll(':', '-').replace('.', '-');
+  await Promise.all(artifacts.map((artifact) => {
+    const filename = `${timestamp}_${functionName}_${artifact.suffix}.${artifact.extension}`;
+    const filePath = path.join(DEBUG_DIRECTORY, filename);
+    return writeFile(filePath, ensureTrailingNewline(artifact.content), 'utf8');
+  }));
+}
+
+function formatFullMessagesDebugSnapshot(messages: LlmProviderMessage[], worldStatePrompt: string): string {
   if (messages.length === 0) {
     return '（暂无）';
   }
 
   return messages
-    .map((message) => {
-      const hint = message.role === 'book' ? '**游戏输出**' : '**玩家输入**';
-      return toBlockQuote(`${hint}：${message.content}`);
-    })
+    .map((message, index) => formatDebugMessageSection(index, message, worldStatePrompt))
     .join('\n\n');
 }
 
-function formatReply(reply: string | object): string {
-  if (typeof reply === 'string') {
-    return toMarkdownText(reply);
+function formatDebugMessageSection(
+  index: number,
+  message: LlmProviderMessage,
+  worldStatePrompt: string,
+): string {
+  const title = `## ${index + 1}. ${message.role}`;
+
+  if (message.role === 'tool') {
+    const maskedToolMessage = {
+      ...message,
+      content: '',
+    };
+
+    return [
+      title,
+      '',
+      toCodeFence('json', JSON.stringify(maskedToolMessage, null, 2)),
+      '',
+      toCodeFence('md', worldStatePrompt),
+    ].join('\n');
   }
 
-  return ['模型返回了 JSON Object：','```json', JSON.stringify(reply, null, 2), '```'].join('\n');
+  if (message.tool_calls?.length) {
+    return [
+      title,
+      '',
+      toCodeFence('json', JSON.stringify(message, null, 2)),
+    ].join('\n');
+  }
+
+  return [
+    title,
+    '',
+    toCodeFence('md', message.content ?? ''),
+  ].join('\n');
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) {
+    return [
+      `Error: ${error.message || '（空）'}`,
+      error.stack ? '' : null,
+      error.stack ?? null,
+    ].filter((line): line is string => line !== null).join('\n');
+  }
+
+  if (typeof error === 'string') {
+    return `Error: ${error}`;
+  }
+
+  return `Error: ${JSON.stringify(error, null, 2)}`;
 }
 
 function toMarkdownText(content: string): string {
-  const lines = content.split('\n')
-  const mashedLines = lines.map(l => l.startsWith('#') ? `#${l}` : l)
-  const mashedContent = mashedLines.join('\n')
-  return mashedContent.trim() ? mashedContent : '（模型返回了空内容）';
+  const trimmedContent = content.trim();
+  if (!trimmedContent) {
+    return '（模型返回了空内容）';
+  }
+
+  return trimmedContent
+    .split('\n')
+    .map((line) => (line.startsWith('#') ? `#${line}` : line))
+    .join('\n');
 }
 
-function toBlockQuote(content: string): string {
-  return content
-    .split('\n')
-    .map((line) => `> ${line}`)
-    .join('\n');
+function toCodeFence(language: string, content: string): string {
+  const normalizedContent = content || '（空）';
+  const maxBackticks = Math.max(...Array.from(normalizedContent.matchAll(/`+/g), (match) => match[0].length), 0);
+  const fence = '`'.repeat(Math.max(3, maxBackticks + 1));
+
+  return `${fence}${language}\n${normalizedContent}\n${fence}`;
+}
+
+function ensureTrailingNewline(content: string): string {
+  return content.endsWith('\n') ? content : `${content}\n`;
+}
+
+function resolveDebugDirectory(): string {
+  const currentWorkingDirectory = process.cwd();
+  return path.basename(currentWorkingDirectory) === 'backend'
+    ? path.resolve(currentWorkingDirectory, 'data/game-debug')
+    : path.resolve(currentWorkingDirectory, 'backend/data/game-debug');
 }

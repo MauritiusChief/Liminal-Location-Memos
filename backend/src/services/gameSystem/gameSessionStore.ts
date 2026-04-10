@@ -18,28 +18,8 @@ export type GameMessage =
   | {
       role: 'book';
       content: string;
-    }
+    };
 
-/**
- * TODO 目前 Game State, Game Session, Game Save 都是这个类型
- * TODO 记录 deepseek、Openrouter 等不同的供应商，以兼容不同的 API 格式
- */
-export interface GameSession {
-  sessionId: string;
-  playerPosition: Position;
-  playerOrientation: number;
-  playerIndoorLocation: PlayerIndoorLocation | null;
-  messageHistory: GameMessage[];
-  activeOutdoorVisualDescriptions: string[]; // 记录 outdoorVisualDescriptions id
-  outdoorVisualDescriptions: Record<string, OutdoorVisualDescriptionRecord>;
-  buildingSchemas: Record<string, BuildingSchema>;
-  levelVisualDescriptions: Record<string, LevelVisualDescriptionRecord>;
-  llmProvider?: string;
-}
-
-/**
- * 文本形式记录某一经纬度附近(100m范围内)的事实性细节
- */
 export interface OutdoorVisualDescriptionRecord {
   id: string;
   center: Position; // 绑定经纬度坐标
@@ -48,40 +28,32 @@ export interface OutdoorVisualDescriptionRecord {
   updatedAt: string;
 }
 
-/**
- * 建筑蓝图，由多个建筑楼层蓝图组成
- */
-export type BuildingSchema = Record<string, BuildingLevelSchemaDefinition>;
-/**
- * 建筑楼层蓝图，由该蓝图所管辖的房间以及所属的多个建筑房间蓝图组成
- */
-export interface BuildingLevelSchemaDefinition {
-  span: number | [number, number]; // 对应单层与多层状况
-  rooms: Record<string, BuildingSchemaRoom | BuildingSchemaSuiteRoom>;
+export interface BuildingSchemaSubRoom {
+  count: number;
+  desc: string;
 }
-/**
- * 简单房间蓝图
- */
+
 export interface BuildingSchemaRoom {
   count: number;
   desc: string;
   access?: 'entrance' | 'vertical' | 'internal';
 }
-/**
- * 套房蓝图，适用于重复的复杂结构房间，设定不包含 access
- */
+
 export interface BuildingSchemaSuiteRoom {
   count: number;
   desc: string;
   subRooms: Record<string, BuildingSchemaSubRoom>;
 }
-/**
- * 套房蓝图的子房间蓝图，设定不包含 access
- */
-export interface BuildingSchemaSubRoom {
-  count: number;
-  desc: string;
+
+export interface BuildingLevelSchemaDefinition {
+  span: number | [number, number];
+  rooms: Record<string, BuildingSchemaRoom | BuildingSchemaSuiteRoom>;
 }
+
+/**
+ * 建筑蓝图，由多个建筑楼层蓝图组成
+ */
+export type BuildingSchema = Record<string, BuildingLevelSchemaDefinition>;
 
 /**
  * 文本形式记录某一建筑的某一楼层的事实性细节
@@ -100,11 +72,57 @@ export interface PlayerIndoorLocation {
   roomKey: string;
 }
 
-//#region 客户端类型
+/**
+ * 纯长期游戏状态。
+ * 不包含流式请求、后台任务、排队消息等运行时字段。
+ */
+export interface GameState {
+  playerPosition: Position;
+  playerOrientation: number;
+  playerIndoorLocation: PlayerIndoorLocation | null;
+  messageHistory: GameMessage[];
+  activeOutdoorVisualDescriptions: string[];
+  outdoorVisualDescriptions: Record<string, OutdoorVisualDescriptionRecord>;
+  buildingSchemas: Record<string, BuildingSchema>;
+  levelVisualDescriptions: Record<string, LevelVisualDescriptionRecord>;
+}
 
 /**
- * TODO：在添加登录功能时，添加仅暴露必须字段的客户端专用类型
+ * 可持久化恢复的存档。
  */
+export interface GameSave {
+  sessionId: string;
+  gameState: GameState;
+  llmProvider?: string;
+}
+
+export interface GameSessionRuntime {
+  pendingVisualDescription: boolean;
+  queuedPlayerMessage: string | null;
+  activeTurnId: string | null;
+  pendingVisualDescriptionTask: Promise<void> | null;
+}
+
+/**
+ * 运行时会话：GameSave + 运行期编排状态。
+ */
+export interface GameSession {
+  sessionId: string;
+  gameState: GameState;
+  llmProvider?: string;
+  runtime: GameSessionRuntime;
+}
+
+/**
+ * 提供给前端的可恢复快照。
+ * 基础数据来自 GameSave，但允许附带少量运行态摘要供 UI 展示。
+ */
+export interface GameClientSessionSnapshot extends GameState {
+  sessionId: string;
+  llmProvider?: string;
+  pendingVisualDescription: boolean;
+  hasQueuedPlayerMessage: boolean;
+}
 
 //#region 常量
 
@@ -115,7 +133,7 @@ const DEFAULT_START_POSITION: Position = {
   // lat: 33.83653441683847,
   // lon: -84.34211999827654,
   lat: testPosition[0],
-  lon: testPosition[1]
+  lon: testPosition[1],
 };
 
 const SAVE_DIRECTORY = path.resolve(process.cwd(), 'data', 'game-saves');
@@ -132,7 +150,7 @@ const sessions = new Map<string, GameSession>();
  * @param sessionId
  * @returns 获取到的 Game Session，或者表示失败的 undefined
  */
-export async function getSession(sessionId: string): Promise<GameSession | undefined> {
+export async function getRuntimeSession(sessionId: string): Promise<GameSession | undefined> {
   if (sessionId) {
     const existing = sessions.get(sessionId);
     if (existing) {
@@ -140,47 +158,53 @@ export async function getSession(sessionId: string): Promise<GameSession | undef
     }
   }
 
-  const save = await loadSaveDocument(sessionId)
-  if (!save) return undefined // 没有找到 Game Session
+  const save = await loadGameSave(sessionId);
+  if (!save) {
+    return undefined;
+  }
 
-  const loadedSession = save;
-  sessions.set(sessionId, loadedSession); // 把文件存档态的 Game Session 存入内存缓存
-  return loadedSession;
+  const session = createRuntimeSessionFromSave(save);
+  sessions.set(sessionId, session);  // 把文件存档态的 Game Session 存入内存缓存
+  return session;
 }
 
 /**
  * 创建 Game Session
  * @returns 新创建的 Game Session
  */
-export async function createSession(): Promise<GameSession> {
+export async function createRuntimeSession(): Promise<GameSession> {
   const nextSessionId = randomUUID();
-  const save = createSaveDocument(nextSessionId);
-  const loadedSession = save;
+  const save = createGameSave(nextSessionId);
+  const session = createRuntimeSessionFromSave(save);
 
-  sessions.set(nextSessionId, loadedSession);
-  return loadedSession;
+  sessions.set(nextSessionId, session);
+  return session;
 }
 
 /**
  * Game Session 更新统一通过这个入口回写，避免路由层直接操作缓存和文件。
  * @param session
  */
-export async function updateSession(session: GameSession): Promise<void> {
+export async function updateRuntimeSession(session: GameSession): Promise<void> {
   sessions.set(session.sessionId, session);
-  // 同步写入文件
+  await saveGameSave(toGameSave(session));
+}
+
+export async function saveGameSave(save: GameSave): Promise<void> {
   await mkdir(SAVE_DIRECTORY, { recursive: true });
-  const savePath = path.join(SAVE_DIRECTORY, `${session.sessionId}.json`)
-  await writeFile(savePath, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+  const savePath = path.join(SAVE_DIRECTORY, `${save.sessionId}.json`);
+  await writeFile(savePath, `${JSON.stringify(save, null, 2)}\n`, 'utf8');
 }
 
 //#region 帮助函数
 
-async function loadSaveDocument(sessionId: string): Promise<GameSession | null> {
+export async function loadGameSave(sessionId: string): Promise<GameSave | null> {
   const savePath = path.join(SAVE_DIRECTORY, `${sessionId}.json`);
 
   try {
     const content = await readFile(savePath, 'utf8');
-    return JSON.parse(content) as GameSession;
+    const parsed = JSON.parse(content) as Partial<GameSave> | Partial<GameState>;
+    return normalizeLoadedSave(sessionId, parsed);
   } catch (error) {
     if (isFileNotFound(error)) {
       return null;
@@ -190,17 +214,73 @@ async function loadSaveDocument(sessionId: string): Promise<GameSession | null> 
   }
 }
 
-function createSaveDocument(sessionId: string): GameSession {
+export function toGameSave(session: GameSession): GameSave {
+  return {
+    sessionId: session.sessionId,
+    gameState: cloneGameState(session.gameState),
+    llmProvider: session.llmProvider,
+  };
+}
+
+export function toClientGameSessionSnapshot(session: GameSession): GameClientSessionSnapshot {
+  const snapshot = cloneGameState(session.gameState);
+  return {
+    sessionId: session.sessionId,
+    llmProvider: session.llmProvider,
+    pendingVisualDescription: session.runtime.pendingVisualDescription,
+    hasQueuedPlayerMessage: Boolean(session.runtime.queuedPlayerMessage),
+    ...snapshot,
+  };
+}
+
+export function cloneGameState(gameState: GameState): GameState {
+  return structuredClone(gameState);
+}
+
+function createRuntimeSessionFromSave(save: GameSave): GameSession {
+  return {
+    sessionId: save.sessionId,
+    gameState: cloneGameState(save.gameState),
+    llmProvider: save.llmProvider,
+    runtime: {
+      pendingVisualDescription: false,
+      queuedPlayerMessage: null,
+      activeTurnId: null,
+      pendingVisualDescriptionTask: null,
+    },
+  };
+}
+
+function createGameSave(sessionId: string): GameSave {
   return {
     sessionId,
-    playerPosition: { ...DEFAULT_START_POSITION },
-    playerOrientation: Math.floor(Math.random() * 360),
-    playerIndoorLocation: null,
-    messageHistory: [],
-    activeOutdoorVisualDescriptions: [],
-    outdoorVisualDescriptions: {},
-    buildingSchemas: {},
-    levelVisualDescriptions: {},
+    gameState: {
+      playerPosition: { ...DEFAULT_START_POSITION },
+      playerOrientation: Math.floor(Math.random() * 360),
+      playerIndoorLocation: null,
+      messageHistory: [],
+      activeOutdoorVisualDescriptions: [],
+      outdoorVisualDescriptions: {},
+      buildingSchemas: {},
+      levelVisualDescriptions: {},
+    },
+  };
+}
+
+function normalizeLoadedSave(sessionId: string, parsed: Partial<GameSave> | Partial<GameState>): GameSave {
+  if ('gameState' in parsed && parsed.gameState) {
+    const save = parsed as GameSave;
+    return {
+      sessionId: save.sessionId || sessionId,
+      gameState: save.gameState,
+      llmProvider: save.llmProvider,
+    };
+  }
+
+  // 兼容旧版本直接把 GameSession/GameState 写进文件的存档。
+  return {
+    sessionId,
+    gameState: parsed as GameState,
   };
 }
 

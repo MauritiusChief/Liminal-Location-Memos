@@ -14,6 +14,7 @@ export function HomeChatPage() {
   const {
     message,
     session,
+    streamingBookMessage,
     hasStarted,
     detectedStoredSessionId,
     hasCheckedStoredSessionId,
@@ -37,6 +38,10 @@ export function HomeChatPage() {
     await dispatch(submitChatMessage());
   };
 
+  const canSubmitMessage = hasStarted
+    && !request.activeBookStream
+    && !session?.hasQueuedPlayerMessage;
+
   return (
     <section>
       <h2>Game Chat</h2>
@@ -49,6 +54,12 @@ export function HomeChatPage() {
                 <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap' }}>{entry.content}</pre>
               </article>
             )) : 'No messages yet.'}
+            {streamingBookMessage ? (
+              <article style={{ marginBottom: '12px' }}>
+                <strong>Book</strong>
+                <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap' }}>{streamingBookMessage}</pre>
+              </article>
+            ) : null}
           </div>
 
           {hasStarted ? (
@@ -64,9 +75,19 @@ export function HomeChatPage() {
                 placeholder="Tell the book what you do next."
               />
               <br />
-              <button type="submit" disabled={request.status === 'loading'}>
-                {request.status === 'loading' ? 'Sending...' : 'Send'}
+              <button type="submit" disabled={!canSubmitMessage}>
+                {request.activeBookStream
+                  ? 'Streaming...'
+                  : session?.hasQueuedPlayerMessage
+                    ? 'Queued'
+                    : 'Send'}
               </button>
+              {session?.pendingVisualDescription ? (
+                <p>Visual Description 正在后台更新。此时允许再发送 1 条消息排队。</p>
+              ) : null}
+              {session?.hasQueuedPlayerMessage ? (
+                <p>已存在 1 条排队消息，后台准备完成前不会再接受新的输入。</p>
+              ) : null}
             </form>
           ) : (
             <section style={{ marginTop: '16px' }}>
@@ -101,6 +122,14 @@ export function HomeChatPage() {
           <p>
             Current orientation:{' '}
             {session ? `${Math.round(session.playerOrientation)}°` : 'Unknown'}
+          </p>
+          <p>
+            Pending Visual Description:{' '}
+            {session?.pendingVisualDescription ? 'Yes' : 'No'}
+          </p>
+          <p>
+            Queued Next Turn:{' '}
+            {session?.hasQueuedPlayerMessage ? 'Yes' : 'No'}
           </p>
           <h4>Active Outdoor Visual Descriptions</h4>
           <div>
