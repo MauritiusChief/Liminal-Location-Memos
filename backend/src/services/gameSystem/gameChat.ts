@@ -81,12 +81,12 @@ type MovePlayerToolCall = {
 const MOVE_PLAYER_TOOL: GameStateToolDef = {
   name: 'move_player',
   description: [
-    '当用户明确或隐含地要求玩家移动时，综合判断玩家自身状态以及周遭的环境信息，然后使用此工具更改游戏角色的经纬度。',
+    '当用户明确或隐含地要求玩家移动或转向时，综合判断玩家自身状态以及周遭的环境信息，然后使用此工具更改游戏角色的朝向与经纬度。',
     '注意：即使用户要求移动了，也需要分析是否有阻碍移动的障碍、玩家状态是否足以支持此次移动等条件。如果分析表明这次移动没法完整执行，可以将移动的目的地修改在近处。',
     '（比如如果因存在障碍而无法移动，可以将目的地设置在障碍物面前）',
   ],
   arguments: {
-    bearingDegrees: { type: 'number', optional: false, description: '以正北为0度，顺时针增加。' },
+    bearingDegrees: { type: 'number', optional: false, description: '以正前方为0度，顺时针增加。' },
     distanceMeters: { type: 'number', optional: false, description: '移动距离，单位米。' },
     reason: { type: 'string', optional: true, description: '简短说明为何这样移动。' },
   },
@@ -437,13 +437,14 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
   const worldStatePrompt = await toWorldStatePrompt(state);
   const message = [
     '玩家发送的消息：',
-    `> ${latestPlayerMessage?.content ?? ''}`,
+    `> ${latestPlayerMessage?.content ?? ''}\n`,
     '近期对话历史：',
     messageHistory
       .slice(Math.max(0, messageHistory.length - 6), messageHistory.length - 1)
       .map((messageEntry) => {
         const hint = messageEntry.role === 'book' ? '**游戏输出**' : '**玩家输入**';
-        return `> ${hint}：${messageEntry.content}\n>`;
+        const contentLines = messageEntry.content.split('\n')
+        return `> ${hint}：\n${contentLines.map(line => `> ${line}`).join('\n')}\n>`;
       })
       .join('\n'),
     '---',
@@ -529,8 +530,9 @@ export function applyGameStateToolCalls(state: GameState, toolCalls: GameStateTo
     if (!Number.isFinite(bearingDegrees) || !Number.isFinite(distanceMeters) || distanceMeters < 0) {
       continue;
     }
+    const actualDirectionDegrees = state.playerOrientation + bearingDegrees;
 
-    const nextPosition = movePosition(state.playerPosition, bearingDegrees, distanceMeters);
+    const nextPosition = movePosition(state.playerPosition, actualDirectionDegrees, distanceMeters);
     if (!nextPosition) {
       continue;
     }
@@ -683,6 +685,10 @@ function findNearestOutdoorVisualDescription(
  *
  * 这里使用球面坐标公式，而不是把经纬度简单当作平面坐标，
  * 这样在地理位置计算上更稳妥。
+ * @param position
+ * @param bearingDegrees 以北面为 0 度、顺时针增加的绝对朝向
+ * @param distanceMeters
+ * @returns
  */
 function movePosition(
   position: Position,
