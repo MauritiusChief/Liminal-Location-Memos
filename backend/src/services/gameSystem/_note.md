@@ -25,8 +25,8 @@ Game State 术语：
       - （TODO）LLM 在概览 Book Message 时，认为某些事实性细节假如在只提供 OSM 数据的情况下无法复现。这时会以该细节所对应的建筑的中心坐标为基准记录
   - **Level Visual Description**
     - 内容与 Outdoor Visual Description 类似，但记录的 index 是某建筑某楼层某 Sector，且一次性涵盖整个 Sector
-    - Sector 是指按边长100m（也就是外接圆半径100m）的六边形网格进行遮罩后，切分出来之后吸收细微区域形成的小区域。如果建筑不大，一个 Level 就只会有 Sector
-    - 网格仅仅以该建筑所在面，不是全球统一网格。如果建筑面积达到阈值，优先以网格线经过建筑中心点的方式设置网格
+    - **Sector**：是指按边长100m（也就是外接圆半径100m）的六边形网格进行遮罩后，切分出来之后吸收细微区域形成的小区域。如果建筑不大，一个 Level 就只会有 Sector
+      - 网格仅仅以该建筑所在面，不是全球统一网格。如果建筑面积达到阈值，优先以网格线经过建筑中心点的方式设置网格
 
 （TODO）游戏建筑术语：
 - **Theme**：程序随机选择的，为该建筑或建筑某一部分添加效果的描述。比如某个民宅正在办派对，后续生成时就可能添加派对描述，甚至在建筑里生成更多派对用品与食物
@@ -39,9 +39,11 @@ Game State 术语：
   - **Suite Schema**
   - **Subroom Schema**
 - **Category**：建筑的大的类型，比如图书馆 Category，独栋房屋 Category
-- **Pattern**：预设的建筑里的主要功能房间或主要楼层，可以认为是 Building Schema 的前体。每个大类（Category）的建筑都有一套或几套 Pattern，比如图书馆大类包含藏书室、电脑房、讨论室等各种房间，以及楼层上的 Pattern 比如高层酒店大类有地面层、住房层等。
-  - **Pattern Distribution**：如果建筑本身是多体建筑，或者建筑因面积很大拆分为了多个 Sector，每个子建筑/Sector肯定不会包含 Pattern 中的全部功能。因此就需要这个 Pattern Distribution 指定各个子建筑/Sector中没有哪些功能（或者说，哪些功能在一个子建筑/Sector拥有之后便可服务整个建筑）
-- **Schema Trivial**：每个大类（Category）的建筑通用的零碎房间
+  - **Category Base Schema**：每个大类（Category）的建筑的 Schema 通用基板，不同的 Pattern 就是在这个基板上增加（主要）、合并或者减少形成多样化的 Schema
+  - **Category Schema**：只存在于 Schema 构建阶段的辅助 Schem，可以认为是 Building Schema 的前体。在 Category Base Schem 上应用 Pattern 而产生，包含全面的功能信息与各功能的楼层信息。
+- **Pattern**：预设的建筑里的主要功能房间或主要楼层。每个大类（Category）的建筑都有一套或几套 Pattern，比如图书馆大类包含藏书室、电脑房、讨论室等各种房间，以及楼层上的 Pattern 比如高层酒店大类有地面层、住房层等。
+  - **Pattern Distribution**：如果建筑本身是多体建筑，每个子建筑肯定不会包含 Pattern 中的全部功能。因此就需要这个 Pattern Distribution 指定各个子建筑中没有哪些功能（或者说，哪些功能在一个子建筑拥有之后便可服务整个建筑）
+- **Sector Distribution**：完成 Category Schem 之后，如果建筑/子建筑的楼层空间非常大，那么就要套用 Sector 分区规则切分。然后，对每个 Sector 套用类似的 Pattern Distribution 的分配（哪些功能在一个区域拥有之后便可服务整个楼层）
 
 ## 游戏流程
 
@@ -57,26 +59,31 @@ Game State 术语：
 
 ## 建筑生成逻辑
 
-TODO: Pattern Distribution 设计不合理，把分建筑的步骤和分完建筑分楼层的步骤搞混了，要区分开
-
 1. 用 OSM tags 以及建筑内包含的所有 POI 对建筑进行分类：
   - 分类结果不一定是单一类型，也可以是复合类型。比方说“图书馆 - 内含 咖啡厅”
   - 如果是非常标准的建筑，比如独栋民宅、独立加油站，可以直接*程序*给出分类结果
   - 如果缺少信息，则额外获取获取短距离范围内的 OSM Scene Prompt，以及此范围内已有的建筑蓝图，交给 *LLM* 进行分类
   - 如果是多体建筑，则所有建筑作为一个整体，再查看信息是否足够，然后走程序分类/LLM 分类的分支
-2. 根据分类结果，*程序*随机选择一套基础 Pattern，然后生成 Pattern Distribution
-  - 如果是非常标准的独栋建筑，比如独栋酒店、办公楼，不存在分配问题，可以直接下一步程序生成 Building Schema
-  - 如果是多体建筑，则需要让 *LLM* 把基础 Pattern 中的功能分配到多个建筑中（会提供各个建筑的 OSM tags 与所含 POI 作为参考）
-  - 如果是超大的楼层建筑，则需要按六边形网格切分 Sector，然后类似多体建筑那样用 *LLM* 把 Pattern 中的功能进行分配（会提供各个 Sector 所含的 POI 作为参考）
-3. Pattern 或 Pattern Distribution 便可以直接用程序生成 Building Schema 了：
-  - 添加随机的 Suite Schema，比如仅仅指定为公寓或酒店后，内部的套房
-  - 添加零碎 Room Schema，比如办公室、厕所、清洁室、储藏室等
+2. 根据分类结果，*程序*随机选择一套基础 Pattern
+3. 从 Pattern 视情况生成 Pattern Distribution
+  - 如果*程序*判断是非常标准的独栋建筑，比如独栋酒店、办公楼，不存在分配问题，可以直接下一步
+  - 如果是多体建筑，则需要让 *LLM* 把 Pattern 中的功能分配到多个建筑中（会提供各个建筑的 OSM tags 与所含 POI 作为参考）生成 Pattern Distribution
+4. 在 Category Base Schem 上应用 Pattern 或 Pattern Distribution，结合建筑楼层信息生成 Category Schema
+  - 如果是多层建筑，那么会读取 Category Schem 中每个功能所偏好的楼层（底层、顶层）和楼层分布频率（每一层都有、隔一层有一个），细化到每个楼层的程度
+5. 从 Category Schema 视情况生成 Sector Distribution
+  - 如果*程序*判断面积不大，则不需要切分为 Sector，直接下一步
+  - 面积较大的话则需要先按六边形网格切分 Sector，然后 *LLM* 把 Category Schema 中单一楼层的功能分配到多个 Sector 中（会提供各个 Sector 的方位、外部的附近道路或设施、所含的 POI 作为参考）
+6. 收尾工作
+  - 填补随机的 Suite Schema，比如仅仅指定为公寓或酒店后，内部的套房
   - 添加出入口和楼层间通道、多体建筑之间的通道
+
+
+  - 如果是超大的楼层建筑，则需要按六边形网格切分 Sector，然后类似多体建筑那样用 *LLM* 把 Pattern 中的功能进行分配（会提供各个 Sector 所含的 POI 作为参考）
 
 > 例子1：way/123
 > 1. 程序内判断：building=house, Scene Object 没有查找到周围的面积更小的矩形建筑或者停车场，分类为“带车库的独栋住宅”（Category: house_with_garage）
-> 2. 程序随机选择一个 Pattern，因为 way/123 面积较小，随机到了“单卧室”（Pattern: small: { bedroom: { desc: "卧室" } }）
+> 2. 程序随机选择一个 Pattern，因为 way/123 面积较小，随机到了“单卧室”
 > 3. 程序内判断：way/123 不是 relation 建筑，不存在 Pattern Distribution 问题，Pattern 内部所有功能房间全部给到 way/123
-> 4. 程序根据分类“带车库的独栋住宅”，按功能与条件添加所有缺失的房间的种类（添加 schema_trivial: {<车库>、<浴室+厕所>、<客厅>、<厨房+餐厅>、<洗衣间>}）（因 way/123 面积较小，浴室与厕所功能被触发随机合并了，厨房与餐厅也触发随机合并了，schema_trivial 里本来有的 <走廊> 直接被随机删除了）
-> 5. 程序内判断：way/123 没有多楼层，所有房间种类全部给到 1 楼
-> 6. 程序内判断：way/123 面积较小，1 楼的房间不用再按 Sector 细分
+> 4. 程序根据 Category “带车库的独栋住宅”，在其 Category Base Schema 基础上应用 Pattern “单卧室”，随机把餐厅、厨房、客厅合并了，固定把浴室和厕所合并了，生成了 Category Schema。
+> 5. 程序内判断：way/123 没有多楼层，Category Schema 内所有房间种类全部给到 1 楼，“每个楼层必有”的东西也只用设置 1 次
+> 6. 程序内判断：way/123 面积较小，1 楼的房间不用再按 Sector Distribution 细分
