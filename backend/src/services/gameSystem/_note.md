@@ -39,7 +39,7 @@ Game State 术语：
   - **Suite Schema**
   - **Subroom Schema**
 - **Category**：建筑的大的类型，比如图书馆 Category，独栋房屋 Category
-  - **Category Base Schema**：每个大类（Category）的建筑的 Schema 通用基板，不同的 Pattern 就是在这个基板上增加（主要）、合并或者减少形成多样化的 Schema
+  - **Category Base Schema**：每个大类（Category）的建筑的 Schema 通用基板，不同的 Pattern 就是在这个基板上增加房间种类，形成多样化的 Schema
   - **Category Schema**：只存在于 Schema 构建阶段的辅助 Schem，可以认为是 Building Schema 的前体。在 Category Base Schem 上应用 Pattern 而产生，包含全面的功能信息与各功能的楼层信息。
 - **Pattern**：预设的建筑里的主要功能房间或主要楼层。每个大类（Category）的建筑都有一套或几套 Pattern，比如图书馆大类包含藏书室、电脑房、讨论室等各种房间，以及楼层上的 Pattern 比如高层酒店大类有地面层、住房层等。
   - **Pattern Distribution**：如果建筑本身是多体建筑，每个子建筑肯定不会包含 Pattern 中的全部功能。因此就需要这个 Pattern Distribution 指定各个子建筑中没有哪些功能（或者说，哪些功能在一个子建筑拥有之后便可服务整个建筑）
@@ -74,16 +74,14 @@ Game State 术语：
   - 如果*程序*判断面积不大，则不需要切分为 Sector，直接下一步
   - 面积较大的话则需要先按六边形网格切分 Sector，然后 *LLM* 把 Category Schema 中单一楼层的功能分配到多个 Sector 中（会提供各个 Sector 的方位、外部的附近道路或设施、所含的 POI 作为参考）
 6. 收尾工作
+  - 根据楼层或者 Sector 面积填补各个房间的数量信息，或者根据房间的类型随机决定数量
   - 填补随机的 Suite Schema，比如仅仅指定为公寓或酒店后，内部的套房
   - 添加出入口和楼层间通道、多体建筑之间的通道
 
-
-  - 如果是超大的楼层建筑，则需要按六边形网格切分 Sector，然后类似多体建筑那样用 *LLM* 把 Pattern 中的功能进行分配（会提供各个 Sector 所含的 POI 作为参考）
-
 > 例子1：way/123
-> 1. 程序内判断：building=house, Scene Object 没有查找到周围的面积更小的矩形建筑或者停车场，分类为“带车库的独栋住宅”（Category: house_with_garage）
+> 1. 程序内判断：building=house, Scene Object 没有查找到周围的面积更小的矩形建筑或者停车场，分类为“住宅”（Category: house）
 > 2. 程序随机选择一个 Pattern，因为 way/123 面积较小，随机到了“单卧室”
 > 3. 程序内判断：way/123 不是 relation 建筑，不存在 Pattern Distribution 问题，Pattern 内部所有功能房间全部给到 way/123
-> 4. 程序根据 Category “带车库的独栋住宅”，在其 Category Base Schema 基础上应用 Pattern “单卧室”，随机把餐厅、厨房、客厅合并了，固定把浴室和厕所合并了，生成了 Category Schema。
+> 4. 程序根据 Category “带车库的独栋住宅”，在其 Category Base Schema 基础上应用 Pattern “单卧室”，生成了 Category Schema。
 > 5. 程序内判断：way/123 没有多楼层，Category Schema 内所有房间种类全部给到 1 楼，“每个楼层必有”的东西也只用设置 1 次
 > 6. 程序内判断：way/123 面积较小，1 楼的房间不用再按 Sector Distribution 细分
