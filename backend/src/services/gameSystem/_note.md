@@ -17,14 +17,15 @@
 
 Game State 术语：
 - **Visual Description**：用来记录某地范围内，确定性数据（比如 OSM）未呈现而让 LLM 自由发挥的地方。
-  - **Outdoor Visual Description**
+  - **Field Visual Description**
     - 内容为以列表形式记录某一经纬度为 index、半径300米范围内的 World State 数据（包括 OSM 和游戏内的物品、容器等数据）未呈现，但在过往 LLM 对话中提及的细节
-    - 处于玩家300米范围内的 Outdoor Visual Description 都会以附带极坐标方位的形式呈现给 LLM，作为事实来源
-    - 生成时有两种途径
-      - 玩家距离最近的 Outdoor Visual Description 超过300米了，以玩家所在坐标为基准记录
-      - （TODO）LLM 在概览 Book Message 时，认为某些事实性细节假如在只提供 OSM 数据的情况下无法复现。这时会以该细节所对应的建筑的中心坐标为基准记录
+    - 处于玩家300米范围内的 Field Visual Description 都会以附带极坐标方位的形式呈现给 LLM，作为事实来源
+    - 生成途径：玩家距离最近的 Field Visual Description 超过300米了，以玩家所在坐标为基准记录
+  - **Exterior Visual Description**
+    - 与 Field Visual Description 类似，内容为列表形式半径300米范围内 LLM 对话中与建筑相关的细节，此时 index 为建筑的id。
+    - 生成途径：LLM 在概览 Book Message 时，如果某些细节与建筑有关，就会以该细节所对应的建筑id为基准进行记录（需要 LLM 辨认属于哪个建筑）
   - **Level Visual Description**
-    - 内容与 Outdoor Visual Description 类似，但记录的 index 是某建筑某楼层某 Sector，且一次性涵盖整个 Sector
+    - 内容与 Field Visual Description 类似，但记录的 index 是某建筑某楼层某 Sector，且一次性涵盖整个 Sector
     - **Sector**：是指按边长100m（也就是外接圆半径100m）的六边形网格进行遮罩后，切分出来之后吸收细微区域形成的小区域。如果建筑不大，一个 Level 就只会有 Sector
       - 网格仅仅以该建筑所在面，不是全球统一网格。如果建筑面积达到阈值，优先以网格线经过建筑中心点的方式设置网格
 
@@ -79,9 +80,9 @@ Game State 术语：
   - 添加出入口和楼层间通道、多体建筑之间的通道
 
 > 例子1：way/123
-> 1. 程序内判断：building=house, Scene Object 没有查找到周围的面积更小的矩形建筑或者停车场，分类为“住宅”（Category: house）
+> 1. 程序内判断：building=house, Scene Object 没有查找到停车场，随机分类为了“住宅 - 内含 车库”（Category: house & garage）
 > 2. 程序随机选择一个 Pattern，因为 way/123 面积较小，随机到了“单卧室”
 > 3. 程序内判断：way/123 不是 relation 建筑，不存在 Pattern Distribution 问题，Pattern 内部所有功能房间全部给到 way/123
-> 4. 程序根据 Category “带车库的独栋住宅”，在其 Category Base Schema 基础上应用 Pattern “单卧室”，生成了 Category Schema。
+> 4. 程序根据 Category “住宅 - 内含 车库”，在其 Category Base Schema 基础上（实际上是空的）应用 Pattern “单卧室”，生成了 Category Schema。
 > 5. 程序内判断：way/123 没有多楼层，Category Schema 内所有房间种类全部给到 1 楼，“每个楼层必有”的东西也只用设置 1 次
 > 6. 程序内判断：way/123 面积较小，1 楼的房间不用再按 Sector Distribution 细分

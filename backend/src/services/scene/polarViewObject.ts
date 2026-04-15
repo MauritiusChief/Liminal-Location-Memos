@@ -33,7 +33,7 @@ export interface SampledPolarViewFeature {
   geometryType: string;
   osmType?: string;
   // 该地物所有的坐标点
-  // 如果是 line，这个也 sampleCoordinates 也负责计算线类专属属性
+  // 如果是 line，这个 sampleCoordinates 也负责计算线类专属属性
   sampleCoordinates: [number, number][];
   // 该地物的中心坐标点
   centerCoordinate: [number, number] | null;
@@ -59,12 +59,13 @@ export interface PolarViewFeature {
   category: "building" | "area" | "poi" | "line";
   geometryType: string;
   osmType?: string;
-  featureDetail: FeatureDetail;
+  featureDetail: FeatureDetail; // OSM tags 数据在此存储
+  // 地物精炼的点信息
   centerPoint: PolarCoordinateSample;
   widestSpan: PolarAngularSpan;
   nearestPoint: PolarCoordinateSample;
   farthestPoint: PolarCoordinateSample;
-  // 线类地物
+  // 线类地物精炼的点信息
   linePoints?: PolarCoordinateSample[];
   linePath?: PolarCoordinateSample[];
   orientationDegrees?: number;

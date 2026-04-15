@@ -25,7 +25,7 @@ interface DbBuildingDetailTableRow extends DbFeatureDetailTableRow {
 }
 
 /**
- * 以 featureId 为指数记录地物细节数据，不包含几何形状数据（用与描绘 Scene、生成 Building Schema 等）
+ * 以 featureId 为 index 记录地物细节数据，不包含几何形状数据（用与描绘 Scene、生成 Building Schema 等）
  */
 export interface FeatureDetail {
   featureId: string;
