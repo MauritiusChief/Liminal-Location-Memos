@@ -1,4 +1,22 @@
 
+import { query } from "@/db/client.js";
+import { loadServiceSql } from "@/db/sqlLoader.js";
+
+/**
+ * 与 SQL 查询结果表一致的扁平类型
+ */
+interface DbStandaloneResidentialBuildingRow {
+  area_sqm: number | string | null;
+  neighbor_sample_count: number | string | null;
+  neighbor_average_area_sqm: number | string | null;
+  is_simple_rectangle: boolean | null;
+}
+
+export interface StandaloneResidentialCandidate {
+  featureId: string;
+  category: "building";
+  tags: Record<string, string>;
+}
 
 //#region 常量
 
@@ -60,6 +78,11 @@ const RESIDENTIAL_CATEGORIES = {
   tool_shed: {desc: "工具屋", base_schema: {self: true}},
 }
 
+const STANDALONE_BUILDING_NEIGHBOR_RADIUS_METERS = 60
+const STANDALONE_BUILDING_MAX_ACCESSORY_AREA_SQM = 45
+const STANDALONE_BUILDING_RELATIVE_AREA_THRESHOLD = 0.7
+const STANDALONE_BUILDING_MIN_NEIGHBOR_SAMPLE_COUNT = 3
+
 
 //#region 主函数
 
@@ -75,6 +98,99 @@ const RESIDENTIAL_CATEGORIES = {
  * - 带车库住宅
  * - 住宅（车库靠街边停车）
  */
+const classifyStandaloneResidentialBuildingSqlPromise = loadServiceSql(
+  "gameSystem/sql/classifyStandaloneResidentialBuilding.sql",
+);
+
+/**
+ * 判断一个已确定只可能是“独栋住宅”或“独立附属建筑（独立车库/工具屋）”的建筑，
+ * 是否应按独栋住宅处理。
+ *
+ * 输入前提：
+ * - 调用方必须已经把候选范围收窄到“独栋住宅”与“独立附属建筑”二选一
+ * - `candidate.featureId` 必须使用现有 `osm_type/osm_id` 形式
+ *
+ * 输出语义：
+ * - 返回 `true`：按独栋住宅处理
+ * - 返回 `false`：更像独立附属建筑（独立车库/工具屋）
+ *
+ * 保守策略：
+ * - 当目标建筑不存在、邻域样本不足、或关键几何证据不足时，一律按住宅处理
+ *
+ * @param candidate 已缩小到“独栋住宅/独立附属建筑”范围内的建筑候选
+ * @returns 是否应按独栋住宅处理
+ */
+export async function isStandaloneResidentialBuilding(
+  candidate: StandaloneResidentialCandidate,
+): Promise<boolean> {
+  const featureRef = parseBuildingFeatureId(candidate.featureId);
+  if (!featureRef) {
+    return true;
+  }
+
+  const sql = await classifyStandaloneResidentialBuildingSqlPromise;
+  const result = await query<DbStandaloneResidentialBuildingRow>(
+    sql,
+    [featureRef.osmType, featureRef.osmId, STANDALONE_BUILDING_NEIGHBOR_RADIUS_METERS],
+  );
+  const row = result.rows[0];
+
+  if (!row) {
+    return true;
+  }
+
+  const areaSqm = toFiniteNumber(row.area_sqm);
+  const neighborSampleCount = toFiniteNumber(row.neighbor_sample_count);
+  const neighborAverageAreaSqm = toFiniteNumber(row.neighbor_average_area_sqm);
+
+  if (
+    areaSqm === null
+    || neighborSampleCount === null
+    || neighborSampleCount < STANDALONE_BUILDING_MIN_NEIGHBOR_SAMPLE_COUNT
+    || neighborAverageAreaSqm === null
+  ) {
+    return true;
+  }
+
+  if (row.is_simple_rectangle !== true) {
+    return true;
+  }
+
+  if (areaSqm > STANDALONE_BUILDING_MAX_ACCESSORY_AREA_SQM) {
+    return true;
+  }
+
+  if (areaSqm >= neighborAverageAreaSqm * STANDALONE_BUILDING_RELATIVE_AREA_THRESHOLD) {
+    return true;
+  }
+
+  return false;
+}
 
 
 // 根据详细的 osm tags 进行分类
+
+//#region 帮助函数
+
+function parseBuildingFeatureId(featureId: string): { osmType: string; osmId: number } | null {
+  const [osmType, osmIdText] = featureId.split("/");
+  if (!osmType || !osmIdText) {
+    return null;
+  }
+
+  const osmId = Number.parseInt(osmIdText, 10);
+  if (!Number.isFinite(osmId)) {
+    return null;
+  }
+
+  return { osmType, osmId };
+}
+
+function toFiniteNumber(value: number | string | null): number | null {
+  if (value === null || typeof value === "undefined") {
+    return null;
+  }
+
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
