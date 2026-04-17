@@ -93,6 +93,11 @@ export function buildLeveledPolarView(request: RangedPosition, polarViewFeatures
     const distanceMeters = polarViewFeature.nearestPoint.distanceMeters
     const levelMarker = typeof distanceMeters === "number" ? classifyPolarLevel(distanceMeters) : null;
     const layerMarker = typeof distanceMeters === "number" ? classifyPolarLevelLayer(distanceMeters) : null;
+    const crossesMicroGridBoundary = doesFeatureCrossMicroGridBoundary(polarViewFeature);
+
+    if (crossesMicroGridBoundary) {
+      leveled.levels[0]!.features.push(polarViewFeature);
+    }
 
     if (!levelMarker) continue
 
@@ -383,6 +388,10 @@ function classifyPolarLevelLayer(distanceMeters: number): 'a' | 'b' | null {
     (definition) => distanceMeters > definition.minExclusive && distanceMeters <= definition.maxInclusive,
   );
   return matchedLayer ? matchedLayer.layer : null;
+}
+
+function doesFeatureCrossMicroGridBoundary(feature: PolarViewFeature): boolean {
+  return feature.nearestPoint.distanceMeters <= 30 && feature.farthestPoint.distanceMeters > 30;
 }
 /**
  * 解析 OSM height 标签并转换为米。
