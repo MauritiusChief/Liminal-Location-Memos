@@ -557,7 +557,7 @@ function collectBuildingOutlineReferences(
  * @param references 原始 outline 引用数组
  * @returns 去重后的 outline 引用
  */
-function dedupeOutlineReferences(references: OutlineReference[]): OutlineReference[] {
+export function dedupeOutlineReferences(references: OutlineReference[]): OutlineReference[] {
   const seen = new Set<string>();
   const deduped: OutlineReference[] = [];
 

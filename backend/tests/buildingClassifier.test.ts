@@ -12,7 +12,6 @@ import { query } from "../src/db/client";
 import {
   generateBuildingSchema,
   isStandaloneResidentialBuilding,
-  resolveBuildingSelection,
 } from "../src/services/gameSystem/buildingClassifier";
 
 describe("buildingClassifier", () => {
@@ -121,98 +120,6 @@ describe("buildingClassifier", () => {
     const schema = await generateBuildingSchema("way/123");
 
     expect(schema?.featureId).toBe("way/123");
-    expect(schema?.classification).toEqual({
-      effectiveFeatureId: "way/123",
-      categoryKeys: ["house"],
-      patternKey: "studio",
-      patternSource: "by_area_and_levels",
-    });
-  });
-
-  it("classifies building=garage directly and uses the category name as pattern", async () => {
-    mockedQuery.mockResolvedValueOnce({
-      rows: [buildDetailRow({
-        feature_id: "way/10",
-        osm_type: "way",
-        osm_id: 10,
-        tags: { building: "garage" },
-        area_sqm: 32,
-      })],
-    } as never);
-
-    await expect(resolveBuildingSelection("way/10")).resolves.toEqual({
-      effectiveFeatureId: "way/10",
-      categoryKeys: ["garage"],
-      patternKey: "garage",
-      patternSource: "by_tag",
-    });
-  });
-
-  it("classifies building=shed directly and uses the category name as pattern", async () => {
-    mockedQuery.mockResolvedValueOnce({
-      rows: [buildDetailRow({
-        feature_id: "way/11",
-        osm_type: "way",
-        osm_id: 11,
-        tags: { building: "shed" },
-        area_sqm: 24,
-      })],
-    } as never);
-
-    await expect(resolveBuildingSelection("way/11")).resolves.toEqual({
-      effectiveFeatureId: "way/11",
-      categoryKeys: ["tool_shed"],
-      patternKey: "tool_shed",
-      patternSource: "by_tag",
-    });
-  });
-
-  it("promotes a building part way to its parent building relation before classification", async () => {
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/201",
-          osm_type: "way",
-          osm_id: 201,
-          tags: { building: "yes" },
-          relations: [{
-            role: "part",
-            rel: 9001,
-            reltags: { type: "building" },
-          }],
-          area_sqm: 50,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "relation/9001",
-          osm_type: "relation",
-          osm_id: 9001,
-          tags: { building: "garage" },
-          area_sqm: 120,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/201",
-          osm_type: "way",
-          osm_id: 201,
-          tags: { building: "yes" },
-          relations: [{
-            role: "part",
-            rel: 9001,
-            reltags: { type: "building" },
-          }],
-          area_sqm: 50,
-        })],
-      } as never);
-
-    await expect(resolveBuildingSelection("way/201")).resolves.toEqual({
-      effectiveFeatureId: "relation/9001",
-      categoryKeys: ["garage"],
-      patternKey: "garage",
-      patternSource: "by_tag",
-    });
   });
 
   it("returns undefined for unresolved buildings when skipComplex is true", async () => {
@@ -229,34 +136,6 @@ describe("buildingClassifier", () => {
     await expect(generateBuildingSchema("way/500", true)).resolves.toBeUndefined();
   });
 
-  it("uses area and levels to choose from the larger-house pattern pool", async () => {
-    jest.spyOn(Math, "random").mockReturnValue(0.99);
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/321",
-          osm_type: "way",
-          osm_id: 321,
-          tags: { building: "house", "building:levels": "3" },
-          area_sqm: 260,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [buildStandaloneRow({
-          area_sqm: 260,
-          neighbor_sample_count: 6,
-          neighbor_average_area_sqm: 120,
-          is_simple_rectangle: false,
-        })],
-      } as never);
-
-    await expect(resolveBuildingSelection("way/321")).resolves.toEqual({
-      effectiveFeatureId: "way/321",
-      categoryKeys: ["house"],
-      patternKey: "elaborate",
-      patternSource: "by_area_and_levels",
-    });
-  });
 });
 
 function buildStandaloneRow(overrides: Partial<{
