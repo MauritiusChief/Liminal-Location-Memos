@@ -178,10 +178,11 @@ export async function generateBuildingSchema(
   }
 
   // 看看能不能直接分类出来
-  const directCategory = await resolveDirectCategory(candidate);
+  const directCategory = await resolveDirectCategory(candidate); // TODO 当前只支持住宅
   if (directCategory) {
+    console.log(featureId);
     console.log(directCategory);
-    console.log(selectResidentialPatternKey(candidate, directCategory)); // TODO 当前只支持
+    console.log(selectResidentialPatternKey(candidate, directCategory)); // TODO 当前只支持住宅
     return undefined
   }
 
@@ -199,9 +200,10 @@ const fetchBuildingFeatureDetailByIdSqlPromise = loadServiceSql("gameSystem/sql/
 const fetchBuildingRelationMemberDetailsSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingRelationMemberDetails.sql");
 
 /**
- * 把任意传入的 building feature 收敛为后续分类所用的“有效候选”。
+ * TODO 候选中填入当前建筑所在的 area
+ * 把任意传入的 building feature id 填充为后续分类所用的“有效候选”。
  *
- * 若传入的是 building relation 的 part way，则自动提升到 relation 级建筑，
+ * 若传入的是 building relation 的一部分，则自动提升到 relation 级建筑，
  * 并把各个 member 建筑一并取回，供后续补足 tags / contained POI / 层数推断。
  *
  * @param featureId 原始输入的 building feature id
@@ -217,7 +219,7 @@ async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandid
     return relation.reltags.type === "building";
   });
 
-  // 只有 part way 需要自动提升到 relation；直接传 relation 本体则维持原样。
+  // 只有多体建筑的子建筑需要自动提升到 relation；直接传 relation 本体则维持原样。
   const shouldPromoteToRelation = feature.detail.osmType === "way" && relationReference;
   if (!shouldPromoteToRelation) {
     return toResolvedCandidate("single", feature.detail, undefined, feature.areaSqm);

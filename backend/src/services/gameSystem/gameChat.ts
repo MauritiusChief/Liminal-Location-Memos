@@ -8,7 +8,7 @@ import {
   normalizeLongitude,
   radiansToDegrees,
 } from '@/services/geometry.js';
-import { buildSceneFromRequest } from '../scene/sceneObject.js';
+import { buildSceneFromRequest, SceneObject } from '../scene/sceneObject.js';
 import { buildScenePrompt } from '../scene/scenePrompt.js';
 import {
   BUILD_GAME_STATE_MANAGER_SYSTEM,
@@ -36,6 +36,7 @@ import {
   updateRuntimeSession,
 } from './gameSessionStore.js';
 import { applyMovePlayerTool } from './toolMovePlayer.js';
+import { generateBuildingSchema } from './buildingClassifier.js';
 
 interface GameStateToolCall {
   name: string;
@@ -320,7 +321,9 @@ async function streamInitialBookMessage(
 ): Promise<string> {
   console.log(`[${new Date().toISOString()}] initialBookMessage() 触发`);
 
-  const worldStatePrompt = await toWorldStatePrompt(state, INITIAL_SCENE_RADIUS_METERS);
+  const { lat, lon } = state.playerPosition;
+  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: INITIAL_SCENE_RADIUS_METERS }, state.playerOrientation);
+  const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
   // TODO 获取 sceneObject 时，顺带把可自动生成的 Building Schema 也生成了；如果太复杂则留着，等玩家进入再去生成
   await writeGameDebugRequest({
     mode: 'user-message',
@@ -377,8 +380,17 @@ async function streamRegularBookMessage(
 ): Promise<string> {
   console.log(`[${new Date().toISOString()}] generateBookMessage() 触发`);
 
-  const worldStatePrompt = await toWorldStatePrompt(state);
-  // TODO 获取 sceneObject 时，顺带把可自动生成的 Building Schema 也生成了；如果太复杂则留着，等玩家进入再去生成
+  const { lat, lon } = state.playerPosition;
+  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: WORLD_STATE_RADIUS_METERS}, state.playerOrientation);
+  const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
+  // TODO 自动生成可生成的 Building Schema（当前仅完成 Category 和 Pattern 打印）
+  const {microGrid, polarView} = sceneObject
+  const featureIds = [
+    ...microGrid.cells.flatMap(cell => cell).flatMap(cell => cell.sourceFeatureIds),
+    ...(polarView?.levels.flatMap( l => l.clusters.flatMap( c => c.features.flatMap( f => f.featureId))) ?? [])
+  ]
+  featureIds.forEach( id => generateBuildingSchema(id)) // TODO 当前仅打印
+  // 组装消息历史
   const messageHistory = state.messageHistory.slice(Math.max(0, state.messageHistory.length - 12));
   await writeGameDebugRequest({
     mode: 'full-messages',
@@ -438,7 +450,11 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
   const systemPrompt = BUILD_GAME_STATE_MANAGER_SYSTEM(toolDefs);
   const messageHistory = state.messageHistory;
   const latestPlayerMessage = messageHistory[messageHistory.length - 1];
-  const worldStatePrompt = await toWorldStatePrompt(state);
+  // 组装 world state 提示词
+  const { lat, lon } = state.playerPosition;
+  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: WORLD_STATE_RADIUS_METERS}, state.playerOrientation);
+  const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
+  // 组装背景消息提示词
   const message = [
     '玩家发送的消息：',
     `> ${latestPlayerMessage?.content ?? ''}\n`,
@@ -498,13 +514,11 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
  *
  * TODO 添加更多信息，比如 Building Schema 乃至天气、物品、玩家状态等信息
  * @param state
- * @param radius 用于 Scene Object 的半径
+ * @param scene 已按照合理半径获取的 Scene Object
  * @returns TODO 目前仅包含 scenePrompt 和 VisualDescription 的提示词
  */
-async function toWorldStatePrompt(state: GameState, radius: number = WORLD_STATE_RADIUS_METERS): Promise<string> {
-  const { lat, lon } = state.playerPosition;
-  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: radius }, state.playerOrientation);
-  const scenePrompt = buildScenePrompt(sceneObject, state.playerOrientation);
+async function toWorldStatePrompt(state: GameState, scene: SceneObject): Promise<string> {
+  const scenePrompt = buildScenePrompt(scene, state.playerOrientation);
   const outdoorVisualDescriptions = Object.entries(state.outdoorVisualDescriptions)
     .filter(([id]) => state.activeOutdoorVisualDescriptions.includes(id))
     .map(([, record]) => record.content)
