@@ -16,6 +16,8 @@ SELECT
   tb.osm_type,
   tb.osm_id,
   GeometryType(tb.geom) AS geometry_type,
+  ST_X(ST_Centroid(tb.geom)) AS center_lon,
+  ST_Y(ST_Centroid(tb.geom)) AS center_lat,
   jsonb_strip_nulls(
     jsonb_build_object(
       'name', tb.name,

@@ -20,6 +20,7 @@ import { buildScenePrompt } from '@/services/scene/scenePrompt.js';
 import { getRuntimeSession, toClientGameSessionSnapshot } from '@/services/gameSystem/gameSessionStore.js';
 import { streamGameStart, streamGameTurn, type GameStreamEvent } from '@/services/gameSystem/gameChat.js';
 import type { Response } from 'express';
+import { generateBuildingSchema } from '@/services/gameSystem/buildingClassifier.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -457,6 +458,13 @@ apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
     const playerOrientation = orientationParsed.value;
     // console.log(rangedPosition);
     const sceneObject = await buildSceneFromRequest(rangedPosition, playerOrientation)
+    // TODO 测试分类函数
+    const {microGrid, polarView} = sceneObject
+    const featureIds = [
+      ...microGrid.cells.flatMap(cell => cell).flatMap(cell => cell.sourceFeatureIds),
+      ...(polarView?.levels.flatMap( l => l.clusters.flatMap( c => c.features.flatMap( f => f.featureId))) ?? [])
+    ]
+    featureIds.forEach( id => generateBuildingSchema(id, {})) // TODO 当前仅打印
     const scenePrompt = buildScenePrompt(sceneObject, playerOrientation)
     response.json({
       radius,

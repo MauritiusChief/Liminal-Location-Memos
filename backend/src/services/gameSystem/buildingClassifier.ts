@@ -2,6 +2,7 @@ import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { FeatureDetail } from "@/services/featureDetail.js";
 import { ContainedPoiReference, dedupeOutlineReferences, OutlineReference, RelationReference } from "@/services/osmNormalization/osmNormalizer.js";
+import { distanceToPosition } from "@/services/geometry.js";
 import { Position } from "./gameSessionStore.js";
 
 /**
@@ -26,10 +27,22 @@ interface DbBuildingDetailRow {
   tainted: boolean;
   contained_pois: ContainedPoiReference[];
   area_sqm: number | string | null;
+  center_lon: number | string;
+  center_lat: number | string;
+}
+
+interface DbRoadKindsRow {
+  road_kinds: string[] | null;
+}
+
+interface DbCoveringAreasRow {
+  covering_areas: string[] | null;
 }
 
 export interface BuildingSchema {
   featureId: string;
+  category: string;
+  centerPosition: Position;
   theme: string;
   levels: Record<string, LevelSchema>; // key 为楼层种类名
 }
@@ -82,6 +95,7 @@ interface BuildingCandidate {
   detail: FeatureDetail;
   memberDetails?: FeatureDetail[];
   areaSqm: number | null;
+  centerPosition: Position;
   buildingLevels: number | null;
   heightMeters: number | null;
   buildingValue: string | null;
@@ -158,17 +172,37 @@ const EXPLICIT_HOUSE_BUILDING_VALUES = new Set(["house", "detached", "residentia
 const EXPLICIT_GARAGE_BUILDING_VALUES = new Set(["garage", "garages", "carport"]);
 const EXPLICIT_TOOL_SHED_BUILDING_VALUES = new Set(["shed"]);
 
+const RESIDENTIAL_DISTRICT_SCHEMA_RADIUS_METERS = 120;
+const RESIDENTIAL_DISTRICT_ROAD_RADIUS_METERS = 90;
+const RESIDENTIAL_DISTRICT_AREA_WEIGHTS: Record<string, { residential: number; nonResidential: number }> = {
+  "landuse:residential": { residential: 6, nonResidential: 0 },
+  "landuse:commercial": { residential: 0, nonResidential: 5 },
+  "landuse:industrial": { residential: 0, nonResidential: 6 },
+  "amenity:school": { residential: 0, nonResidential: 4 },
+  "amenity:university": { residential: 0, nonResidential: 5 },
+};
+const RESIDENTIAL_DISTRICT_ROAD_WEIGHTS: Record<string, { residential: number; nonResidential: number }> = {
+  "highway:residential": { residential: 3, nonResidential: 0 },
+  "highway:service": { residential: 1, nonResidential: 0 },
+  "highway:primary": { residential: 0, nonResidential: 3 },
+  "highway:trunk": { residential: 0, nonResidential: 4 },
+  "highway:motorway": { residential: 0, nonResidential: 5 },
+};
+const RESIDENTIAL_DISTRICT_SCHEMA_HOUSE_WEIGHT = 4;
+
 //#region 出口函数
 
 /**
  * 输入 featureId, 自行从数据库获取相关数据后进行分类等操作，返回现成的 Building Schema
  * TODO: 添加最终 Building Schema 的组装逻辑。目前只做到 category/pattern 选择。
  * @param featureId 支持传入单体 building 或 relation/part
+ * @param existingSchemas 作为参考的来自 Game State 的 Building Schema
  * @param skipComplex 是否跳过太复杂需要 LLM 参与的步骤
  * @returns 现成的 Building Schema，或者表示被跳过的 undefined
  */
 export async function generateBuildingSchema(
   featureId: string,
+  existingSchemas: Record<string, BuildingSchema>,
   skipComplex: boolean = true
 ): Promise<BuildingSchema | undefined> {
   // 先找到候选建筑
@@ -178,12 +212,14 @@ export async function generateBuildingSchema(
   }
 
   // 看看能不能直接分类出来
-  const directCategory = await resolveDirectCategory(candidate); // TODO 当前只支持住宅
+  const directCategory = await resolveDirectCategory(candidate, existingSchemas); // TODO 当前只支持住宅
   if (directCategory) {
-    console.log(featureId);
-    console.log(directCategory);
-    console.log(selectResidentialPatternKey(candidate, directCategory)); // TODO 当前只支持住宅
-    return undefined
+    return buildBuildingSchema(
+      candidate.detail.featureId,
+      directCategory,
+      candidate.centerPosition,
+      selectResidentialPatternKey(candidate, directCategory),
+    );
   }
 
   if (skipComplex) {
@@ -198,6 +234,8 @@ export async function generateBuildingSchema(
 const classifyStandaloneResidentialBuildingSqlPromise = loadServiceSql("gameSystem/sql/classifyStandaloneResidentialBuilding.sql");
 const fetchBuildingFeatureDetailByIdSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingFeatureDetailById.sql");
 const fetchBuildingRelationMemberDetailsSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingRelationMemberDetails.sql");
+const fetchBuildingRoadKindsSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingRoadKinds.sql");
+const fetchBuildingCoveringAreasSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingCoveringAreas.sql");
 
 /**
  * TODO 候选中填入当前建筑所在的 area
@@ -222,7 +260,7 @@ async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandid
   // 只有多体建筑的子建筑需要自动提升到 relation；直接传 relation 本体则维持原样。
   const shouldPromoteToRelation = feature.detail.osmType === "way" && relationReference;
   if (!shouldPromoteToRelation) {
-    return toResolvedCandidate("single", feature.detail, undefined, feature.areaSqm);
+    return toResolvedCandidate("single", feature.detail, undefined, feature.areaSqm, feature.centerPosition);
   }
 
   const relationFeatureId = `relation/${relationReference.rel}`;
@@ -230,15 +268,24 @@ async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandid
   const relationMemberSnapshots = await fetchBuildingRelationMemberSnapshots(relationReference.rel);
 
   if (!relationSnapshot && relationMemberSnapshots.length === 0) {
-    return toResolvedCandidate("single", feature.detail, undefined, feature.areaSqm);
+    return toResolvedCandidate("single", feature.detail, undefined, feature.areaSqm, feature.centerPosition);
   }
 
   // 寻找 relation 并获取其信息的分支
   const memberDetails = relationMemberSnapshots.map((snapshot) => snapshot.detail);
   const relationDetail = relationSnapshot?.detail ?? synthesizeRelationDetail(relationFeatureId, memberDetails);
   const relationAreaSqm = relationSnapshot?.areaSqm ?? sumAreas(relationMemberSnapshots.map((snapshot) => snapshot.areaSqm));
+  const relationCenterPosition = relationSnapshot?.centerPosition ?? computeMeanCenterPosition(
+    relationMemberSnapshots.map((snapshot) => snapshot.centerPosition),
+  );
 
-  return toResolvedCandidate("building_relation", relationDetail, memberDetails, relationAreaSqm);
+  return toResolvedCandidate(
+    "building_relation",
+    relationDetail,
+    memberDetails,
+    relationAreaSqm,
+    relationCenterPosition || feature.centerPosition,
+  );
 }
 
 /**
@@ -250,9 +297,13 @@ async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandid
  * - 对住宅候选继续调用“独栋住宅 vs 独立附属建筑”专门规则做二次收窄。
  *
  * @param candidate 已标准化的建筑候选
+ * @param existingSchemas 作为参考的来自 Game State 的 Building Schema
  * @returns 已支持的 category；若当前阶段仍无法稳定判断则返回 null // TODO 当前只支持住宅
  */
-async function resolveDirectCategory(candidate: BuildingCandidate): Promise<ResidentialCategoryKey | null> {
+async function resolveDirectCategory(
+  candidate: BuildingCandidate,
+  existingSchemas: Record<string, BuildingSchema>
+): Promise<ResidentialCategoryKey | null> {
   if (isExplicitGarage(candidate.detail.tags) || hasContainedPoiTag(candidate, "amenity", ["parking"])) {
     return "garage";
   }
@@ -267,26 +318,17 @@ async function resolveDirectCategory(candidate: BuildingCandidate): Promise<Resi
       return "house";
     }
 
-    if (isExplicitGarage(candidate.detail.tags)) {
-      return "garage";
-    }
-
-    if (isExplicitToolShed(candidate.detail.tags)) {
-      return "tool_shed";
-    }
-
-    return null;
+    return "garage";
   }
 
-  return null;
+  return resolveResidentialDistrictCategory(candidate, existingSchemas);
 }
 
 /**
- * 判断一个已确定只可能是“独栋住宅”或“独立附属建筑（独立车库/工具屋）”的建筑，
- * 是否应按独栋住宅处理。
+ * 判断一个建筑是“独栋住宅”或“独立附属建筑（独立车库/工具屋）”。
  *
  * 输入前提：
- * - 调用方必须已经把候选范围收窄到“独栋住宅”与“独立附属建筑”二选一
+ * - 默认调用方已经把候选范围收窄到“独栋住宅”与“独立附属建筑”二选一
  *
  * 输出语义：
  * - 返回 `true`：独栋住宅
@@ -388,6 +430,33 @@ function determineResidentialPatternPool(candidate: BuildingCandidate): string[]
   return ["standard", "duplex"];
 }
 
+/**
+ * 在没有 explicit building tag 的情况下，
+ * 结合覆盖区域、周边道路和已有 schema 判断当前建筑是否位于独栋住宅区。
+ */
+async function resolveResidentialDistrictCategory(
+  candidate: BuildingCandidate,
+  existingSchemas: Record<string, BuildingSchema>,
+): Promise<ResidentialCategoryKey | null> {
+  const [coveringAreas, roadKinds] = await Promise.all([
+    fetchBuildingCoveringAreas(candidate.detail.featureId),
+    fetchBuildingRoadKinds(candidate.detail.featureId),
+  ]);
+
+  const weights = computeResidentialDistrictWeights(candidate, existingSchemas, coveringAreas, roadKinds);
+  if (weights.residential <= 0 && weights.nonResidential <= 0) {
+    return null;
+  }
+
+  const isResidentialDistrict = weightedBoolean(weights.residential, weights.nonResidential);
+  if (!isResidentialDistrict) {
+    return null;
+  }
+
+  const isStandaloneResidential = await isStandaloneResidentialBuilding(candidate.detail.featureId);
+  return isStandaloneResidential ? "house" : "garage";
+}
+
 //#region 共用逻辑函数
 
 /**
@@ -401,7 +470,7 @@ function determineResidentialPatternPool(candidate: BuildingCandidate): string[]
  */
 async function fetchBuildingFeatureDetailById(
   featureId: string,
-): Promise<{ detail: FeatureDetail; areaSqm: number | null } | null> {
+): Promise<{ detail: FeatureDetail; areaSqm: number | null; centerPosition: Position } | null> {
   const featureRef = parseBuildingFeatureId(featureId);
   const sql = await fetchBuildingFeatureDetailByIdSqlPromise;
   const result = await query<DbBuildingDetailRow>(sql, [featureRef.osmType, featureRef.osmId]);
@@ -414,6 +483,10 @@ async function fetchBuildingFeatureDetailById(
   return {
     detail: mapBuildingDetailRowToFeatureDetail(row),
     areaSqm: toFiniteNumber(row.area_sqm),
+    centerPosition: {
+      lat: Number(row.center_lat),
+      lon: Number(row.center_lon),
+    },
   };
 }
 
@@ -428,14 +501,38 @@ async function fetchBuildingFeatureDetailById(
  */
 async function fetchBuildingRelationMemberSnapshots(
   relationOsmId: number,
-): Promise<Array<{ detail: FeatureDetail; areaSqm: number | null }>> {
+): Promise<Array<{ detail: FeatureDetail; areaSqm: number | null; centerPosition: Position }>> {
   const sql = await fetchBuildingRelationMemberDetailsSqlPromise;
   const result = await query<DbBuildingDetailRow>(sql, [relationOsmId]);
 
   return result.rows.map((row) => ({
     detail: mapBuildingDetailRowToFeatureDetail(row),
     areaSqm: toFiniteNumber(row.area_sqm),
+    centerPosition: {
+      lat: Number(row.center_lat),
+      lon: Number(row.center_lon),
+    },
   }));
+}
+
+async function fetchBuildingRoadKinds(featureId: string): Promise<string[]> {
+  const featureRef = parseBuildingFeatureId(featureId);
+  const sql = await fetchBuildingRoadKindsSqlPromise;
+  const result = await query<DbRoadKindsRow>(sql, [
+    featureRef.osmType,
+    featureRef.osmId,
+    RESIDENTIAL_DISTRICT_ROAD_RADIUS_METERS,
+  ]);
+
+  return result.rows[0]?.road_kinds || [];
+}
+
+async function fetchBuildingCoveringAreas(featureId: string): Promise<string[]> {
+  const featureRef = parseBuildingFeatureId(featureId);
+  const sql = await fetchBuildingCoveringAreasSqlPromise;
+  const result = await query<DbCoveringAreasRow>(sql, [featureRef.osmType, featureRef.osmId]);
+
+  return result.rows[0]?.covering_areas || [];
 }
 
 /**
@@ -510,6 +607,7 @@ function toResolvedCandidate(
   detail: FeatureDetail,
   memberDetails: FeatureDetail[] | undefined,
   areaSqm: number | null,
+  centerPosition: Position,
 ): BuildingCandidate {
   const buildingLevels = parseBuildingLevels(detail.tags) ?? inferLevelsFromMembers(memberDetails);
   const heightMeters = parseHeightMeters(detail.tags.height) ?? inferHeightFromMembers(memberDetails);
@@ -519,9 +617,26 @@ function toResolvedCandidate(
     detail,
     memberDetails,
     areaSqm,
+    centerPosition,
     buildingLevels,
     heightMeters,
     buildingValue: trimTagValue(detail.tags.building),
+  };
+}
+
+function buildBuildingSchema(
+  featureId: string,
+  category: string,
+  centerPosition: Position,
+  patternKey: string,
+): BuildingSchema {
+  void patternKey;
+  return {
+    featureId,
+    category,
+    centerPosition,
+    theme: "default",
+    levels: {},
   };
 }
 
@@ -704,6 +819,63 @@ function mergeStringRecord(primary: Record<string, string>, fallback: Record<str
   return merged;
 }
 
+function computeResidentialDistrictWeights(
+  candidate: BuildingCandidate,
+  existingSchemas: Record<string, BuildingSchema>,
+  coveringAreas: string[],
+  roadKinds: string[],
+): { residential: number; nonResidential: number } {
+  let residential = 0;
+  let nonResidential = 0;
+
+  for (const area of coveringAreas) {
+    const weights = RESIDENTIAL_DISTRICT_AREA_WEIGHTS[area];
+    if (!weights) {
+      continue;
+    }
+
+    residential += weights.residential;
+    nonResidential += weights.nonResidential;
+  }
+
+  for (const roadKind of roadKinds) {
+    const weights = RESIDENTIAL_DISTRICT_ROAD_WEIGHTS[roadKind];
+    if (!weights) {
+      continue;
+    }
+
+    residential += weights.residential;
+    nonResidential += weights.nonResidential;
+  }
+
+  const nearbyHouseSchemas = Object.values(existingSchemas).filter((schema) => {
+    return schema.category === "house"
+      && distanceToPosition(schema.centerPosition, candidate.centerPosition) <= RESIDENTIAL_DISTRICT_SCHEMA_RADIUS_METERS;
+  });
+  residential += nearbyHouseSchemas.length * RESIDENTIAL_DISTRICT_SCHEMA_HOUSE_WEIGHT;
+
+  return { residential, nonResidential };
+}
+
+function computeMeanCenterPosition(positions: Position[]): Position | null {
+  if (positions.length === 0) {
+    return null;
+  }
+
+  const totals = positions.reduce(
+    (accumulator, position) => ({
+      lat: accumulator.lat + position.lat,
+      lon: accumulator.lon + position.lon,
+    }),
+    { lat: 0, lon: 0 },
+  );
+
+  return {
+    lat: totals.lat / positions.length,
+    lon: totals.lon / positions.length,
+  };
+}
+
 /**
  * 判断 tags 是否直接指向住宅类 building。
  *
@@ -755,6 +927,18 @@ function hasContainedPoiTag(
     const tagValue = trimTagValue(poi.tags[key]);
     return tagValue !== null && valueSet.has(tagValue);
   });
+}
+
+function weightedBoolean(residentialWeight: number, nonResidentialWeight: number): boolean {
+  const safeResidentialWeight = Math.max(0, residentialWeight);
+  const safeNonResidentialWeight = Math.max(0, nonResidentialWeight);
+  const totalWeight = safeResidentialWeight + safeNonResidentialWeight;
+
+  if (totalWeight <= 0) {
+    return false;
+  }
+
+  return Math.random() * totalWeight < safeResidentialWeight;
 }
 
 /**

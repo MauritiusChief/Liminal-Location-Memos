@@ -389,7 +389,7 @@ async function streamRegularBookMessage(
     ...microGrid.cells.flatMap(cell => cell).flatMap(cell => cell.sourceFeatureIds),
     ...(polarView?.levels.flatMap( l => l.clusters.flatMap( c => c.features.flatMap( f => f.featureId))) ?? [])
   ]
-  featureIds.forEach( id => generateBuildingSchema(id)) // TODO 当前仅打印
+  featureIds.forEach( id => generateBuildingSchema(id, state.buildingSchemas)) // TODO 当前仅打印
   // 组装消息历史
   const messageHistory = state.messageHistory.slice(Math.max(0, state.messageHistory.length - 12));
   await writeGameDebugRequest({

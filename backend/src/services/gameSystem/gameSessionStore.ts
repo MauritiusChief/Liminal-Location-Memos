@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { BuildingSchema } from './buildingClassifier.js';
 
 export interface Position {
   lat: number;
@@ -27,33 +28,6 @@ export interface OutdoorVisualDescriptionRecord {
   createdAt: string;
   updatedAt: string;
 }
-
-export interface BuildingSchemaSubRoom {
-  count: number;
-  desc: string;
-}
-
-export interface BuildingSchemaRoom {
-  count: number;
-  desc: string;
-  access?: 'entrance' | 'vertical' | 'internal';
-}
-
-export interface BuildingSchemaSuiteRoom {
-  count: number;
-  desc: string;
-  subRooms: Record<string, BuildingSchemaSubRoom>;
-}
-
-export interface BuildingLevelSchemaDefinition {
-  span: number | [number, number];
-  rooms: Record<string, BuildingSchemaRoom | BuildingSchemaSuiteRoom>;
-}
-
-/**
- * 建筑蓝图，由多个建筑楼层蓝图组成
- */
-export type BuildingSchema = Record<string, BuildingLevelSchemaDefinition>;
 
 /**
  * 文本形式记录某一建筑的某一楼层的事实性细节
