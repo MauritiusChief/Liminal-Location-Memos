@@ -110,13 +110,8 @@ export async function streamGameStart(emit: EmitGameEvent): Promise<GameSession>
 
   const session = await createRuntimeSession();
   const workingState = cloneGameState(session.gameState);
-  const { lat, lon } = workingState.playerPosition;
 
-  const openingMessage = await streamInitialBookMessage({
-    lat,
-    lon,
-    radius: INITIAL_SCENE_RADIUS_METERS,
-  }, workingState.playerOrientation, emit);
+  const openingMessage = await streamInitialBookMessage(workingState, emit);
 
   workingState.messageHistory.push({
     role: 'book',
@@ -315,31 +310,33 @@ async function finalizeVisualDescription(session: GameSession, bookMessage: stri
 
 /**
  * 根据 request 生成 Scene Prompt，然后 stream 第一条 Book Message
- * @param request
- * @param playerOrientation
+ * @param state
+ * @param emit
  * @returns 整个游戏的第一条描述周遭状况的 Book Message
  */
 async function streamInitialBookMessage(
-  request: RangedPosition,
-  playerOrientation: number,
+  state: GameState,
   emit: EmitGameEvent,
 ): Promise<string> {
   console.log(`[${new Date().toISOString()}] initialBookMessage() 触发`);
 
-  const sceneObject = await buildSceneFromRequest(request, playerOrientation);
-  const scenePrompt = buildScenePrompt(sceneObject, playerOrientation);
+  const worldStatePrompt = await toWorldStatePrompt(state, INITIAL_SCENE_RADIUS_METERS);
+  // TODO 获取 sceneObject 时，顺带把可自动生成的 Building Schema 也生成了；如果太复杂则留着，等玩家进入再去生成
   await writeGameDebugRequest({
     mode: 'user-message',
-    functionName: 'initialBookMessage',
+    functionName: 'streamInitialBookMessage',
     systemPrompt: INITIAL_BOOK_MESSAGE_SYSTEM,
-    userMessage: scenePrompt,
+    userMessage: worldStatePrompt,
   });
 
   let reply = '';
   let reasoning = '';
 
   try {
-    for await (const event of streamReplySingleMessage(INITIAL_BOOK_MESSAGE_SYSTEM, scenePrompt)) {
+    for await (const event of streamReplySingleMessage(
+      INITIAL_BOOK_MESSAGE_SYSTEM,
+      worldStatePrompt,
+    )) {
       if (event.replyDelta) {
         reply += event.replyDelta;
         await emit({ type: 'book_reply_delta', text: event.replyDelta });
@@ -350,7 +347,7 @@ async function streamInitialBookMessage(
     }
 
     await writeGameDebugResult({
-      functionName: 'initialBookMessage',
+      functionName: 'streamInitialBookMessage',
       reply,
       reasoning,
     });
@@ -381,10 +378,11 @@ async function streamRegularBookMessage(
   console.log(`[${new Date().toISOString()}] generateBookMessage() 触发`);
 
   const worldStatePrompt = await toWorldStatePrompt(state);
+  // TODO 获取 sceneObject 时，顺带把可自动生成的 Building Schema 也生成了；如果太复杂则留着，等玩家进入再去生成
   const messageHistory = state.messageHistory.slice(Math.max(0, state.messageHistory.length - 12));
   await writeGameDebugRequest({
     mode: 'full-messages',
-    functionName: 'generateBookMessage',
+    functionName: 'streamRegularBookMessage',
     systemPrompt: REGULAR_BOOK_MESSAGE_SYSTEM,
     gameMessages: messageHistory,
     worldStatePrompt,
@@ -409,14 +407,14 @@ async function streamRegularBookMessage(
     }
 
     await writeGameDebugResult({
-      functionName: 'generateBookMessage',
+      functionName: 'streamRegularBookMessage',
       reply,
       reasoning,
     });
     return reply;
   } catch (error) {
     await writeGameDebugResult({
-      functionName: 'generateBookMessage',
+      functionName: 'streamRegularBookMessage',
       error,
     });
     throw error;
@@ -492,13 +490,20 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
 }
 
 /**
- * 把当前 GameState 转成 Book 可消费的 world-state prompt。
+ * 把当前 GameState 转成可消费的 world-state 提示词。
+ * 过程中会从数据库请求信息以组建 Scene Object
+ * 消费者：
+ * - Book 消息生成者
+ * - Game State Manager
  *
  * TODO 添加更多信息，比如 Building Schema 乃至天气、物品、玩家状态等信息
+ * @param state
+ * @param radius 用于 Scene Object 的半径
+ * @returns TODO 目前仅包含 scenePrompt 和 VisualDescription 的提示词
  */
-async function toWorldStatePrompt(state: GameState): Promise<string> {
+async function toWorldStatePrompt(state: GameState, radius: number = WORLD_STATE_RADIUS_METERS): Promise<string> {
   const { lat, lon } = state.playerPosition;
-  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: WORLD_STATE_RADIUS_METERS }, state.playerOrientation);
+  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: radius }, state.playerOrientation);
   const scenePrompt = buildScenePrompt(sceneObject, state.playerOrientation);
   const outdoorVisualDescriptions = Object.entries(state.outdoorVisualDescriptions)
     .filter(([id]) => state.activeOutdoorVisualDescriptions.includes(id))
