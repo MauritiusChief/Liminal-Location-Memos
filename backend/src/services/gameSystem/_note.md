@@ -48,14 +48,16 @@ Game State 术语：
 
 ## 游戏流程
 
-1. 玩家点击开始游戏后，进入游戏初始化流程。从经纬度数据读取 OSM 然后生成 Scene Prompt，让一个专门的 Agent 生成开场 Book Message
-2. 每次生成 Book Message 时，会先以 stream 的形式把文本增量发给前端
-3. Book Message stream 完成后，先立即提交本轮 Game Save，再由另一个 Agent 根据 Book Message 撰写或者更新 Visual Description
+0. 玩家点击开始游戏后，进入游戏初始化流程。从经纬度数据读取 OSM 然后生成 Scene Prompt，让一个专门的 Agent 生成开场 Book Message
+
+1. 每次生成 Book Message 时，会先以 stream 的形式把文本增量发给前端
+2. Book Message stream 完成后，先立即提交本轮 Game Save，再由另一个 Agent 根据 Book Message 撰写或者更新 Visual Description
   - 为了更短的互动前静止时间，Visual Description 不再阻塞 Book Message 的送达
   - 在 Visual Description 工作完成之前，只允许暂存 1 条下一回合的 User Message；若队列已占满，则拒绝新的消息
   - 当 Visual Description 准备完毕后，排队中的下一条消息才会进入下一回合
-4. 玩家发送信息之后，先由 Game State 管理者 Agent 专门处理 Game State
-5. Game State 处理完毕后，处理结果以及玩家的周遭信息会以 syth tool return 的形式给到剧本主持人，生成 Book Message 并 stream 给前端
+3. 玩家发送信息之后，先由 Game State 管理者 Agent 专门处理 Game State
+  - 如果进入了
+4. Game State 处理完毕后，处理结果以及玩家的周遭信息会以 syth tool return 的形式给到剧本主持人，生成 Book Message 并 stream 给前端
 5.
 
 ## 建筑生成逻辑

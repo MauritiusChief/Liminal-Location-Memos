@@ -22,7 +22,7 @@
 ### 存入数据库
 
 相关文件
-- `osmNormalizedToDb.ts`：实际执行 SQL 的地方（SQL目前从远处文件引入，未来会挪到近处）TODO
+- `osmNormalizedToDb.ts`：实际执行 SQL 的地方
 - `osmFeatureConfig.ts`：为`osmNormalizedToDb.ts`提供判断去哪个表、表里填什么数据的逻辑支持
 
 ## DEBUG API
