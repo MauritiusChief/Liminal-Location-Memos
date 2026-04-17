@@ -1,6 +1,7 @@
 
 import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
+import { Position } from "./gameSessionStore.js";
 
 /**
  * 与 SQL 查询结果表一致的扁平类型
@@ -10,6 +11,45 @@ interface DbStandaloneResidentialBuildingRow {
   neighbor_sample_count: number | string | null;
   neighbor_average_area_sqm: number | string | null;
   is_simple_rectangle: boolean | null;
+}
+
+interface BuildingSchema {
+  featureId: string;
+  theme: string;
+  levels: Record<string, LevelSchema>; // key 为楼层种类名
+}
+
+interface LevelSchema {
+  theme: string;
+  span: number[]; // 使用该 Schema 的楼层
+  sectors: Record<string, SectorSchema>; // key 为该 Sector 的名字
+}
+
+interface SectorSchema {
+  area: number;
+  centerPosition: Position;
+  rooms: Record<string, RoomSchema | SuiteSchema>; // key 为该房间/套房的种类名
+}
+
+interface RoomSchema {
+  descrption: string;
+  count: number;
+  access?: "entrance" | "vertical" | "internal"
+}
+
+/**
+ * 特意无 access
+ */
+interface SuiteSchema {
+  theme: string;
+  subRooms: SubRoomSchema[]
+}
+/**
+ * 特意无 access
+ */
+interface SubRoomSchema {
+  descrption: string;
+  count: number;
 }
 
 //#region 常量
@@ -76,6 +116,21 @@ const STANDALONE_BUILDING_NEIGHBOR_RADIUS_METERS = 60
 const STANDALONE_BUILDING_MAX_ACCESSORY_AREA_SQM = 45
 const STANDALONE_BUILDING_RELATIVE_AREA_THRESHOLD = 0.7
 const STANDALONE_BUILDING_MIN_NEIGHBOR_SAMPLE_COUNT = 1
+
+//#region 出口函数
+
+/**
+ * 输入 featureId, 自行从数据库获取相关数据后进行分类等操作，返回现成的 Building Schema
+ * TODO:添加具体的区分规则
+ * 1. 先检测其 tag，是否有足够定向的 tag 如 building=house, amenity=library 等。有则直接给出分类，然后再结合其他数据（如高度、面积等），加权随机或者纯随机得到 pattern
+ * 2. 若无 tag 则检测其所在的 area，比如商业(landuse=commercial)、学校(amenity=university)等，结合其他数据（如高度、面积等），加权随机或者纯随机得到分类以及 pattern（Category 与 pattern 同步得出）
+ * @param featureId
+ * @param skipComplex 是否跳过太复杂需要 LLM 参与的步骤
+ * @returns 现成的 Building Schema，或者表示被跳过的 undefined
+ */
+export async function generateBuildingSchema(featureId: string, skipComplex: boolean = true): Promise<BuildingSchema | undefined> {
+  return
+}
 
 
 //#region 主函数
