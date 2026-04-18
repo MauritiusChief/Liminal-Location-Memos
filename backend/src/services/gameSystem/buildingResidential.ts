@@ -191,7 +191,7 @@ export async function ambiguousResidentialCategory(
 
   const [buildingKind, hasNearbyParking] = await Promise.all([
     determineResidentialBuildingKind(candidate.detail.featureId),
-    fetchNearbyParkingSignal(candidate.detail.featureId),
+    determineNearbyParkingSignal(candidate.detail.featureId),
   ]);
   const nearbySchemas = Object.values(existingSchemas).filter((schema) => {
     return distanceToPosition(schema.centerPosition, candidate.centerPosition) <= RESIDENTIAL_ACCESSORY_CONTEXT_RADIUS_METERS;
@@ -284,7 +284,12 @@ export async function determineResidentialBuildingKind(featureId: string): Promi
   return "house";
 }
 
-export async function fetchNearbyParkingSignal(featureId: string): Promise<boolean> {
+/**
+ * 决定某一地物周遭是否有停车场所
+ * @param featureId
+ * @returns
+ */
+export async function determineNearbyParkingSignal(featureId: string): Promise<boolean> {
   const featureRef = parseBuildingFeatureId(featureId);
   const sql = await fetchNearbyParkingSignalSqlPromise;
   const result = await query<DbNearbyParkingSignalRow>(
