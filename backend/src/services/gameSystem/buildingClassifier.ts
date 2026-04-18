@@ -637,7 +637,7 @@ function hasContainedPoiTag(
  */
 export function weightedBoolean(supportingWeight: number, nonSupportingWeight: number): boolean {
   const totalWeight = supportingWeight + nonSupportingWeight;
-  if (totalWeight <= 0) return false;
+  if (totalWeight === 0) return Math.random() < 0.5; // 总权重为0说明无决定因素，则完全随机
   return Math.random() * totalWeight < supportingWeight;
 }
 

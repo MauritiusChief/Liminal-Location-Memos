@@ -101,9 +101,7 @@ const STANDALONE_BUILDING_MIN_NEIGHBOR_SAMPLE_COUNT = 1;
 const SMALL_HOUSE_AREA_MAX_SQM = 90;
 const MEDIUM_HOUSE_AREA_MAX_SQM = 220;
 
-//#region 分区：住宅区
-
-const classifyStandaloneResidentialBuildingSqlPromise = loadServiceSql("gameSystem/sql/classifyStandaloneResidentialBuilding.sql");
+//#region Pattern 逻辑
 
 /**
  * 根据已经确定的 category 选出 pattern。
@@ -160,6 +158,8 @@ function determineHousePatternPool(candidate: BuildingCandidate): string[] {
   return ["standard", "duplex"];
 }
 
+//#region Category 逻辑
+
 /**
  * 在没有 explicit building tag 的情况下，
  * 结合覆盖区域、周边道路和已有 schema 判断当前建筑是否位于独栋住宅区。
@@ -187,6 +187,8 @@ export async function ambiguousResidentialCategory(
   const isStandaloneResidential = await isStandaloneResidentialBuilding(candidate.detail.featureId);
   return isStandaloneResidential ? "house" : "garage";
 }
+
+const classifyStandaloneResidentialBuildingSqlPromise = loadServiceSql("gameSystem/sql/classifyStandaloneResidentialBuilding.sql");
 
 /**
  * 判断一个建筑是“独栋住宅”或“独立附属建筑（独立车库/工具屋）”。
