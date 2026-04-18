@@ -6,6 +6,7 @@ import {
 } from '@/services/osmNormalization/osmFeatureConfig.js';
 import { ContainedPoiReference } from '@/services/osmNormalization/osmNormalizer.js';
 import { FeatureDetail } from '../featureDetail.js';
+import { trimTagValue } from '../utils.js';
 
 export const BUILDING_TAG_KEYS = BUILDING_PRIMARY_LABEL_KEYS;
 export const POI_TAG_KEYS = POI_PRIMARY_LABEL_KEYS;
@@ -17,16 +18,6 @@ const BUILDING_POI_LABEL_LIMIT = 1;
 // 这样 grid 和 polar 可以共享同一套文本风格，而不用各自维护一份相似但逐渐分叉的逻辑。
 
 //#region 共享辅助填标签函数
-
-// 这里顺手把空字符串也视为“没有值”，避免 label 里出现视觉上为空的噪音。
-export function trimTagValue(value: string | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
 
 /**
  * 共用的依照 XX_TAG_KEYS 产出主分类标签的函数。

@@ -1,5 +1,6 @@
-import { AREA_TAG_KEYS, BUILDING_TAG_KEYS, POI_TAG_KEYS, ROAD_TAG_KEYS, trimTagValue } from "./sceneUtilLabel.js";
+import { AREA_TAG_KEYS, BUILDING_TAG_KEYS, POI_TAG_KEYS, ROAD_TAG_KEYS } from "./sceneUtilLabel.js";
 import { PolarView, PolarViewCluster, PolarViewLevel } from "./polarViewLabeled.js";
+import { trimTagValue } from "../utils.js";
 
 type PolarFeatureCategory = "building" | "area" | "poi" | "line";
 type MarkedPolarViewFeature = PolarViewCluster["features"][number];

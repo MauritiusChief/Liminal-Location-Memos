@@ -1,7 +1,8 @@
 import { AREA_PRIMARY_LABEL_KEYS, BUILDING_PRIMARY_LABEL_KEYS, LINE_PRIMARY_LABEL_KEYS, POI_PRIMARY_LABEL_KEYS } from "@/services/osmNormalization/osmFeatureConfig.js";
 import { MicroGrid, MicroGridCell } from "./microGridObject.js";
 import { FeatureDetail } from "@/services/featureDetail.js";
-import { buildBuildingBaseLabel, getAreaDisplayLabel, getPoiDisplayLabel, getRoadDisplayLabel, trimTagValue } from "./sceneUtilLabel.js";
+import { buildBuildingBaseLabel, getAreaDisplayLabel, getPoiDisplayLabel, getRoadDisplayLabel } from "./sceneUtilLabel.js";
+import { trimTagValue } from "../utils.js";
 
 export interface LabeledMicroGridCell {
   row: number;
