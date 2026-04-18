@@ -337,6 +337,16 @@ function determineHousePatternPool(candidate: BuildingCandidate): string[] {
   return ["standard", "duplex"];
 }
 
+//TODO 添加 Pattern Distribution 占位函数，总是认为建筑只有一体，所以无 Pattern Distribution 问题
+
+//#region C-Schema 逻辑
+
+//TODO Sector Distribution 也为占位函数，总是认为 C-Schema 中某个楼层只占一个 Sector
+
+//#region 收尾逻辑
+
+
+
 //#region 帮助函数
 
 function isHouseFamilyCategory(category: string): boolean {

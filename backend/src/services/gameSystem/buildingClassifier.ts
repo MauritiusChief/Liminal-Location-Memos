@@ -323,6 +323,8 @@ export async function fetchBuildingCoveringAreas(featureId: string): Promise<str
 }
 
 /**
+ * TODO 不要做成合成虚假 FeatureDetail，这样会阻碍后续 Pattern Distribution。
+ *
  * 当 relation 本体自身无法直接查到完整细节时，
  * 使用其 member 建筑合成一个虚假的 relation 级 FeatureDetail。
  *
@@ -395,7 +397,7 @@ function buildBuildingSchema(
   centerPosition: Position,
   patternKey: string,
 ): BuildingSchema {
-  void patternKey;
+  console.log(patternKey);
   return {
     featureId,
     category,
