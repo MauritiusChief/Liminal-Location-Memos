@@ -3,9 +3,6 @@ import { BuildingCandidate, BuildingSchema, fetchBuildingCoveringAreas, fetchBui
 import { query } from "@/db/client.js";
 import { distanceToPosition } from "../geometry.js";
 
-export type ResidentialCategoryKey = "house" | "house&garage" | "garage" | "tool_shed";
-export type ResidentialBuildingKind = "house" | "accessory";
-
 /**
  * 与 SQL 查询结果表一致的扁平类型
  */
@@ -118,7 +115,7 @@ const MEDIUM_HOUSE_AREA_MAX_SQM = 220;
 export async function ambiguousResidentialCategory(
   candidate: BuildingCandidate,
   existingSchemas: Record<string, BuildingSchema>,
-): Promise<ResidentialCategoryKey | null> {
+): Promise<string | null> {
   const [coveringAreas, roadKinds] = await Promise.all([
     fetchBuildingCoveringAreas(candidate.detail.featureId),
     fetchBuildingRoadKinds(candidate.detail.featureId),
@@ -221,17 +218,13 @@ const fetchNearbyParkingSignalSqlPromise = loadServiceSql("gameSystem/sql/fetchN
  * 输入前提：
  * - 默认调用方已经确认候选属于住宅区
  *
- * 输出语义：
- * - 返回 `true`：独栋住宅
- * - 返回 `false`：独立附属建筑（独立车库/工具屋）
- *
  * 保守策略：
  * - 当目标建筑邻域样本不足或关键几何证据不足时，一律按住宅处理
  *
  * @param featureId 已缩小到“独栋住宅/独立附属建筑”范围内的建筑候选
  * @returns 是否应按独栋住宅处理
  */
-async function determineResidentialBuildingKind(featureId: string): Promise<ResidentialBuildingKind> {
+async function determineResidentialBuildingKind(featureId: string): Promise<string> {
   // 获取数据库中的周遭建筑数据与建筑本身数据
   const featureRef = parseBuildingFeatureId(featureId);
   const sql = await fetchHouseDetermingFactorSqlPromise;
