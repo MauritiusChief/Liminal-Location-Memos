@@ -18,7 +18,7 @@ interface DbFeatureDetailTableRow {
   tainted: boolean;
 };
 
-interface DbBuildingDetailTableRow extends DbFeatureDetailTableRow {
+export interface DbBuildingFeatureDetailRow extends DbFeatureDetailTableRow {
   category: 'building';
   contained_pois: ContainedPoiReference[];
   outline_references: OutlineReference[];
@@ -56,19 +56,7 @@ export async function fetchFeatureDetailsFromDb(request: RangedPosition): Promis
   ]);
 
   return [
-    ...buildingRows.map((row) => ({
-      featureId: row.feature_id,
-      osmType: row.osm_type,
-      osmId: row.osm_id,
-      category: 'building' as const,
-      geometryType: row.geometry_type,
-      tags: row.tags || {},
-      relationReferences: row.relations || [],
-      outlineReferences: row.outline_references || [],
-      meta: row.meta || {},
-      tainted: row.tainted ?? false,
-      containedPoisReferences: row.contained_pois && row.contained_pois.length > 0 ? row.contained_pois : undefined,
-    })),
+    ...buildingRows.map((row) => mapBuildingDetailRowToFeatureDetail(row)),
     ...otherRows.map((row) => ({
       featureId: row.feature_id,
       osmType: row.osm_type,
@@ -89,14 +77,39 @@ const fetchSceneBuildingDetailsSqlPromise = loadServiceSql('fetchSceneBuildingDe
 const fetchSceneNonBuildingDetailsSqlPromise = loadServiceSql('fetchSceneNonBuildingDetails.sql');
 
 /**
+ * 把 building detail 查询结果统一映射为代码内部使用的 FeatureDetail。
+ *
+ * 这个 helper 用于复用 building 专有字段的归一化规则，避免 scene 与
+ * building classifier 分别维护两套同构映射。
+ *
+ * @param row 查询返回的一行 building detail
+ * @returns 对齐 FeatureDetail 字段命名后的结果
+ */
+export function mapBuildingDetailRowToFeatureDetail(row: DbBuildingFeatureDetailRow): FeatureDetail {
+  return {
+    featureId: row.feature_id,
+    osmType: row.osm_type,
+    osmId: row.osm_id,
+    category: 'building',
+    geometryType: row.geometry_type,
+    tags: row.tags || {},
+    meta: row.meta || {},
+    tainted: row.tainted ?? false,
+    relationReferences: row.relations || [],
+    outlineReferences: row.outline_references || [],
+    containedPoisReferences: row.contained_pois && row.contained_pois.length > 0 ? row.contained_pois : undefined,
+  };
+}
+
+/**
  * 这里取的是“建筑详情 + 建筑内 POI”，供标签、grid 补充细节、prompt 共用。
  * 注：为了兼容 debug 模式，SQL 所取的信息是超量的。
  * @param request
  * @returns 直接返回与 DB 表格式一致的结果
  */
-async function fetchBuildingDetails(request: RangedPosition): Promise<DbBuildingDetailTableRow[]> {
+async function fetchBuildingDetails(request: RangedPosition): Promise<DbBuildingFeatureDetailRow[]> {
   const sql = await fetchSceneBuildingDetailsSqlPromise;
-  const result = await query<DbBuildingDetailTableRow>(
+  const result = await query<DbBuildingFeatureDetailRow>(
     sql,
     [request.lon, request.lat, request.radius],
   );

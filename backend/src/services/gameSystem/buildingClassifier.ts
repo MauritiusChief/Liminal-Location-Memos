@@ -1,7 +1,7 @@
 import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
-import { FeatureDetail } from "@/services/featureDetail.js";
-import { ContainedPoiReference, dedupeOutlineReferences, OutlineReference, RelationReference } from "@/services/osmNormalization/osmNormalizer.js";
+import { DbBuildingFeatureDetailRow, FeatureDetail, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
+import { dedupeOutlineReferences } from "@/services/osmNormalization/osmNormalizer.js";
 import { Position } from "./gameSessionStore.js";
 import { ambiguousResidentialCategory, selectResidentialPatternKey } from "./buildingResidential.js";
 import { trimTagValue } from "../utils.js";
@@ -9,17 +9,7 @@ import { trimTagValue } from "../utils.js";
 /**
  * 与 SQL 查询结果表一致的扁平类型
  */
-interface DbBuildingDetailRow {
-  feature_id: string;
-  osm_type: string;
-  osm_id: number;
-  geometry_type: string;
-  tags: Record<string, string>;
-  relations: RelationReference[];
-  outline_references: OutlineReference[];
-  meta: Record<string, string | number>;
-  tainted: boolean;
-  contained_pois: ContainedPoiReference[];
+interface DbBuildingClassifierDetailRow extends DbBuildingFeatureDetailRow {
   area_sqm: number;
   center_lon: number;
   center_lat: number;
@@ -270,7 +260,7 @@ async function fetchBuildingFeatureDetailById(
 ): Promise<{ detail: FeatureDetail; areaSqm: number | null; centerPosition: Position } | null> {
   const featureRef = parseBuildingFeatureId(featureId);
   const sql = await fetchBuildingFeatureDetailByIdSqlPromise;
-  const result = await query<DbBuildingDetailRow>(sql, [featureRef.osmType, featureRef.osmId]);
+  const result = await query<DbBuildingClassifierDetailRow>(sql, [featureRef.osmType, featureRef.osmId]);
   const row = result.rows[0];
 
   if (!row) {
@@ -300,7 +290,7 @@ async function fetchBuildingRelationMemberSnapshots(
   relationOsmId: number,
 ): Promise<Array<{ detail: FeatureDetail; areaSqm: number | null; centerPosition: Position }>> {
   const sql = await fetchBuildingRelationMemberDetailsSqlPromise;
-  const result = await query<DbBuildingDetailRow>(sql, [relationOsmId]);
+  const result = await query<DbBuildingClassifierDetailRow>(sql, [relationOsmId]);
 
   return result.rows.map((row) => ({
     detail: mapBuildingDetailRowToFeatureDetail(row),
@@ -330,28 +320,6 @@ export async function fetchBuildingCoveringAreas(featureId: string): Promise<str
   const result = await query<DbCoveringAreasRow>(sql, [featureRef.osmType, featureRef.osmId]);
 
   return result.rows[0]?.covering_areas || [];
-}
-
-/**
- * 把 DB 扁平行结构转换为代码内部统一使用的 FeatureDetail。
- *
- * @param row 查询返回的一行 building detail
- * @returns 对齐 FeatureDetail 字段命名后的结果
- */
-function mapBuildingDetailRowToFeatureDetail(row: DbBuildingDetailRow): FeatureDetail {
-  return {
-    featureId: row.feature_id,
-    osmType: row.osm_type,
-    osmId: row.osm_id,
-    category: "building",
-    geometryType: row.geometry_type,
-    tags: row.tags || {},
-    meta: row.meta || {},
-    tainted: row.tainted ?? false,
-    relationReferences: row.relations || [],
-    outlineReferences: row.outline_references || [],
-    containedPoisReferences: row.contained_pois && row.contained_pois.length > 0 ? row.contained_pois : undefined,
-  };
 }
 
 /**
