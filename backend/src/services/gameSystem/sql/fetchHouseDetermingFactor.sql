@@ -3,11 +3,34 @@ WITH target_building AS (
     b.osm_type,
     b.osm_id,
     b.geom,
+    CASE
+      WHEN GeometryType(b.geom) = 'POLYGON' THEN b.geom
+      WHEN GeometryType(b.geom) = 'MULTIPOLYGON' AND ST_NumGeometries(b.geom) = 1 THEN ST_GeometryN(b.geom, 1)
+      ELSE NULL
+    END AS simple_polygon_geom,
     ST_Area(b.geom::geography) AS area_sqm,
     CASE
-      WHEN GeometryType(b.geom) <> 'POLYGON' THEN FALSE
-      WHEN ST_NumInteriorRings(b.geom) <> 0 THEN FALSE
-      WHEN ST_NPoints(ST_ExteriorRing(b.geom)) <> 5 THEN FALSE
+      WHEN (
+        CASE
+          WHEN GeometryType(b.geom) = 'POLYGON' THEN b.geom
+          WHEN GeometryType(b.geom) = 'MULTIPOLYGON' AND ST_NumGeometries(b.geom) = 1 THEN ST_GeometryN(b.geom, 1)
+          ELSE NULL
+        END
+      ) IS NULL THEN FALSE
+      WHEN ST_NumInteriorRings(
+        CASE
+          WHEN GeometryType(b.geom) = 'POLYGON' THEN b.geom
+          WHEN GeometryType(b.geom) = 'MULTIPOLYGON' AND ST_NumGeometries(b.geom) = 1 THEN ST_GeometryN(b.geom, 1)
+          ELSE NULL
+        END
+      ) <> 0 THEN FALSE
+      WHEN ST_NPoints(ST_ExteriorRing(
+        CASE
+          WHEN GeometryType(b.geom) = 'POLYGON' THEN b.geom
+          WHEN GeometryType(b.geom) = 'MULTIPOLYGON' AND ST_NumGeometries(b.geom) = 1 THEN ST_GeometryN(b.geom, 1)
+          ELSE NULL
+        END
+      )) <> 5 THEN FALSE
       ELSE TRUE
     END AS is_simple_rectangle
   FROM osm_buildings b

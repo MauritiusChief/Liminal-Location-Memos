@@ -10,6 +10,7 @@ export default {
     "^\\./apiTypes\\.js$": "<rootDir>/src/routes/apiTypes.ts",
     "^\\.\\./config\\.js$": "<rootDir>/src/config.ts",
     "^\\.\\./geometry\\.js$": "<rootDir>/src/services/geometry.ts",
+    "^\\.\\./utils\\.js$": "<rootDir>/src/services/utils.ts",
     "^\\.\\./scene/sceneObject\\.js$": "<rootDir>/src/services/scene/sceneObject.ts",
     "^\\.\\./scene/scenePrompt\\.js$": "<rootDir>/src/services/scene/scenePrompt.ts",
     "^\\./osmGate\\.js$": "<rootDir>/src/services/osmNormalization/osmGate.ts",
@@ -22,6 +23,8 @@ export default {
     "^\\./gameDebug\\.js$": "<rootDir>/src/services/gameSystem/gameDebug.ts",
     "^\\./llm\\.js$": "<rootDir>/src/services/gameSystem/llm.ts",
     "^\\./gameSessionStore\\.js$": "<rootDir>/src/services/gameSystem/gameSessionStore.ts",
+    "^\\./buildingResidential\\.js$": "<rootDir>/src/services/gameSystem/buildingResidential.ts",
+    "^\\./buildingClassifier\\.js$": "<rootDir>/src/services/gameSystem/buildingClassifier.ts",
     "^@/(.*)\\.js$": "<rootDir>/src/$1.ts",
   },
 };

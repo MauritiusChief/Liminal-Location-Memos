@@ -3,7 +3,8 @@ import { BuildingCandidate, BuildingSchema, fetchBuildingCoveringAreas, fetchBui
 import { query } from "@/db/client.js";
 import { distanceToPosition } from "../geometry.js";
 
-type ResidentialCategoryKey = keyof typeof RESIDENTIAL_CATEGORIES;
+export type ResidentialCategoryKey = "house" | "house&garage" | "garage" | "tool_shed";
+export type ResidentialBuildingKind = "house" | "accessory";
 
 /**
  * 与 SQL 查询结果表一致的扁平类型
@@ -13,6 +14,10 @@ interface DbHouseDetermingRow {
   neighbor_sample_count: number;
   neighbor_average_area_sqm: number;
   is_simple_rectangle: boolean;
+}
+
+interface DbNearbyParkingSignalRow {
+  has_nearby_parking: boolean | null;
 }
 
 //#region 常量
@@ -94,9 +99,11 @@ const RESIDENTIAL_DISTRICT_ROAD_WEIGHTS: Record<string, { residential: number; n
 const RESIDENTIAL_DISTRICT_SCHEMA_HOUSE_WEIGHT = 4;
 
 const HOUSE_DETERMING_NEIGHBOR_RADIUS_METERS = 60;
-const HOUSE_DETERMING_MAX_ACCESSORY_AREA_SQM = 45;
-const HOUSE_DETERMING_RELATIVE_AREA_THRESHOLD = 0.7;
+const HOUSE_DETERMING_RELATIVE_AREA_THRESHOLD = 0.5;
 const HOUSE_DETERMING_MIN_NEIGHBOR_SAMPLE_COUNT = 1;
+const RESIDENTIAL_ACCESSORY_CONTEXT_RADIUS_METERS = 25;
+const RESIDENTIAL_PRIMARY_CATEGORY_WEIGHT = 9;
+const RESIDENTIAL_SECONDARY_CATEGORY_WEIGHT = 1;
 
 const SMALL_HOUSE_AREA_MAX_SQM = 90;
 const MEDIUM_HOUSE_AREA_MAX_SQM = 220;
@@ -119,11 +126,11 @@ export function selectResidentialPatternKey(
   // 简单建筑直接返回 Category Key 作为 Pattern Key
   const simpleCategoryKeys = Object.entries(RESIDENTIAL_CATEGORIES)
     .filter(([key, cat]) => 'base_schema' in cat && cat.base_schema && 'self' in cat.base_schema)
-    .map(([key, cat]) => key)
-  if (simpleCategoryKeys.includes(categoryKey)) return categoryKey
+    .map(([key]) => key);
+  if (simpleCategoryKeys.includes(categoryKey)) return categoryKey;
 
-  // 复杂建筑可以保证只剩 house 了
-  const patternPool = determineHousePatternPool(candidate); // TODO 当前只支持住宅
+  // 当前复合住宅类别仍复用住宅 pattern 池。
+  const patternPool = determineHousePatternPool(candidate);
   return pickRandom(patternPool);
 }
 
@@ -184,11 +191,43 @@ export async function ambiguousResidentialCategory(
     return null;
   }
 
-  const isHouse = await isHouseBuilding(candidate.detail.featureId);
-  return isHouse ? "house" : "garage";
+  const [buildingKind, hasNearbyParking] = await Promise.all([
+    determineResidentialBuildingKind(candidate.detail.featureId),
+    fetchNearbyParkingSignal(candidate.detail.featureId),
+  ]);
+  const nearbySchemas = Object.values(existingSchemas).filter((schema) => {
+    return distanceToPosition(schema.centerPosition, candidate.centerPosition) <= RESIDENTIAL_ACCESSORY_CONTEXT_RADIUS_METERS;
+  });
+
+  if (buildingKind === "house") {
+    const hasNearbyGarage = nearbySchemas.some((schema) => schema.category === "garage");
+    if (hasNearbyParking || hasNearbyGarage) {
+      return "house";
+    }
+
+    return weightedBoolean(RESIDENTIAL_PRIMARY_CATEGORY_WEIGHT, RESIDENTIAL_SECONDARY_CATEGORY_WEIGHT)
+      ? "house&garage"
+      : "house";
+  }
+
+  const hasNearbyHouseGarage = nearbySchemas.some((schema) => schema.category === "house&garage");
+  if (hasNearbyHouseGarage) {
+    return "tool_shed";
+  }
+
+  if (hasNearbyParking) {
+    return weightedBoolean(RESIDENTIAL_PRIMARY_CATEGORY_WEIGHT, RESIDENTIAL_SECONDARY_CATEGORY_WEIGHT)
+      ? "tool_shed"
+      : "garage";
+  }
+
+  return weightedBoolean(RESIDENTIAL_PRIMARY_CATEGORY_WEIGHT, RESIDENTIAL_SECONDARY_CATEGORY_WEIGHT)
+    ? "garage"
+    : "tool_shed";
 }
 
 const fetchHouseDetermingFactorSqlPromise = loadServiceSql("gameSystem/sql/fetchHouseDetermingFactor.sql");
+const fetchNearbyParkingSignalSqlPromise = loadServiceSql("gameSystem/sql/fetchNearbyParkingSignal.sql");
 
 /**
  * 判断一个建筑是“独栋住宅”或“独立附属建筑（独立车库/工具屋）”。
@@ -206,7 +245,7 @@ const fetchHouseDetermingFactorSqlPromise = loadServiceSql("gameSystem/sql/fetch
  * @param featureId 已缩小到“独栋住宅/独立附属建筑”范围内的建筑候选
  * @returns 是否应按独栋住宅处理
  */
-export async function isHouseBuilding(featureId: string): Promise<boolean> {
+export async function determineResidentialBuildingKind(featureId: string): Promise<ResidentialBuildingKind> {
   // 获取数据库中的周遭建筑数据与建筑本身数据
   const featureRef = parseBuildingFeatureId(featureId);
   const sql = await fetchHouseDetermingFactorSqlPromise;
@@ -231,18 +270,30 @@ export async function isHouseBuilding(featureId: string): Promise<boolean> {
     || neighborSampleCount < HOUSE_DETERMING_MIN_NEIGHBOR_SAMPLE_COUNT
     || neighborAverageAreaSqm === null
   ) {
-    return true;
+    return "house";
   }
 
-  if ( // 确实就是独立住宅
-    row?.is_simple_rectangle !== true
-    && areaSqm > HOUSE_DETERMING_MAX_ACCESSORY_AREA_SQM
-    && areaSqm >= neighborAverageAreaSqm * HOUSE_DETERMING_RELATIVE_AREA_THRESHOLD
+  // console.log(row?.is_simple_rectangle);
+
+  if ( // 确定为独立附属建筑
+    row?.is_simple_rectangle
+    && areaSqm < neighborAverageAreaSqm * HOUSE_DETERMING_RELATIVE_AREA_THRESHOLD
   ) {
-    return true;
+    return "accessory";
   }
 
-  return false;
+  return "house";
+}
+
+export async function fetchNearbyParkingSignal(featureId: string): Promise<boolean> {
+  const featureRef = parseBuildingFeatureId(featureId);
+  const sql = await fetchNearbyParkingSignalSqlPromise;
+  const result = await query<DbNearbyParkingSignalRow>(
+    sql,
+    [featureRef.osmType, featureRef.osmId, RESIDENTIAL_ACCESSORY_CONTEXT_RADIUS_METERS],
+  );
+
+  return result.rows[0]?.has_nearby_parking === true;
 }
 
 /**
@@ -277,7 +328,7 @@ function computeResidentialDistrictWeights(
   }
 
   const nearbyHouseSchemas = Object.values(existingSchemas).filter((schema) => {
-    return schema.category === "house"
+    return isHouseFamilyCategory(schema.category)
       && distanceToPosition(schema.centerPosition, candidate.centerPosition) <= RESIDENTIAL_DISTRICT_SCHEMA_RADIUS_METERS;
   });
   residential += nearbyHouseSchemas.length * RESIDENTIAL_DISTRICT_SCHEMA_HOUSE_WEIGHT;
@@ -286,5 +337,9 @@ function computeResidentialDistrictWeights(
 }
 
 //#region 帮助函数
+
+function isHouseFamilyCategory(category: string): boolean {
+  return category === "house" || category === "house&garage";
+}
 
 
