@@ -464,7 +464,10 @@ apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
       ...microGrid.cells.flatMap(cell => cell).flatMap(cell => cell.sourceFeatureIds),
       ...(polarView?.levels.flatMap( l => l.clusters.flatMap( c => c.features.flatMap( f => f.featureId))) ?? [])
     ]
-    featureIds.forEach( id => generateBuildingSchema(id, {})) // TODO 当前仅打印
+    featureIds.forEach(async id => {
+      const b = await generateBuildingSchema(id, {})
+      if (b) console.log(b)
+    }) // TODO 当前仅打印
     const scenePrompt = buildScenePrompt(sceneObject, playerOrientation)
     response.json({
       radius,

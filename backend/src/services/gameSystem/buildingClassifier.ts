@@ -172,6 +172,7 @@ const EXPLICIT_HOUSE_BUILDING_VALUES = new Set(["house", "detached", "residentia
 const EXPLICIT_GARAGE_BUILDING_VALUES = new Set(["garage", "garages", "carport"]);
 const EXPLICIT_TOOL_SHED_BUILDING_VALUES = new Set(["shed"]);
 
+// 住宅区判定参数
 const RESIDENTIAL_DISTRICT_SCHEMA_RADIUS_METERS = 120;
 const RESIDENTIAL_DISTRICT_ROAD_RADIUS_METERS = 90;
 const RESIDENTIAL_DISTRICT_AREA_WEIGHTS: Record<string, { residential: number; nonResidential: number }> = {
@@ -212,13 +213,24 @@ export async function generateBuildingSchema(
   }
 
   // 看看能不能直接分类出来
-  const directCategory = await resolveDirectCategory(candidate, existingSchemas); // TODO 当前只支持住宅
-  if (directCategory) {
+  const explicitCategory = resolveExplicitCategory(candidate); // TODO 当前只支持住宅
+  if (explicitCategory) {
     return buildBuildingSchema(
       candidate.detail.featureId,
-      directCategory,
+      explicitCategory,
       candidate.centerPosition,
-      selectResidentialPatternKey(candidate, directCategory),
+      selectResidentialPatternKey(candidate, explicitCategory), // TODO 当前只支持住宅
+    );
+  }
+
+  // 不能直接分出来就进入模糊分类模式
+  const ambiguousCategory = await resolveAmbiguousCategory(candidate, existingSchemas)
+  if (ambiguousCategory) {
+    return buildBuildingSchema(
+      candidate.detail.featureId,
+      ambiguousCategory,
+      candidate.centerPosition,
+      selectResidentialPatternKey(candidate, ambiguousCategory), // TODO 当前只支持住宅
     );
   }
 
@@ -226,6 +238,7 @@ export async function generateBuildingSchema(
     return undefined;
   }
 
+  console.log('TODO: LLM 分支');
   return undefined; // TODO 进入 LLM 分支
 }
 
@@ -300,10 +313,7 @@ async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandid
  * @param existingSchemas 作为参考的来自 Game State 的 Building Schema
  * @returns 已支持的 category；若当前阶段仍无法稳定判断则返回 null // TODO 当前只支持住宅
  */
-async function resolveDirectCategory(
-  candidate: BuildingCandidate,
-  existingSchemas: Record<string, BuildingSchema>
-): Promise<ResidentialCategoryKey | null> {
+function resolveExplicitCategory(candidate: BuildingCandidate): ResidentialCategoryKey | null {
   if (isExplicitGarage(candidate.detail.tags) || hasContainedPoiTag(candidate, "amenity", ["parking"])) {
     return "garage";
   }
@@ -313,15 +323,108 @@ async function resolveDirectCategory(
   }
 
   if (isExplicitHouse(candidate.detail.tags)) {
-    const isResidential = await isStandaloneResidentialBuilding(candidate.detail.featureId);
-    if (isResidential) {
-      return "house";
-    }
-
-    return "garage";
+    return "house";
   }
 
-  return resolveResidentialDistrictCategory(candidate, existingSchemas);
+  return null
+}
+
+/**
+ * TODO 目前暂只支持住宅区
+ * @param candidate
+ * @param existingSchemas
+ * @returns
+ */
+async function resolveAmbiguousCategory(
+  candidate: BuildingCandidate,
+  existingSchemas: Record<string, BuildingSchema>
+): Promise<ResidentialCategoryKey | null> {
+  return ambiguousResidentialCategory(candidate, existingSchemas);
+}
+
+//#region 分区：住宅区
+
+/**
+ * 根据已经确定的 category 选出 pattern。
+ *
+ * 简单附属建筑不单独扩 pattern 表，而是直接把 category 名作为唯一 pattern。
+ *
+ * @param candidate 已标准化的建筑候选
+ * @param categoryKey 已确定的 category
+ * @returns category 对应的 pattern key
+ */
+function selectResidentialPatternKey(
+  candidate: BuildingCandidate,
+  categoryKey: ResidentialCategoryKey, // TODO 当前只支持住宅
+): string {
+  // 简单建筑直接返回 Category Key 作为 Pattern Key
+  const simpleCategoryKeys = Object.entries(RESIDENTIAL_CATEGORIES)
+    .filter(([key, cat]) => 'base_schema' in cat && cat.base_schema && 'self' in cat.base_schema)
+    .map(([key, cat]) => key)
+  if (simpleCategoryKeys.includes(categoryKey)) return categoryKey
+
+  // 复杂建筑可以保证只剩 house 了
+  const patternPool = determineHousePatternPool(candidate); // TODO 当前只支持住宅
+  return pickRandom(patternPool);
+}
+
+/**
+ * 为住宅类选择一个“可抽样的 pattern 候选池”。
+ *
+ * 当前规则只使用面积与楼层数这两个稳定信号，保持实现简单且可解释。
+ * 真正的随机发生在 pickRandom() 中。
+ *
+ * @param candidate 已确定为住宅的建筑候选
+ * @returns 允许抽样的住宅 pattern 列表
+ */
+function determineHousePatternPool(candidate: BuildingCandidate): string[] {
+  const { areaSqm, buildingLevels } = candidate;
+
+  if (areaSqm === null && buildingLevels === null) {
+    return ["studio", "standard", "duplex", "elaborate"];
+  }
+
+  if ((areaSqm === null || areaSqm <= SMALL_HOUSE_AREA_MAX_SQM) && (buildingLevels === null || buildingLevels <= 1)) {
+    return ["studio", "standard"];
+  }
+
+  if ((areaSqm === null || areaSqm <= MEDIUM_HOUSE_AREA_MAX_SQM) && (buildingLevels === null || buildingLevels <= 2)) {
+    return ["standard", "duplex"];
+  }
+
+  if ((areaSqm !== null && areaSqm > MEDIUM_HOUSE_AREA_MAX_SQM) || (buildingLevels !== null && buildingLevels >= 2)) {
+    return ["duplex", "elaborate"];
+  }
+
+  return ["standard", "duplex"];
+}
+
+/**
+ * 在没有 explicit building tag 的情况下，
+ * 结合覆盖区域、周边道路和已有 schema 判断当前建筑是否位于独栋住宅区。
+ */
+async function ambiguousResidentialCategory(
+  candidate: BuildingCandidate,
+  existingSchemas: Record<string, BuildingSchema>,
+): Promise<ResidentialCategoryKey | null> {
+  const [coveringAreas, roadKinds] = await Promise.all([
+    fetchBuildingCoveringAreas(candidate.detail.featureId),
+    fetchBuildingRoadKinds(candidate.detail.featureId),
+  ]);
+  // console.log('coveringAreas: ',coveringAreas);
+  // console.log('roadKinds;: ',roadKinds);
+
+  const weights = computeResidentialDistrictWeights(candidate, existingSchemas, coveringAreas, roadKinds);
+  // console.log('weights: ',weights);
+  const isResidentialDistrict = weightedBoolean(weights.residential, weights.nonResidential);
+  // console.log('isResidentialDistrict: ',isResidentialDistrict);
+  if (!isResidentialDistrict) {
+    console.log('随机判定不是住宅区建筑');
+    return null;
+  }
+
+  const isStandaloneResidential = await isStandaloneResidentialBuilding(candidate.detail.featureId);
+  return isStandaloneResidential ? "house" : "garage";
 }
 
 /**
@@ -351,12 +454,15 @@ export async function isStandaloneResidentialBuilding(featureId: string): Promis
   const row = result.rows[0];
 
   const areaSqm = toFiniteNumber(row?.area_sqm ?? null);
+  // console.log(`${featureId}: 面积${areaSqm}`);
   const neighborSampleCount = toFiniteNumber(row?.neighbor_sample_count ?? null);
+  // console.log(`周围建筑数${neighborSampleCount}`);
   const neighborAverageAreaSqm = toFiniteNumber(row?.neighbor_average_area_sqm ?? null);
+  // console.log(`周围平均面积${neighborAverageAreaSqm}`);
 
   // 进行判断
 
-  if ( // 没有其他建筑
+  if ( // 没有其他建筑，按独栋住宅处理
     areaSqm === null
     || neighborSampleCount === null
     || neighborSampleCount < STANDALONE_BUILDING_MIN_NEIGHBOR_SAMPLE_COUNT
@@ -367,8 +473,8 @@ export async function isStandaloneResidentialBuilding(featureId: string): Promis
 
   if ( // 确实就是独立住宅
     row?.is_simple_rectangle !== true
-    || areaSqm > STANDALONE_BUILDING_MAX_ACCESSORY_AREA_SQM
-    || areaSqm >= neighborAverageAreaSqm * STANDALONE_BUILDING_RELATIVE_AREA_THRESHOLD
+    && areaSqm > STANDALONE_BUILDING_MAX_ACCESSORY_AREA_SQM
+    && areaSqm >= neighborAverageAreaSqm * STANDALONE_BUILDING_RELATIVE_AREA_THRESHOLD
   ) {
     return true;
   }
@@ -376,85 +482,42 @@ export async function isStandaloneResidentialBuilding(featureId: string): Promis
   return false;
 }
 
-/**
- * 根据已经确定的 category 选出 pattern。
- *
- * 简单附属建筑不单独扩 pattern 表，而是直接把 category 名作为唯一 pattern。
- *
- * @param candidate 已标准化的建筑候选
- * @param categoryKey 已确定的 category
- * @returns category 对应的 pattern key
- */
-function selectResidentialPatternKey(
-  candidate: BuildingCandidate,
-  categoryKey: ResidentialCategoryKey, // TODO 当前只支持住宅
-): string {
-  // 简单建筑直接返回 Category Key 作为 Pattern Key
-  const simpleCategoryKeys = Object.entries(RESIDENTIAL_CATEGORIES)
-    .filter(([key, cat]) => 'base_schema' in cat && cat.base_schema && 'self' in cat.base_schema)
-    .map(([key, cat]) => key)
-  if (simpleCategoryKeys.includes(categoryKey)) return categoryKey
-
-  const patternPool = determineResidentialPatternPool(candidate); // TODO 当前只支持住宅
-  return pickRandom(patternPool);
-}
-
-/**
- * 为住宅类选择一个“可抽样的 pattern 候选池”。
- *
- * 当前规则只使用面积与楼层数这两个稳定信号，保持实现简单且可解释。
- * 真正的随机发生在 pickRandom() 中。
- *
- * @param candidate 已确定为住宅的建筑候选
- * @returns 允许抽样的住宅 pattern 列表
- */
-function determineResidentialPatternPool(candidate: BuildingCandidate): string[] {
-  const { areaSqm, buildingLevels } = candidate;
-
-  if (areaSqm === null && buildingLevels === null) {
-    return ["studio", "standard", "duplex", "elaborate"];
-  }
-
-  if ((areaSqm === null || areaSqm <= SMALL_HOUSE_AREA_MAX_SQM) && (buildingLevels === null || buildingLevels <= 1)) {
-    return ["studio", "standard"];
-  }
-
-  if ((areaSqm === null || areaSqm <= MEDIUM_HOUSE_AREA_MAX_SQM) && (buildingLevels === null || buildingLevels <= 2)) {
-    return ["standard", "duplex"];
-  }
-
-  if ((areaSqm !== null && areaSqm > MEDIUM_HOUSE_AREA_MAX_SQM) || (buildingLevels !== null && buildingLevels >= 2)) {
-    return ["duplex", "elaborate"];
-  }
-
-  return ["standard", "duplex"];
-}
-
-/**
- * 在没有 explicit building tag 的情况下，
- * 结合覆盖区域、周边道路和已有 schema 判断当前建筑是否位于独栋住宅区。
- */
-async function resolveResidentialDistrictCategory(
+function computeResidentialDistrictWeights(
   candidate: BuildingCandidate,
   existingSchemas: Record<string, BuildingSchema>,
-): Promise<ResidentialCategoryKey | null> {
-  const [coveringAreas, roadKinds] = await Promise.all([
-    fetchBuildingCoveringAreas(candidate.detail.featureId),
-    fetchBuildingRoadKinds(candidate.detail.featureId),
-  ]);
+  coveringAreas: string[],
+  roadKinds: string[],
+): { residential: number; nonResidential: number } {
+  let residential = 0;
+  let nonResidential = 0;
 
-  const weights = computeResidentialDistrictWeights(candidate, existingSchemas, coveringAreas, roadKinds);
-  if (weights.residential <= 0 && weights.nonResidential <= 0) {
-    return null;
+  for (const area of coveringAreas) {
+    const weights = RESIDENTIAL_DISTRICT_AREA_WEIGHTS[area];
+    if (!weights) {
+      continue;
+    }
+
+    residential += weights.residential;
+    nonResidential += weights.nonResidential;
   }
 
-  const isResidentialDistrict = weightedBoolean(weights.residential, weights.nonResidential);
-  if (!isResidentialDistrict) {
-    return null;
+  for (const roadKind of roadKinds) {
+    const weights = RESIDENTIAL_DISTRICT_ROAD_WEIGHTS[roadKind];
+    if (!weights) {
+      continue;
+    }
+
+    residential += weights.residential;
+    nonResidential += weights.nonResidential;
   }
 
-  const isStandaloneResidential = await isStandaloneResidentialBuilding(candidate.detail.featureId);
-  return isStandaloneResidential ? "house" : "garage";
+  const nearbyHouseSchemas = Object.values(existingSchemas).filter((schema) => {
+    return schema.category === "house"
+      && distanceToPosition(schema.centerPosition, candidate.centerPosition) <= RESIDENTIAL_DISTRICT_SCHEMA_RADIUS_METERS;
+  });
+  residential += nearbyHouseSchemas.length * RESIDENTIAL_DISTRICT_SCHEMA_HOUSE_WEIGHT;
+
+  return { residential, nonResidential };
 }
 
 //#region 共用逻辑函数
@@ -819,44 +882,6 @@ function mergeStringRecord(primary: Record<string, string>, fallback: Record<str
   return merged;
 }
 
-function computeResidentialDistrictWeights(
-  candidate: BuildingCandidate,
-  existingSchemas: Record<string, BuildingSchema>,
-  coveringAreas: string[],
-  roadKinds: string[],
-): { residential: number; nonResidential: number } {
-  let residential = 0;
-  let nonResidential = 0;
-
-  for (const area of coveringAreas) {
-    const weights = RESIDENTIAL_DISTRICT_AREA_WEIGHTS[area];
-    if (!weights) {
-      continue;
-    }
-
-    residential += weights.residential;
-    nonResidential += weights.nonResidential;
-  }
-
-  for (const roadKind of roadKinds) {
-    const weights = RESIDENTIAL_DISTRICT_ROAD_WEIGHTS[roadKind];
-    if (!weights) {
-      continue;
-    }
-
-    residential += weights.residential;
-    nonResidential += weights.nonResidential;
-  }
-
-  const nearbyHouseSchemas = Object.values(existingSchemas).filter((schema) => {
-    return schema.category === "house"
-      && distanceToPosition(schema.centerPosition, candidate.centerPosition) <= RESIDENTIAL_DISTRICT_SCHEMA_RADIUS_METERS;
-  });
-  residential += nearbyHouseSchemas.length * RESIDENTIAL_DISTRICT_SCHEMA_HOUSE_WEIGHT;
-
-  return { residential, nonResidential };
-}
-
 function computeMeanCenterPosition(positions: Position[]): Position | null {
   if (positions.length === 0) {
     return null;
@@ -929,16 +954,16 @@ function hasContainedPoiTag(
   });
 }
 
-function weightedBoolean(residentialWeight: number, nonResidentialWeight: number): boolean {
-  const safeResidentialWeight = Math.max(0, residentialWeight);
-  const safeNonResidentialWeight = Math.max(0, nonResidentialWeight);
-  const totalWeight = safeResidentialWeight + safeNonResidentialWeight;
-
-  if (totalWeight <= 0) {
-    return false;
-  }
-
-  return Math.random() * totalWeight < safeResidentialWeight;
+/**
+ * 以支持权重和反对权重加权随机得到结果
+ * @param supportingWeight
+ * @param nonSupportingWeight 为负数
+ * @returns true 代表支持，false 代表反对
+ */
+function weightedBoolean(supportingWeight: number, nonSupportingWeight: number): boolean {
+  const totalWeight = supportingWeight + nonSupportingWeight;
+  if (totalWeight <= 0) return false;
+  return Math.random() * totalWeight < supportingWeight;
 }
 
 /**
