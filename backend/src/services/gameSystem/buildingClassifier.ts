@@ -213,13 +213,13 @@ export async function generateBuildingSchema(
   }
 
   // 看看能不能直接分类出来
-  const explicitCategory = resolveExplicitCategory(candidate); // TODO 当前只支持住宅
+  const explicitCategory = resolveExplicitCategory(candidate);
   if (explicitCategory) {
     return buildBuildingSchema(
       candidate.detail.featureId,
       explicitCategory,
       candidate.centerPosition,
-      selectResidentialPatternKey(candidate, explicitCategory), // TODO 当前只支持住宅
+      selectPatternKey(candidate, explicitCategory),
     );
   }
 
@@ -230,7 +230,7 @@ export async function generateBuildingSchema(
       candidate.detail.featureId,
       ambiguousCategory,
       candidate.centerPosition,
-      selectResidentialPatternKey(candidate, ambiguousCategory), // TODO 当前只支持住宅
+      selectPatternKey(candidate, ambiguousCategory),
     );
   }
 
@@ -251,7 +251,6 @@ const fetchBuildingRoadKindsSqlPromise = loadServiceSql("gameSystem/sql/fetchBui
 const fetchBuildingCoveringAreasSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingCoveringAreas.sql");
 
 /**
- * TODO 候选中填入当前建筑所在的 area
  * 把任意传入的 building feature id 填充为后续分类所用的“有效候选”。
  *
  * 若传入的是 building relation 的一部分，则自动提升到 relation 级建筑，
@@ -311,7 +310,7 @@ async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandid
  *
  * @param candidate 已标准化的建筑候选
  * @param existingSchemas 作为参考的来自 Game State 的 Building Schema
- * @returns 已支持的 category；若当前阶段仍无法稳定判断则返回 null // TODO 当前只支持住宅
+ * @returns 已支持的 category；若当前阶段仍无法稳定判断则返回 null
  */
 function resolveExplicitCategory(candidate: BuildingCandidate): ResidentialCategoryKey | null {
   if (isExplicitGarage(candidate.detail.tags) || hasContainedPoiTag(candidate, "amenity", ["parking"])) {
@@ -340,6 +339,19 @@ async function resolveAmbiguousCategory(
   existingSchemas: Record<string, BuildingSchema>
 ): Promise<ResidentialCategoryKey | null> {
   return ambiguousResidentialCategory(candidate, existingSchemas);
+}
+
+/**
+ * TODO 目前暂只支持住宅区
+ * @param candidate
+ * @param categoryKey
+ * @returns
+ */
+function selectPatternKey(
+  candidate: BuildingCandidate,
+  categoryKey: ResidentialCategoryKey, // TODO 当前只支持住宅
+): string {
+  return selectResidentialPatternKey(candidate, categoryKey)
 }
 
 //#region 分区：住宅区
@@ -482,6 +494,14 @@ export async function isStandaloneResidentialBuilding(featureId: string): Promis
   return false;
 }
 
+/**
+ * 根据候选建筑所处区域与周边道路，加权随机决定是不是居住区建筑
+ * @param candidate
+ * @param existingSchemas
+ * @param coveringAreas
+ * @param roadKinds
+ * @returns
+ */
 function computeResidentialDistrictWeights(
   candidate: BuildingCandidate,
   existingSchemas: Record<string, BuildingSchema>,
@@ -493,20 +513,14 @@ function computeResidentialDistrictWeights(
 
   for (const area of coveringAreas) {
     const weights = RESIDENTIAL_DISTRICT_AREA_WEIGHTS[area];
-    if (!weights) {
-      continue;
-    }
-
+    if (!weights) continue;
     residential += weights.residential;
     nonResidential += weights.nonResidential;
   }
 
   for (const roadKind of roadKinds) {
     const weights = RESIDENTIAL_DISTRICT_ROAD_WEIGHTS[roadKind];
-    if (!weights) {
-      continue;
-    }
-
+    if (!weights) continue;
     residential += weights.residential;
     nonResidential += weights.nonResidential;
   }
