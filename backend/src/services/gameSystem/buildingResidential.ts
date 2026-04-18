@@ -172,15 +172,15 @@ export async function ambiguousResidentialCategory(
     fetchBuildingCoveringAreas(candidate.detail.featureId),
     fetchBuildingRoadKinds(candidate.detail.featureId),
   ]);
-  // console.log('coveringAreas: ',coveringAreas);
-  // console.log('roadKinds;: ',roadKinds);
+  // console.log('覆盖区域: ',coveringAreas);
+  // console.log('周边道路: ',roadKinds);
 
   const weights = computeResidentialDistrictWeights(candidate, existingSchemas, coveringAreas, roadKinds);
   // console.log('weights: ',weights);
   const isResidentialDistrict = weightedBoolean(weights.residential, weights.nonResidential);
   // console.log('isResidentialDistrict: ',isResidentialDistrict);
   if (!isResidentialDistrict) {
-    console.log('随机判定不是住宅区建筑');
+    // console.log('随机判定不是住宅区建筑');
     return null;
   }
 
