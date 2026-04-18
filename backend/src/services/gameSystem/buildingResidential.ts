@@ -8,7 +8,7 @@ type ResidentialCategoryKey = keyof typeof RESIDENTIAL_CATEGORIES;
 /**
  * 与 SQL 查询结果表一致的扁平类型
  */
-interface DbStandaloneResidentialBuildingRow {
+interface DbHouseDetermingRow {
   area_sqm: number;
   neighbor_sample_count: number;
   neighbor_average_area_sqm: number;
@@ -93,10 +93,10 @@ const RESIDENTIAL_DISTRICT_ROAD_WEIGHTS: Record<string, { residential: number; n
 };
 const RESIDENTIAL_DISTRICT_SCHEMA_HOUSE_WEIGHT = 4;
 
-const STANDALONE_BUILDING_NEIGHBOR_RADIUS_METERS = 60;
-const STANDALONE_BUILDING_MAX_ACCESSORY_AREA_SQM = 45;
-const STANDALONE_BUILDING_RELATIVE_AREA_THRESHOLD = 0.7;
-const STANDALONE_BUILDING_MIN_NEIGHBOR_SAMPLE_COUNT = 1;
+const HOUSE_DETERMING_NEIGHBOR_RADIUS_METERS = 60;
+const HOUSE_DETERMING_MAX_ACCESSORY_AREA_SQM = 45;
+const HOUSE_DETERMING_RELATIVE_AREA_THRESHOLD = 0.7;
+const HOUSE_DETERMING_MIN_NEIGHBOR_SAMPLE_COUNT = 1;
 
 const SMALL_HOUSE_AREA_MAX_SQM = 90;
 const MEDIUM_HOUSE_AREA_MAX_SQM = 220;
@@ -184,11 +184,11 @@ export async function ambiguousResidentialCategory(
     return null;
   }
 
-  const isStandaloneResidential = await isStandaloneResidentialBuilding(candidate.detail.featureId);
-  return isStandaloneResidential ? "house" : "garage";
+  const isHouse = await isHouseBuilding(candidate.detail.featureId);
+  return isHouse ? "house" : "garage";
 }
 
-const classifyStandaloneResidentialBuildingSqlPromise = loadServiceSql("gameSystem/sql/classifyStandaloneResidentialBuilding.sql");
+const fetchHouseDetermingFactorSqlPromise = loadServiceSql("gameSystem/sql/fetchHouseDetermingFactor.sql");
 
 /**
  * 判断一个建筑是“独栋住宅”或“独立附属建筑（独立车库/工具屋）”。
@@ -206,13 +206,13 @@ const classifyStandaloneResidentialBuildingSqlPromise = loadServiceSql("gameSyst
  * @param featureId 已缩小到“独栋住宅/独立附属建筑”范围内的建筑候选
  * @returns 是否应按独栋住宅处理
  */
-export async function isStandaloneResidentialBuilding(featureId: string): Promise<boolean> {
+export async function isHouseBuilding(featureId: string): Promise<boolean> {
   // 获取数据库中的周遭建筑数据与建筑本身数据
   const featureRef = parseBuildingFeatureId(featureId);
-  const sql = await classifyStandaloneResidentialBuildingSqlPromise;
-  const result = await query<DbStandaloneResidentialBuildingRow>(
+  const sql = await fetchHouseDetermingFactorSqlPromise;
+  const result = await query<DbHouseDetermingRow>(
     sql,
-    [featureRef.osmType, featureRef.osmId, STANDALONE_BUILDING_NEIGHBOR_RADIUS_METERS],
+    [featureRef.osmType, featureRef.osmId, HOUSE_DETERMING_NEIGHBOR_RADIUS_METERS],
   );
   const row = result.rows[0];
 
@@ -228,7 +228,7 @@ export async function isStandaloneResidentialBuilding(featureId: string): Promis
   if ( // 没有其他建筑，按独栋住宅处理
     areaSqm === null
     || neighborSampleCount === null
-    || neighborSampleCount < STANDALONE_BUILDING_MIN_NEIGHBOR_SAMPLE_COUNT
+    || neighborSampleCount < HOUSE_DETERMING_MIN_NEIGHBOR_SAMPLE_COUNT
     || neighborAverageAreaSqm === null
   ) {
     return true;
@@ -236,8 +236,8 @@ export async function isStandaloneResidentialBuilding(featureId: string): Promis
 
   if ( // 确实就是独立住宅
     row?.is_simple_rectangle !== true
-    && areaSqm > STANDALONE_BUILDING_MAX_ACCESSORY_AREA_SQM
-    && areaSqm >= neighborAverageAreaSqm * STANDALONE_BUILDING_RELATIVE_AREA_THRESHOLD
+    && areaSqm > HOUSE_DETERMING_MAX_ACCESSORY_AREA_SQM
+    && areaSqm >= neighborAverageAreaSqm * HOUSE_DETERMING_RELATIVE_AREA_THRESHOLD
   ) {
     return true;
   }
