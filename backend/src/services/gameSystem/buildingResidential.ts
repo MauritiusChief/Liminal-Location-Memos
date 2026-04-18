@@ -102,8 +102,6 @@ const HOUSE_DETERMING_NEIGHBOR_RADIUS_METERS = 60;
 const HOUSE_DETERMING_RELATIVE_AREA_THRESHOLD = 0.5;
 const HOUSE_DETERMING_MIN_NEIGHBOR_SAMPLE_COUNT = 1;
 const RESIDENTIAL_ACCESSORY_CONTEXT_RADIUS_METERS = 25;
-const RESIDENTIAL_PRIMARY_CATEGORY_WEIGHT = 9;
-const RESIDENTIAL_SECONDARY_CATEGORY_WEIGHT = 1;
 
 const SMALL_HOUSE_AREA_MAX_SQM = 90;
 const MEDIUM_HOUSE_AREA_MAX_SQM = 220;
@@ -199,31 +197,32 @@ export async function ambiguousResidentialCategory(
     return distanceToPosition(schema.centerPosition, candidate.centerPosition) <= RESIDENTIAL_ACCESSORY_CONTEXT_RADIUS_METERS;
   });
 
-  if (buildingKind === "house") {
+  if (buildingKind === "house") { // 如果是住宅则根据是否有外置停车地点来判断本体需不需要车库
     const hasNearbyGarage = nearbySchemas.some((schema) => schema.category === "garage");
     if (hasNearbyParking || hasNearbyGarage) {
       return "house";
     }
 
-    return weightedBoolean(RESIDENTIAL_PRIMARY_CATEGORY_WEIGHT, RESIDENTIAL_SECONDARY_CATEGORY_WEIGHT)
+    return weightedBoolean(9, 1)
       ? "house&garage"
       : "house";
   }
 
   const hasNearbyHouseGarage = nearbySchemas.some((schema) => schema.category === "house&garage");
-  if (hasNearbyHouseGarage) {
+  if (hasNearbyHouseGarage) { // 如果是附属建筑，首先根据是否有内置车库来判断，已有内置车库就不需要车库了
     return "tool_shed";
   }
 
-  if (hasNearbyParking) {
-    return weightedBoolean(RESIDENTIAL_PRIMARY_CATEGORY_WEIGHT, RESIDENTIAL_SECONDARY_CATEGORY_WEIGHT)
+  if (hasNearbyParking) { // 即使有外置停车地点，也可能需要独立车库
+    return weightedBoolean(9, 1)
       ? "tool_shed"
       : "garage";
   }
 
-  return weightedBoolean(RESIDENTIAL_PRIMARY_CATEGORY_WEIGHT, RESIDENTIAL_SECONDARY_CATEGORY_WEIGHT)
-    ? "garage"
-    : "tool_shed";
+  // 没有内置车库且没有外置停车地点，大概率是独立车库，但仍有小概率是街边停车+工具房
+  return weightedBoolean(1, 9)
+    ? "tool_shed"
+    : "garage";
 }
 
 const fetchHouseDetermingFactorSqlPromise = loadServiceSql("gameSystem/sql/fetchHouseDetermingFactor.sql");
