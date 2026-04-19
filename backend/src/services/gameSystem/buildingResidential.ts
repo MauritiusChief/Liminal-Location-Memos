@@ -1,5 +1,5 @@
 import { loadServiceSql } from "@/db/sqlLoader.js";
-import { BuildingCandidate, BuildingSchema, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, pickRandom, weightedBoolean } from "./buildingClassifier.js";
+import { AnyCategoryKey, BuildingCandidate, BuildingSchema, CategoryDefinition, CategorySchema, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, PatternDistribution, PatternRoomDefinition, pickRandom, RoomSchema, weightedBoolean } from "./buildingClassifier.js";
 import { query } from "@/db/client.js";
 import { distanceToPosition } from "../geometry.js";
 
@@ -28,23 +28,23 @@ const ALL_LEVELS = ["all_levels"];
  * 此表内容仅表示种类，不表示数量或与面积的关联
  * - prefered：代表该功能应优先出现的楼层
  */
-const RESIDENTIAL_CATEGORIES = {
+export const RESIDENTIAL_CATEGORIES: Record<string, CategoryDefinition> = {
   house: {desc: "住宅",
     patterns: {
-      studio: {desc: "仅卧室、客厅、浴室的简单布局",
+      studio: {desc: "仅卧室、客厅、浴室的简单布局", rooms: {
         bedroom: {desc: "卧室", prefered: TOP_LEVEL[0]},
         living_room: {desc: "与餐厅、厨房相连的客厅", prefered: GROUND_LEVEL[0]},
         bath_room: {desc: "带厕所的浴室", prefered: TOP_LEVEL[0]},
-      },
-      standard: {desc: "单间卧室的常规布局",
+      }},
+      standard: {desc: "单间卧室的常规布局", rooms: {
         bedroom: {desc: "卧室", prefered: TOP_LEVEL[0]},
         living_room: {desc: "客厅", prefered: GROUND_LEVEL[0]},
         kitchen: {desc: "带餐厅的厨房", prefered: GROUND_LEVEL[0]},
         bath_room: {desc: "带厕所的浴室", prefered: TOP_LEVEL[0]},
         // 概率房间
         laundry: {desc: "洗衣间", prefered: GROUND_LEVEL[0], chance: 0.2},
-      },
-      duplex: {desc: "一到两间卧室的较复杂布局",
+      }},
+      duplex: {desc: "一到两间卧室的较复杂布局", rooms: {
         bedroom: {desc: "卧室", prefered: TOP_LEVEL[0]},
         living_room: {desc: "客厅", prefered: GROUND_LEVEL[0]},
         kitchen: {desc: "带餐厅的厨房", prefered: GROUND_LEVEL[0]},
@@ -55,8 +55,8 @@ const RESIDENTIAL_CATEGORIES = {
         laundry: {desc: "洗衣间", prefered: GROUND_LEVEL[0], chance: 0.8},
         kids_bedroom: {desc: "儿童卧室", prefered: TOP_LEVEL[0], chance: 0.5},
         rest_room: {desc: "厕所", prefered: ALL_LEVELS[0], chance: 0.5},
-      },
-      elaborate: {desc: "三到四间卧室的复杂房屋布局",
+      }},
+      elaborate: {desc: "三到四间卧室的复杂房屋布局", rooms: {
         bedroom: {desc: "卧室", prefered: TOP_LEVEL[0]},
         living_room: {desc: "客厅", prefered: GROUND_LEVEL[0]},
         kitchen: {desc: "厨房", prefered: GROUND_LEVEL[0]},
@@ -68,14 +68,20 @@ const RESIDENTIAL_CATEGORIES = {
         office: {desc: "办公室", chance: 0.5},
         kids_bedroom: {desc: "儿童卧室", prefered: TOP_LEVEL[0], chance: 0.8},
         rest_room: {desc: "厕所", prefered: ALL_LEVELS[0], chance: 0.9},
-      }
+      }}
     }
   },
   // 带车库的住宅通过应用复合型 Category “住宅 - 内含 车库” 表示
   // 就像 “图书馆 - 内含 咖啡厅”
-  garage: {desc: "车库", base_schema: {self: {prefered: GROUND_LEVEL[0]}}},
-  tool_shed: {desc: "工具屋", base_schema: {self: true}},
+  garage: {desc: "车库", base_schema: {rooms: {self: {prefered: GROUND_LEVEL[0]}}}},
+  tool_shed: {desc: "工具屋", base_schema: {rooms: {self: true}}},
 } as const;
+export const RESIDENTIAL_CATEGORY_KEYS = Object.keys(RESIDENTIAL_CATEGORIES)
+export const RESIDENTIAL_PATTERN_KEYS = Object.entries(RESIDENTIAL_CATEGORIES)
+  .flatMap(([key, cat]) => {
+    if ('base_schema' in cat && cat.base_schema && 'self' in cat.base_schema) return key // 简单类型返回 Category Key 本身作为 Pattern Key
+    if ('patterns' in cat && cat.patterns) return Object.keys(cat.patterns)
+  }).filter(k => k !== undefined)
 
 const RESIDENTIAL_DISTRICT_SCHEMA_RADIUS_METERS = 120;
 
@@ -103,7 +109,11 @@ const RESIDENTIAL_ACCESSORY_CONTEXT_RADIUS_METERS = 25;
 const SMALL_HOUSE_AREA_MAX_SQM = 90;
 const MEDIUM_HOUSE_AREA_MAX_SQM = 220;
 
+
+//#####################
 //#region Category 逻辑
+//#####################
+
 
 /**
  * 在没有 explicit building tag 的情况下，
@@ -115,7 +125,7 @@ const MEDIUM_HOUSE_AREA_MAX_SQM = 220;
 export async function ambiguousResidentialCategory(
   candidate: BuildingCandidate,
   existingSchemas: Record<string, BuildingSchema>,
-): Promise<string | null> {
+): Promise<string[]> {
   const [coveringAreas, roadKinds] = await Promise.all([
     fetchBuildingCoveringAreas(candidate.detail.featureId),
     fetchBuildingRoadKinds(candidate.detail.featureId),
@@ -129,7 +139,7 @@ export async function ambiguousResidentialCategory(
   // console.log('isResidentialDistrict: ',isResidentialDistrict);
   if (!isResidentialDistrict) {
     // console.log('随机判定不是住宅区建筑');
-    return null;
+    return [];
   }
 
   const [buildingKind, hasNearbyParking] = await Promise.all([
@@ -143,29 +153,29 @@ export async function ambiguousResidentialCategory(
   if (buildingKind === "house") { // 如果是住宅则根据是否有外置停车地点来判断本体需不需要车库
     const hasNearbyGarage = nearbySchemas.some((schema) => schema.category === "garage");
     if (hasNearbyParking || hasNearbyGarage) {
-      return "house";
+      return ["house"];
     }
 
     return weightedBoolean(9, 1)
-      ? "house&garage"
-      : "house";
+      ? ["house","garage"]
+      : ["house"];
   }
 
   const hasNearbyHouseGarage = nearbySchemas.some((schema) => schema.category === "house&garage");
   if (hasNearbyHouseGarage) { // 如果是附属建筑，首先根据是否有内置车库来判断，已有内置车库就不需要车库了
-    return "tool_shed";
+    return ["tool_shed"];
   }
 
   if (hasNearbyParking) { // 即使有外置停车地点，也可能需要独立车库
     return weightedBoolean(9, 1)
-      ? "tool_shed"
-      : "garage";
+      ? ["tool_shed"]
+      : ["garage"];
   }
 
   // 没有内置车库且没有外置停车地点，大概率是独立车库，但仍有小概率是街边停车+工具房
   return weightedBoolean(1, 9)
-    ? "tool_shed"
-    : "garage";
+    ? ["tool_shed"]
+    : ["garage"];
 }
 
 /**
@@ -280,7 +290,11 @@ async function determineNearbyParkingSignal(featureId: string): Promise<boolean>
   return result.rows[0]?.has_nearby_parking === true;
 }
 
+
+//####################
 //#region Pattern 逻辑
+//####################
+
 
 /**
  * 根据已经确定的 category 选出 pattern。
@@ -296,10 +310,7 @@ export function selectResidentialPatternKey(
   categoryKey: string, // TODO 当前只支持住宅
 ): string {
   // 简单建筑直接返回 Category Key 作为 Pattern Key
-  const simpleCategoryKeys = Object.entries(RESIDENTIAL_CATEGORIES)
-    .filter(([key, cat]) => 'base_schema' in cat && cat.base_schema && 'self' in cat.base_schema)
-    .map(([key]) => key);
-  if (simpleCategoryKeys.includes(categoryKey)) return categoryKey;
+  if (RESIDENTIAL_PATTERN_KEYS.includes(categoryKey)) return categoryKey
 
   // 当前复合住宅类别仍复用住宅 pattern 池。
   const patternPool = determineHousePatternPool(candidate);
@@ -339,12 +350,111 @@ function determineHousePatternPool(candidate: BuildingCandidate): string[] {
 
 //TODO 添加 Pattern Distribution 占位函数，总是认为建筑只有一体，所以无 Pattern Distribution 问题
 
+/**
+ * 根据 residential category 与 pattern 生成最终 Building Schema 的 levels。
+ *
+ * 当前仅实现最小可用流程：
+ * - Pattern Distribution 占位：所有功能都属于当前建筑整体
+ * - Sector Distribution 占位：每个楼层只有一个 main sector
+ *
+ * @param candidate 已标准化的建筑候选
+ * @param categoryKey 已确定的 residential category，支持 `&` 连接的复合型 Category
+ * @param patternKey 已选出的 pattern
+ * @returns Building Schema 的 levels 字段
+ */
+export function buildResidentialLevels(
+  candidate: BuildingCandidate,
+  categoryKey: string,
+  patternKey: string,
+): BuildingSchema["levels"] {
+  const patternDistribution = buildResidentialPatternDistribution(categoryKey, patternKey);
+  const categorySchema = applyResidentialPatternToCategorySchema(candidate, categoryKey, patternDistribution);
+  const sectorDistribution = buildResidentialSectorDistribution(categorySchema);
+
+  return buildResidentialLevelsFromCategorySchema(candidate, categorySchema, sectorDistribution);
+}
+
+
+//#####################
 //#region C-Schema 逻辑
+//#####################
 
-//TODO Sector Distribution 也为占位函数，总是认为 C-Schema 中某个楼层只占一个 Sector
 
+/**
+ * 对 residential Category Base Schema 应用 Pattern Distribution
+ *
+ * @param candidate 已标准化的建筑候选
+ * @param patternDistribution 当前单体/多体建筑应拥有的 pattern 功能
+ * @returns feature id 为键的应用好的所有功能（包括 Pattern 与 Base Schema）
+ */
+export function applyResidentialPatternToBaseSchema(
+  candidate: BuildingCandidate,
+  patternDistribution: PatternDistribution,
+): Record<string, PatternRoomDefinition[]> {
+  // 装载 Base Schema
+  const patternAppliedBaseSchemaEntries = Object.entries(patternDistribution).map( ([fId, distr]) => {
+    const baseSchema = RESIDENTIAL_CATEGORIES[distr.category].base_schema
+    const baseSchemaRooms = baseSchema ? Object.values(baseSchema.rooms).filter(r => typeof r !== 'boolean') : []
+    return [fId, [...baseSchemaRooms, ...distr.rooms]]
+  })
+  const patternAppliedBaseSchema: Record<string, PatternRoomDefinition[]> = Object.fromEntries(patternAppliedBaseSchemaEntries)
+
+  //
+
+
+  return buildCategorySchemaFromResidentialRooms(candidate, rooms);
+}
+
+/**
+ * Sector Distribution 占位函数。
+ *
+ * 现阶段总是假设 C-Schema 中某个楼层只占一个 Sector。
+ *
+ * @param categorySchema 已合成的 C-Schema
+ * @returns 每个 C-Schema 楼层中的 sector 分配
+ */
+function buildResidentialSectorDistribution(categorySchema: CategorySchema): ResidentialSectorDistribution {
+  return Object.fromEntries(
+    Object.keys(categorySchema.levels).map((levelKey) => [levelKey, ["main"]]),
+  );
+}
+
+
+//################
 //#region 收尾逻辑
+//################
 
+
+/**
+ * 把 residential C-Schema 和占位 Sector Distribution 转为最终 Building Schema levels。
+ *
+ * @param candidate 已标准化的建筑候选
+ * @param categorySchema 已合成的 C-Schema
+ * @param sectorDistribution 当前楼层到 sector 的占位分配
+ * @returns Building Schema 的 levels 字段
+ */
+function buildResidentialLevelsFromCategorySchema(
+  candidate: BuildingCandidate,
+  categorySchema: CategorySchema,
+  sectorDistribution: ResidentialSectorDistribution,
+): BuildingSchema["levels"] {
+  return Object.fromEntries(
+    Object.entries(categorySchema.levels).map(([levelKey, levelSchema]) => {
+      const sectorKeys = sectorDistribution[levelKey] || ["main"];
+      return [levelKey, {
+        theme: levelSchema.theme,
+        span: levelSchema.span,
+        sectors: Object.fromEntries(
+          sectorKeys.map((sectorKey) => [sectorKey, {
+            area: candidate.areaSqm ?? 0,
+            centerPosition: candidate.centerPosition,
+            rooms: levelSchema.rooms,
+          }]),
+        ),
+      }];
+    }),
+  );
+}
 
 
 //#region 帮助函数
@@ -352,5 +462,174 @@ function determineHousePatternPool(candidate: BuildingCandidate): string[] {
 function isHouseFamilyCategory(category: string): boolean {
   return category === "house" || category === "house&garage";
 }
+
+function applyHouseSharedRoomCounts(
+  candidate: BuildingCandidate,
+  rooms: Record<string, ResidentialResolvedRoom>,
+): void {
+  if (!rooms.bedroom) return;
+
+  const limit = determineSharedBedroomLimit(candidate);
+  const hasKidsBedroom = Boolean(rooms.kids_bedroom);
+  const hasOffice = Boolean(rooms.office);
+
+  const desiredKidsBedroomCount = hasKidsBedroom ? pickRandom([1, 2]) : 0;
+  let remaining = Math.max(0, limit - 1);
+  let kidsBedroomCount = Math.min(desiredKidsBedroomCount, remaining);
+  remaining -= kidsBedroomCount;
+  let officeCount = hasOffice && remaining > 0 ? 1 : 0;
+  remaining -= officeCount;
+  const bedroomCount = 1 + remaining;
+
+  rooms.bedroom.count = bedroomCount;
+  if (rooms.kids_bedroom) {
+    if (kidsBedroomCount <= 0) {
+      delete rooms.kids_bedroom;
+    } else {
+      rooms.kids_bedroom.count = kidsBedroomCount;
+    }
+  }
+  if (rooms.office) {
+    if (officeCount <= 0) {
+      delete rooms.office;
+    } else {
+      rooms.office.count = officeCount;
+    }
+  }
+}
+
+function determineSharedBedroomLimit(candidate: BuildingCandidate): number {
+  const { areaSqm, buildingLevels } = candidate;
+
+  if ((areaSqm === null || areaSqm <= SMALL_HOUSE_AREA_MAX_SQM) && (buildingLevels === null || buildingLevels <= 1)) {
+    return weightedBoolean(3, 1) ? 1 : 2;
+  }
+
+  if ((areaSqm === null || areaSqm <= MEDIUM_HOUSE_AREA_MAX_SQM) && (buildingLevels === null || buildingLevels <= 2)) {
+    return pickRandom([2, 3]);
+  }
+
+  return pickRandom([3, 4]);
+}
+
+function applyHouseAccessRooms(
+  candidate: BuildingCandidate,
+  rooms: Record<string, ResidentialResolvedRoom>,
+): void {
+  const buildingLevels = normalizeBuildingLevels(candidate.buildingLevels);
+  const isSmallSingleLevel = (candidate.areaSqm === null || candidate.areaSqm <= SMALL_HOUSE_AREA_MAX_SQM) && buildingLevels <= 1;
+
+  if (isSmallSingleLevel && rooms.living_room) {
+    rooms.living_room.access = "entrance";
+  } else {
+    rooms.hall = {
+      desc: "门厅",
+      prefered: GROUND_LEVEL[0],
+      count: 1,
+      access: "entrance",
+    };
+  }
+
+  if (buildingLevels > 1) {
+    rooms.stairwell = {
+      desc: "楼梯间",
+      prefered: ALL_LEVELS[0],
+      count: 1,
+      access: "vertical",
+    };
+  }
+}
+
+function buildCategorySchemaFromResidentialRooms(
+  candidate: BuildingCandidate,
+  rooms: Record<string, ResidentialResolvedRoom>,
+): CategorySchema {
+  const categorySchema: CategorySchema = {
+    theme: "default",
+    levels: {},
+  };
+  const levelOptions = buildResidentialLevelOptions(candidate);
+
+  for (const [roomKey, room] of Object.entries(rooms)) {
+    const targetLevelKeys = resolveResidentialTargetLevelKeys(room.prefered, levelOptions);
+    for (const levelKey of targetLevelKeys) {
+      const levelOption = levelOptions[levelKey];
+      if (!levelOption) continue;
+
+      categorySchema.levels[levelKey] ??= {
+        theme: "default",
+        span: levelOption.span,
+        rooms: {},
+      };
+      categorySchema.levels[levelKey].rooms[roomKey] = toCategoryRoomSchema(room);
+    }
+  }
+
+  return categorySchema;
+}
+
+function toCategoryRoomSchema(room: ResidentialResolvedRoom): RoomSchema {
+  return {
+    descrption: room.desc,
+    count: room.count,
+    ...(room.access ? { access: room.access } : {}),
+  };
+}
+
+function buildResidentialLevelOptions(candidate: BuildingCandidate): Record<string, { span: number[] }> {
+  const buildingLevels = normalizeBuildingLevels(candidate.buildingLevels);
+  const options: Record<string, { span: number[] }> = {
+    ground_level: { span: [1] },
+    all_levels: { span: buildFloorSpan(buildingLevels) },
+  };
+
+  if (buildingLevels > 1) {
+    options.top_level = { span: [buildingLevels] };
+    options.second_level = { span: [2] };
+  }
+  if (buildingLevels > 2) {
+    options.second_to_top_level = { span: [buildingLevels - 1] };
+  }
+  if (buildingLevels > 3) {
+    options.third_level = { span: [3] };
+    options.third_to_top_level = { span: [buildingLevels - 2] };
+  }
+
+  return options;
+}
+
+function resolveResidentialTargetLevelKeys(
+  prefered: string | undefined,
+  levelOptions: Record<string, { span: number[] }>,
+): string[] {
+  const levelKeys = Object.keys(levelOptions);
+  const concreteLevelKeys = levelKeys.filter((levelKey) => levelKey !== ALL_LEVELS[0]);
+  if (prefered === ALL_LEVELS[0]) {
+    return ["all_levels"];
+  }
+  if (!prefered) {
+    return [pickRandom(concreteLevelKeys.length > 0 ? concreteLevelKeys : levelKeys)];
+  }
+  if (prefered in levelOptions) {
+    return [prefered];
+  }
+  if (TOP_LEVEL.includes(prefered)) {
+    return [levelOptions.top_level ? "top_level" : "ground_level"];
+  }
+  if (GROUND_LEVEL.includes(prefered)) {
+    return [levelOptions.ground_level ? "ground_level" : pickRandom(levelKeys)];
+  }
+
+  return [pickRandom(concreteLevelKeys.length > 0 ? concreteLevelKeys : levelKeys)];
+}
+
+function normalizeBuildingLevels(buildingLevels: number | null): number {
+  return Math.max(1, buildingLevels ?? 1);
+}
+
+function buildFloorSpan(buildingLevels: number): number[] {
+  return Array.from({ length: buildingLevels }, (_, index) => index + 1);
+}
+
 
 

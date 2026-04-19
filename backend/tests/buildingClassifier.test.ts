@@ -10,12 +10,9 @@ jest.mock("../src/db/sqlLoader", () => ({
 
 import { query } from "../src/db/client";
 import { generateBuildingSchema } from "../src/services/gameSystem/buildingClassifier";
-import {
-  determineResidentialBuildingKind,
-  selectResidentialPatternKey,
-} from "../src/services/gameSystem/buildingResidential";
+import { buildResidentialLevels } from "../src/services/gameSystem/buildingResidential";
 
-describe("buildingClassifier", () => {
+describe("building residential schema generation", () => {
   const mockedQuery = jest.mocked(query);
 
   beforeEach(() => {
@@ -26,78 +23,7 @@ describe("buildingClassifier", () => {
     jest.restoreAllMocks();
   });
 
-  it("classifies a small rectangular building as an accessory building", async () => {
-    mockedQuery.mockResolvedValue({
-      rows: [buildStandaloneRow({
-        area_sqm: 30,
-        neighbor_sample_count: 4,
-        neighbor_average_area_sqm: 80,
-        is_simple_rectangle: true,
-      })],
-    } as never);
-
-    await expect(determineResidentialBuildingKind("way/123")).resolves.toBe("accessory");
-  });
-
-  it("classifies a non-rectangular small building as a house", async () => {
-    mockedQuery.mockResolvedValue({
-      rows: [buildStandaloneRow({
-        area_sqm: 30,
-        neighbor_sample_count: 4,
-        neighbor_average_area_sqm: 80,
-        is_simple_rectangle: false,
-      })],
-    } as never);
-
-    await expect(determineResidentialBuildingKind("way/123")).resolves.toBe("house");
-  });
-
-  it("classifies a building above the absolute area cutoff as a house", async () => {
-    mockedQuery.mockResolvedValue({
-      rows: [buildStandaloneRow({
-        area_sqm: 46,
-        neighbor_sample_count: 4,
-        neighbor_average_area_sqm: 100,
-        is_simple_rectangle: true,
-      })],
-    } as never);
-
-    await expect(determineResidentialBuildingKind("way/123")).resolves.toBe("house");
-  });
-
-  it("classifies a building that is not small relative to neighbors as a house", async () => {
-    mockedQuery.mockResolvedValue({
-      rows: [buildStandaloneRow({
-        area_sqm: 30,
-        neighbor_sample_count: 4,
-        neighbor_average_area_sqm: 40,
-        is_simple_rectangle: true,
-      })],
-    } as never);
-
-    await expect(determineResidentialBuildingKind("way/123")).resolves.toBe("house");
-  });
-
-  it("classifies a building as a house when nearby samples are insufficient", async () => {
-    mockedQuery.mockResolvedValue({
-      rows: [buildStandaloneRow({
-        area_sqm: 30,
-        neighbor_sample_count: 0,
-        neighbor_average_area_sqm: 80,
-        is_simple_rectangle: true,
-      })],
-    } as never);
-
-    await expect(determineResidentialBuildingKind("way/123")).resolves.toBe("house");
-  });
-
-  it("classifies a building as a house when the target row is missing", async () => {
-    mockedQuery.mockResolvedValue({ rows: [] } as never);
-
-    await expect(determineResidentialBuildingKind("way/123")).resolves.toBe("house");
-  });
-
-  it("classifies an explicit house directly", async () => {
+  it("generates residential levels for an explicit house", async () => {
     jest.spyOn(Math, "random").mockReturnValue(0);
     mockedQuery.mockResolvedValueOnce({
       rows: [buildDetailRow({
@@ -112,422 +38,86 @@ describe("buildingClassifier", () => {
     } as never);
 
     const schema = await generateBuildingSchema("way/123", {});
+    const rooms = schema?.levels.ground_level.sectors.main.rooms;
 
     expect(schema?.featureId).toBe("way/123");
     expect(schema?.category).toBe("house");
     expect(schema?.centerPosition).toEqual({ lat: 40.0, lon: -83.01 });
+    expect(rooms?.bedroom).toEqual({ descrption: "卧室", count: 1 });
+    expect(rooms?.living_room).toEqual({ descrption: "与餐厅、厨房相连的客厅", count: 1, access: "entrance" });
+    expect(rooms?.bath_room).toEqual({ descrption: "带厕所的浴室", count: 1 });
   });
 
-  it("returns undefined for unresolved buildings when skipComplex is true", async () => {
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/500",
-          osm_type: "way",
-          osm_id: 500,
-          tags: { building: "yes" },
-          area_sqm: 150,
-          center_lon: -83.02,
-          center_lat: 40.01,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ covering_areas: ["landuse:commercial"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ road_kinds: [] }],
-      } as never);
-
-    await expect(generateBuildingSchema("way/500", {}, true)).resolves.toBeUndefined();
-  });
-
-  it("returns house for a house-like residential building when nearby parking exists", async () => {
-    jest.spyOn(Math, "random").mockReturnValue(0);
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/700",
-          osm_type: "way",
-          osm_id: 700,
-          tags: { building: "yes" },
-          area_sqm: 95,
-          center_lon: -83.012,
-          center_lat: 40.002,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ covering_areas: ["landuse:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ road_kinds: ["highway:residential", "highway:service"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [buildStandaloneRow({
-          area_sqm: 95,
-          neighbor_sample_count: 5,
-          neighbor_average_area_sqm: 110,
-          is_simple_rectangle: false,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ has_nearby_parking: true }],
-      } as never);
-
-    const schema = await generateBuildingSchema("way/700", {});
-
-    expect(schema?.category).toBe("house");
-  });
-
-  it("returns house for a house-like residential building when a nearby garage schema exists", async () => {
-    jest.spyOn(Math, "random").mockReturnValue(0);
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/701",
-          osm_type: "way",
-          osm_id: 701,
-          tags: { building: "yes" },
-          area_sqm: 95,
-          center_lon: -83.012,
-          center_lat: 40.002,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ covering_areas: ["landuse:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ road_kinds: ["highway:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [buildStandaloneRow({
-          area_sqm: 95,
-          neighbor_sample_count: 5,
-          neighbor_average_area_sqm: 110,
-          is_simple_rectangle: false,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ has_nearby_parking: false }],
-      } as never);
-
-    const schema = await generateBuildingSchema("way/701", {
-      "way/10": buildExistingSchema("way/10", "garage", 40.00205, -83.01205),
-    });
-
-    expect(schema?.category).toBe("house");
-  });
-
-  it("returns house&garage for a house-like residential building without parking or garage when random favors the composite", async () => {
-    jest.spyOn(Math, "random").mockReturnValue(0);
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/702",
-          osm_type: "way",
-          osm_id: 702,
-          tags: { building: "yes", "building:levels": "1" },
-          area_sqm: 95,
-          center_lon: -83.012,
-          center_lat: 40.002,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ covering_areas: ["landuse:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ road_kinds: ["highway:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [buildStandaloneRow({
-          area_sqm: 95,
-          neighbor_sample_count: 5,
-          neighbor_average_area_sqm: 110,
-          is_simple_rectangle: false,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ has_nearby_parking: false }],
-      } as never);
-
-    const schema = await generateBuildingSchema("way/702", {});
-
-    expect(schema?.category).toBe("house&garage");
-  });
-
-  it("returns house for a house-like residential building without parking or garage when random rejects the composite", async () => {
-    jest.spyOn(Math, "random").mockReturnValue(0.95);
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/703",
-          osm_type: "way",
-          osm_id: 703,
-          tags: { building: "yes" },
-          area_sqm: 95,
-          center_lon: -83.012,
-          center_lat: 40.002,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ covering_areas: ["landuse:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ road_kinds: ["highway:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [buildStandaloneRow({
-          area_sqm: 95,
-          neighbor_sample_count: 5,
-          neighbor_average_area_sqm: 110,
-          is_simple_rectangle: false,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ has_nearby_parking: false }],
-      } as never);
-
-    const schema = await generateBuildingSchema("way/703", {});
-
-    expect(schema?.category).toBe("house");
-  });
-
-  it("returns tool_shed for an accessory building when a nearby house&garage schema exists", async () => {
-    jest.spyOn(Math, "random").mockReturnValue(0);
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/704",
-          osm_type: "way",
-          osm_id: 704,
-          tags: { building: "yes" },
-          area_sqm: 30,
-          center_lon: -83.012,
-          center_lat: 40.002,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ covering_areas: ["landuse:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ road_kinds: ["highway:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [buildStandaloneRow({
-          area_sqm: 30,
-          neighbor_sample_count: 5,
-          neighbor_average_area_sqm: 110,
-          is_simple_rectangle: true,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ has_nearby_parking: false }],
-      } as never);
-
-    const schema = await generateBuildingSchema("way/704", {
-      "way/20": buildExistingSchema("way/20", "house&garage", 40.00205, -83.01205),
-    });
-
-    expect(schema?.category).toBe("tool_shed");
-  });
-
-  it("returns tool_shed for an accessory building with nearby parking when random favors tool_shed", async () => {
-    jest.spyOn(Math, "random").mockReturnValue(0);
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/705",
-          osm_type: "way",
-          osm_id: 705,
-          tags: { building: "yes" },
-          area_sqm: 30,
-          center_lon: -83.012,
-          center_lat: 40.002,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ covering_areas: ["landuse:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ road_kinds: ["highway:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [buildStandaloneRow({
-          area_sqm: 30,
-          neighbor_sample_count: 5,
-          neighbor_average_area_sqm: 110,
-          is_simple_rectangle: true,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ has_nearby_parking: true }],
-      } as never);
-
-    const schema = await generateBuildingSchema("way/705", {});
-
-    expect(schema?.category).toBe("tool_shed");
-  });
-
-  it("returns garage for an accessory building with nearby parking when random rejects tool_shed", async () => {
-    jest.spyOn(Math, "random").mockReturnValue(0.95);
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/706",
-          osm_type: "way",
-          osm_id: 706,
-          tags: { building: "yes" },
-          area_sqm: 30,
-          center_lon: -83.012,
-          center_lat: 40.002,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ covering_areas: ["landuse:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ road_kinds: ["highway:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [buildStandaloneRow({
-          area_sqm: 30,
-          neighbor_sample_count: 5,
-          neighbor_average_area_sqm: 110,
-          is_simple_rectangle: true,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ has_nearby_parking: true }],
-      } as never);
-
-    const schema = await generateBuildingSchema("way/706", {});
-
-    expect(schema?.category).toBe("garage");
-  });
-
-  it("returns garage for an accessory building without parking or composite house when random favors garage", async () => {
-    jest.spyOn(Math, "random").mockReturnValue(0);
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/707",
-          osm_type: "way",
-          osm_id: 707,
-          tags: { building: "yes" },
-          area_sqm: 30,
-          center_lon: -83.012,
-          center_lat: 40.002,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ covering_areas: ["landuse:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ road_kinds: ["highway:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [buildStandaloneRow({
-          area_sqm: 30,
-          neighbor_sample_count: 5,
-          neighbor_average_area_sqm: 110,
-          is_simple_rectangle: true,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ has_nearby_parking: false }],
-      } as never);
-
-    const schema = await generateBuildingSchema("way/707", {});
-
-    expect(schema?.category).toBe("garage");
-  });
-
-  it("returns tool_shed for an accessory building without parking or composite house when random rejects garage", async () => {
-    jest.spyOn(Math, "random").mockReturnValue(0.95);
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/708",
-          osm_type: "way",
-          osm_id: 708,
-          tags: { building: "yes" },
-          area_sqm: 30,
-          center_lon: -83.012,
-          center_lat: 40.002,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ covering_areas: ["landuse:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ road_kinds: ["highway:residential"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [buildStandaloneRow({
-          area_sqm: 30,
-          neighbor_sample_count: 5,
-          neighbor_average_area_sqm: 110,
-          is_simple_rectangle: true,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ has_nearby_parking: false }],
-      } as never);
-
-    const schema = await generateBuildingSchema("way/708", {});
-
-    expect(schema?.category).toBe("tool_shed");
-  });
-
-  it("keeps house&garage on the residential pattern pool instead of treating it as a simple pattern", () => {
-    jest.spyOn(Math, "random").mockReturnValue(0);
-
-    const patternKey = selectResidentialPatternKey(buildCandidate({
-      areaSqm: 85,
-      buildingLevels: 1,
-    }), "house&garage");
-
-    expect(patternKey).toBe("studio");
-  });
-
-  it("does not classify an untagged building as residential when non-residential area weight dominates", async () => {
+  it("treats house&garage as a composite category", () => {
     jest.spyOn(Math, "random").mockReturnValue(0.99);
-    mockedQuery
-      .mockResolvedValueOnce({
-        rows: [buildDetailRow({
-          feature_id: "way/709",
-          osm_type: "way",
-          osm_id: 709,
-          tags: { building: "yes" },
-          area_sqm: 95,
-          center_lon: -83.02,
-          center_lat: 40.03,
-        })],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ covering_areas: ["landuse:commercial"] }],
-      } as never)
-      .mockResolvedValueOnce({
-        rows: [{ road_kinds: ["highway:residential"] }],
-      } as never);
 
-    await expect(generateBuildingSchema("way/709", {}, true)).resolves.toBeUndefined();
+    const levels = buildResidentialLevels(
+      buildCandidate({ areaSqm: 120, buildingLevels: 1 }),
+      "house&garage",
+      "standard",
+    );
+    const groundRooms = levels.ground_level.sectors.main.rooms;
+
+    expect(groundRooms.living_room).toBeDefined();
+    expect(groundRooms.kitchen).toBeDefined();
+    expect(groundRooms.garage).toEqual({ descrption: "车库", count: 1 });
+  });
+
+  it("generates simple base schema rooms for garage and tool_shed", () => {
+    const garageLevels = buildResidentialLevels(buildCandidate(), "garage", "garage");
+    const shedLevels = buildResidentialLevels(buildCandidate(), "tool_shed", "tool_shed");
+
+    expect(garageLevels.ground_level.sectors.main.rooms.garage).toEqual({ descrption: "车库", count: 1 });
+    expect(shedLevels.ground_level.sectors.main.rooms.tool_shed).toEqual({ descrption: "工具屋", count: 1 });
+  });
+
+  it("randomly places rooms without prefered on a concrete level", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
+
+    const levels = buildResidentialLevels(
+      buildCandidate({ areaSqm: 260, buildingLevels: 2 }),
+      "house",
+      "elaborate",
+    );
+
+    expect(levels.second_level.sectors.main.rooms.closet).toEqual({ descrption: "储物间", count: 1 });
+    expect(levels.all_levels.sectors.main.rooms.closet).toBeUndefined();
+  });
+
+  it("adds hall and stairwell for larger or multi-level houses", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
+
+    const levels = buildResidentialLevels(
+      buildCandidate({ areaSqm: 160, buildingLevels: 2 }),
+      "house",
+      "standard",
+    );
+
+    expect(levels.ground_level.sectors.main.rooms.hall).toEqual({ descrption: "门厅", count: 1, access: "entrance" });
+    expect(levels.all_levels.sectors.main.rooms.stairwell).toEqual({ descrption: "楼梯间", count: 1, access: "vertical" });
+    expect(levels.ground_level.sectors.main.rooms.living_room).toEqual({ descrption: "客厅", count: 1 });
+  });
+
+  it("shares bedroom capacity while preserving at least one bedroom", () => {
+    jest.spyOn(Math, "random")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0);
+
+    const levels = buildResidentialLevels(
+      buildCandidate({ areaSqm: 60, buildingLevels: 1 }),
+      "house",
+      "elaborate",
+    );
+    const rooms = levels.ground_level.sectors.main.rooms;
+
+    expect(rooms.bedroom).toEqual({ descrption: "卧室", count: 1 });
+    expect(rooms.kids_bedroom).toBeUndefined();
+    expect(rooms.office).toBeUndefined();
   });
 });
-
-function buildStandaloneRow(overrides: Partial<{
-  area_sqm: number;
-  neighbor_sample_count: number;
-  neighbor_average_area_sqm: number;
-  is_simple_rectangle: boolean;
-}> = {}) {
-  return {
-    area_sqm: 30,
-    neighbor_sample_count: 4,
-    neighbor_average_area_sqm: 80,
-    is_simple_rectangle: true,
-    ...overrides,
-  };
-}
 
 function buildDetailRow(overrides: Partial<{
   feature_id: string;
@@ -559,16 +149,6 @@ function buildDetailRow(overrides: Partial<{
     center_lon: -83.0,
     center_lat: 40.0,
     ...overrides,
-  };
-}
-
-function buildExistingSchema(featureId: string, category: string, lat: number, lon: number) {
-  return {
-    featureId,
-    category,
-    centerPosition: { lat, lon },
-    theme: "default",
-    levels: {},
   };
 }
 

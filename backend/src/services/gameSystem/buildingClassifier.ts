@@ -3,8 +3,10 @@ import { loadServiceSql } from "@/db/sqlLoader.js";
 import { DbBuildingFeatureDetailRow, FeatureDetail, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
 import { dedupeOutlineReferences } from "@/services/osmNormalization/osmNormalizer.js";
 import { Position } from "./gameSessionStore.js";
-import { ambiguousResidentialCategory, selectResidentialPatternKey } from "./buildingResidential.js";
+import { ambiguousResidentialCategory, buildResidentialLevels, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
 import { trimTagValue } from "../utils.js";
+
+// Data Base 类型
 
 /**
  * 与 SQL 查询结果表一致的扁平类型
@@ -22,6 +24,8 @@ interface DbRoadKindsRow {
 interface DbCoveringAreasRow {
   covering_areas: string[] | null;
 }
+
+// Schema 类型
 
 export interface BuildingSchema {
   featureId: string;
@@ -43,7 +47,7 @@ interface SectorSchema {
   rooms: Record<string, RoomSchema | SuiteSchema>; // key 为该房间/套房的种类名
 }
 
-interface RoomSchema {
+export interface RoomSchema {
   descrption: string;
   count: number;
   access?: "entrance" | "vertical" | "internal";
@@ -52,7 +56,7 @@ interface RoomSchema {
 /**
  * 特意无 access
  */
-interface SuiteSchema {
+export interface SuiteSchema {
   theme: string;
   subRooms: SubRoomSchema[];
 }
@@ -60,9 +64,20 @@ interface SuiteSchema {
 /**
  * 特意无 access
  */
-interface SubRoomSchema {
+export interface SubRoomSchema {
   descrption: string;
   count: number;
+}
+
+export interface CategorySchema {
+  theme: string;
+  levels: Record<string, CategoryLevelSchema>; // key 为楼层种类名
+}
+
+export interface CategoryLevelSchema {
+  theme: string;
+  span: number[]; // 使用该 C-Schema 的楼层
+  rooms: Record<string, RoomSchema | SuiteSchema>; // key 为该房间/套房的种类名
 }
 
 
@@ -85,11 +100,39 @@ export interface BuildingCandidate {
   buildingValue: string | null;
 }
 
-const FETCH_ROAD_RADIUS_METERS = 90;
+//Definition 类型
 
-const EXPLICIT_HOUSE_BUILDING_VALUES = new Set(["house", "detached", "residential"]);
-const EXPLICIT_GARAGE_BUILDING_VALUES = new Set(["garage", "garages", "carport"]);
-const EXPLICIT_TOOL_SHED_BUILDING_VALUES = new Set(["shed"]);
+export interface CategoryDefinition {
+  desc: string;
+  base_schema?: CategoryBaseSchemaDefinition
+  patterns?: Record<string, PatternDefinition> // 键是该 Pattern 的名字
+}
+
+/**
+ * Base Schem 是不参与 Pattern Distribution 的，只会在分配完成后应用到每个建筑中去
+ */
+export interface CategoryBaseSchemaDefinition {
+  rooms: Record<string, true | PatternRoomDefinition>
+}
+
+export interface PatternDefinition {
+  desc: string,
+  rooms: Record<string, PatternRoomDefinition> // 键是该房间的名字
+}
+
+/**
+ * Pattern 中对房间的定义，不包含数量
+ */
+export interface PatternRoomDefinition {
+  desc?: string;
+  prefered?: string; // 倾向的楼层
+  chance?: number; // 出现在此 Pattern 中的概率
+}
+
+/**
+ * 键为 featureId，值为 Category Key 与 PatternRoomDefinition 列
+ */
+export type PatternDistribution = Record<string, {category: string, rooms: PatternRoomDefinition[]}>
 
 //#region 出口函数
 
@@ -111,28 +154,38 @@ export async function generateBuildingSchema(
   if (!candidate) {
     return undefined;
   }
-
+  let category = []
   // 看看能不能直接分类出来
-  const explicitCategory = resolveExplicitCategory(candidate);
-  if (explicitCategory) {
-    return buildBuildingSchema(
-      candidate.detail.featureId,
-      explicitCategory,
-      candidate.centerPosition,
-      selectPatternKey(candidate, explicitCategory),
-    );
+  // 不能直接分出来就进入模糊分类模式
+  category = resolveExplicitCategory(candidate);
+  if (category.length === 0) category = await resolveAmbiguousCategory(candidate, existingSchemas);
+
+  // TODO 再没有分类结果的话，还没定好怎么处理
+  if (category.length === 0) return undefined;
+
+  // 根据候选建筑本身信息，为每个 Category 随机选择一个 pattern
+  const [mainCategoryKey, ...containedCategoryKeys] = category
+
+  const containedCategoryPatterns: Record<string, string> = {}
+  containedCategoryKeys.forEach(key => {
+    containedCategoryPatterns[key] = selectPatternKey(candidate, key)
+  })
+  const patternKeys = { // 键为各个 Category Key，值为对应 Pattern Key
+    [mainCategoryKey]: selectPatternKey(candidate, mainCategoryKey),
+    ...containedCategoryPatterns
   }
 
-  // 不能直接分出来就进入模糊分类模式
-  const ambiguousCategory = await resolveAmbiguousCategory(candidate, existingSchemas)
-  if (ambiguousCategory) {
-    return buildBuildingSchema(
-      candidate.detail.featureId,
-      ambiguousCategory,
-      candidate.centerPosition,
-      selectPatternKey(candidate, ambiguousCategory),
-    );
-  }
+  // 产出 Pattern Distribution 方案
+  const patternDistribution = decidePatternDistribution(candidate, patternKeys)
+  // 对 Base Schema 应用 Pattern Distribution 方案
+  const patternAppliedBaseSchemaEntries = Object.entries(patternDistribution).map( ([fId, distr]) => {
+    const baseSchema = ALL_CATEGORIES[distr.category].base_schema
+    const baseSchemaRooms = baseSchema ? Object.values(baseSchema.rooms).filter(r => typeof r !== 'boolean') : []
+    return [fId, [...baseSchemaRooms, ...distr.rooms]]
+  })
+  const patternAppliedBaseSchema: Record<string, PatternRoomDefinition[]> = Object.fromEntries(patternAppliedBaseSchemaEntries)
+
+  // 根据 candidate 创建仅有楼层数的空 Category Schema
 
   if (skipComplex) {
     return undefined;
@@ -143,11 +196,15 @@ export async function generateBuildingSchema(
 }
 
 //#region 主逻辑函数
+// 直接用在 generateBuildingSchema 函数中
 
-const fetchBuildingFeatureDetailByIdSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingFeatureDetailById.sql");
-const fetchBuildingRelationMemberDetailsSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingRelationMemberDetails.sql");
-const fetchBuildingRoadKindsSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingRoadKinds.sql");
-const fetchBuildingCoveringAreasSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingCoveringAreas.sql");
+const EXPLICIT_HOUSE_BUILDING_VALUES = new Set(["house", "detached", "residential"]);
+const EXPLICIT_GARAGE_BUILDING_VALUES = new Set(["garage", "garages", "carport"]);
+const EXPLICIT_TOOL_SHED_BUILDING_VALUES = new Set(["shed"]);
+
+const ALL_CATEGORIES = {...RESIDENTIAL_CATEGORIES}
+const ALL_CATEGORY_KEYS = [...RESIDENTIAL_CATEGORY_KEYS]
+const ALL_PATTERN_KEYS = [...RESIDENTIAL_PATTERN_KEYS]
 
 /**
  * 把任意传入的 building feature id 填充为后续分类所用的“有效候选”。
@@ -200,6 +257,7 @@ async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandid
 }
 
 /**
+ * TODO 复合型 Category 目前尚未支持
  * 用强定向 tags / contained POI 直接判定当前候选是否属于已支持的简单类别。
  *
  * 当前顺序刻意偏保守：// TODO 当前只支持住宅
@@ -209,13 +267,13 @@ async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandid
  *
  * @param candidate 已标准化的建筑候选
  * @param existingSchemas 作为参考的来自 Game State 的 Building Schema
- * @returns 已支持的 category；若当前阶段仍无法稳定判断则返回 null
+ * @returns category 列表，长度超过1代表复合 Category；若当前阶段仍无法稳定判断则返回空数组
  */
-function resolveExplicitCategory(candidate: BuildingCandidate): string | null {
-  if (isExplicitBuilding(EXPLICIT_GARAGE_BUILDING_VALUES, candidate.detail.tags) || hasContainedPoiTag(candidate, "amenity", ["parking"])) return "garage";
-  if (isExplicitBuilding(EXPLICIT_TOOL_SHED_BUILDING_VALUES, candidate.detail.tags)) return "tool_shed";
-  if (isExplicitBuilding(EXPLICIT_HOUSE_BUILDING_VALUES, candidate.detail.tags)) return "house";
-  return null
+function resolveExplicitCategory(candidate: BuildingCandidate): string[] {
+  if (isExplicitBuilding(EXPLICIT_GARAGE_BUILDING_VALUES, candidate.detail.tags) || hasContainedPoiTag(candidate, "amenity", ["parking"])) return ["garage"];
+  if (isExplicitBuilding(EXPLICIT_TOOL_SHED_BUILDING_VALUES, candidate.detail.tags)) return ["tool_shed"];
+  if (isExplicitBuilding(EXPLICIT_HOUSE_BUILDING_VALUES, candidate.detail.tags)) return ["house"];
+  return []
 }
 
 /**
@@ -227,14 +285,14 @@ function resolveExplicitCategory(candidate: BuildingCandidate): string | null {
 async function resolveAmbiguousCategory(
   candidate: BuildingCandidate,
   existingSchemas: Record<string, BuildingSchema>
-): Promise<string | null> {
+): Promise<string[]> {
   return ambiguousResidentialCategory(candidate, existingSchemas);
 }
 
 /**
  * TODO 目前暂只支持住宅区
  * @param candidate
- * @param categoryKey
+ * @param categoryKey 已分解的 Category Key（不含`&`）
  * @returns
  */
 function selectPatternKey(
@@ -244,7 +302,55 @@ function selectPatternKey(
   return selectResidentialPatternKey(candidate, categoryKey)
 }
 
+/**
+ * TODO 当前是占位符，只返回单一的 PatternDistribution
+ * @param candidate 提供单体建筑或多体建筑
+ * @param categoryPatternKeys 键值对分别为 Category Key 和 Pattern Kye
+ * @returns
+ */
+function decidePatternDistribution(
+  candidate: BuildingCandidate,
+  categoryPatternKeys: Record<string, string>,
+): PatternDistribution {
+  const featureId = candidate.detail.featureId
+  const catPatKeyParis = Object.entries(categoryPatternKeys)
+
+  const result: PatternDistribution = {}
+  // 对每个 Category Key 都获取其 Category 内容
+  catPatKeyParis.forEach( ([cat, pat]) => {
+    const category = ALL_CATEGORIES[cat]
+    // 连 patterns 都没有的话，根本不存在可供分配的 PatternRoomDefinition
+    // base schema 是不参与分配的
+    if (!category.patterns) {
+      result[featureId] = {category: cat, rooms: []}
+      return
+    }
+    const pattern = category.patterns[pat]
+
+    if (candidate.scope === 'single') { // 单一建筑就直接组装 patternDistribution
+      result[featureId] = {category: cat, rooms: Object.values(pattern.rooms)}
+    } else { // TODO relation Building 应用特殊逻辑（LLM）
+      result[featureId] = {category: cat, rooms: Object.values(pattern.rooms)}
+    }
+  })
+  return result
+}
+
+/**
+ * 预留给下一阶段的 category/pattern -> Category Schema 应用入口。
+ */
+function applyPatternToCategorySchema(): void {
+  // TODO: 下一阶段在这里把 category/pattern 应用到真正的 Category Schema。
+}
+
 //#region 共用逻辑函数
+
+const fetchBuildingFeatureDetailByIdSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingFeatureDetailById.sql");
+const fetchBuildingRelationMemberDetailsSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingRelationMemberDetails.sql");
+const fetchBuildingRoadKindsSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingRoadKinds.sql");
+const fetchBuildingCoveringAreasSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingCoveringAreas.sql");
+
+const FETCH_ROAD_RADIUS_METERS = 90;
 
 /**
  * 根据 featureId 取回单个 building 的细节与面积。
@@ -323,6 +429,23 @@ export async function fetchBuildingCoveringAreas(featureId: string): Promise<str
 }
 
 /**
+ * 把 `&` 分隔的复合型 Category Key 拆分成主 Category 和附属 Category
+ * @param categoryKey
+ * @returns 尚未进行真实性检验的 Category Key (单纯的字符串)
+ */
+export function parseCompositeCategoryKey(categoryKey: string): {
+  mainCategoryKey: string;
+  containedCategoryKeys: string[];
+} {
+  const categoryKeys = categoryKey
+    .split("&")
+    .map((key) => key.trim())
+
+  const [mainCategoryKey, ...containedCategoryKeys] = categoryKeys;
+  return { mainCategoryKey, containedCategoryKeys };
+}
+
+/**
  * TODO 不要做成合成虚假 FeatureDetail，这样会阻碍后续 Pattern Distribution。
  *
  * 当 relation 本体自身无法直接查到完整细节时，
@@ -392,27 +515,18 @@ function toResolvedCandidate(
 }
 
 function buildBuildingSchema(
-  featureId: string,
+  candidate: BuildingCandidate,
   category: string,
-  centerPosition: Position,
   patternKey: string,
 ): BuildingSchema {
   console.log(patternKey);
   return {
-    featureId,
+    featureId: candidate.detail.featureId,
     category,
-    centerPosition,
+    centerPosition: candidate.centerPosition,
     theme: "default",
-    levels: {},
+    levels: buildResidentialLevels(candidate, category, patternKey),
   };
-}
-
-
-/**
- * 预留给下一阶段的 category/pattern -> Category Schema 应用入口。
- */
-function applyPatternToCategorySchema(): void {
-  // TODO: 下一阶段在这里把 category/pattern 应用到真正的 Category Schema。
 }
 
 //#endregion
