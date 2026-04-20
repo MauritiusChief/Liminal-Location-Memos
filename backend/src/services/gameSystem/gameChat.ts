@@ -320,12 +320,12 @@ async function streamInitialBookMessage(
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: INITIAL_SCENE_RADIUS_METERS }, state.playerOrientation);
   const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
   // TODO 自动生成可生成的 Building Schema（当前仅完成 Category 和 Pattern 打印）
-  const {microGrid, polarView} = sceneObject
-  const featureIds = [
-    ...microGrid.cells.flatMap(cell => cell).flatMap(cell => cell.sourceFeatureIds),
-    ...(polarView?.levels.flatMap( l => l.clusters.flatMap( c => c.features.flatMap( f => f.featureId))) ?? [])
-  ]
-  featureIds.forEach( async id => await generateBuildingSchema(id, state.buildingSchemas)) // TODO 当前仅打印
+  // const {microGrid, polarView} = sceneObject
+  // const featureIds = [
+  //   ...microGrid.cells.flatMap(cell => cell).flatMap(cell => cell.sourceFeatureIds),
+  //   ...(polarView?.levels.flatMap( l => l.clusters.flatMap( c => c.features.flatMap( f => f.featureId))) ?? [])
+  // ]
+  // featureIds.forEach( async id => await generateBuildingSchema(id, state.buildingSchemas)) // TODO 当前仅打印
   await writeGameDebugRequest({
     mode: 'user-message',
     functionName: 'streamInitialBookMessage',
@@ -755,7 +755,8 @@ function findNearestFieldVisualDescription(
 function parseExtractedVisualDescriptions(reply: string): ExtractedVisualDescriptions {
   const parsed = JSON.parse(reply) as Partial<ExtractedVisualDescriptions>;
   return {
-    field: typeof parsed.field === 'string' ? parsed.field : '',
+    field: (Array.isArray(parsed.field) && parsed.field.every(item => typeof item === "string")) ?
+      parsed.field.join('\n') : parsed.field ?? '', // 兼容 string 或 string[]
     exteriors: Array.isArray(parsed.exteriors)
       ? parsed.exteriors.flatMap((entry) => {
           if (!entry || typeof entry !== 'object') {
@@ -763,8 +764,10 @@ function parseExtractedVisualDescriptions(reply: string): ExtractedVisualDescrip
           }
 
           const { buildingId, content } = entry as Partial<ExtractedVisualDescriptions['exteriors'][number]>;
-          return typeof buildingId === 'string' && typeof content === 'string'
-            ? [{ buildingId, content }]
+          const contentToReturn = (Array.isArray(content) && content.every(item => typeof item === "string")) ?
+            content.join('\n') : content ?? '';
+          return typeof buildingId === 'string'
+            ? [{ buildingId, content: contentToReturn }]
             : [];
         })
       : [],
