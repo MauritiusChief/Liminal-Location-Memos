@@ -466,7 +466,7 @@ apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
     ]
     featureIds.forEach(async id => {
       const b = await generateBuildingSchema(id, {})
-      if (b) console.log(b)
+      // if (b) console.log(b)
     }) // TODO 当前仅打印
     const scenePrompt = buildScenePrompt(sceneObject, playerOrientation)
     response.json({

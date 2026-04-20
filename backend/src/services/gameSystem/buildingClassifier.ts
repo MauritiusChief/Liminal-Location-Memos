@@ -141,13 +141,13 @@ export interface PatternRoomDefinition {
 }
 
 /**
- * 键为 featureId，值为 Category Key 与 PatternRoomDefinition 列
+ * 键为 featureId，值为已分配到该地物的 Category Key 与房间定义
  */
-export type PatternDistribution = Record<string, {category: string, rooms: PatternRoomDefinition[]}>
+export type PatternDistribution = Record<string, {categories: string[], rooms: Record<string, PatternRoomDefinition>}>
 /**
- * 键为 featureId，值为 PatternRoomDefinition 列
+ * 键为 featureId，值为 room key 到 PatternRoomDefinition 的映射
  */
-export type FeatureIdRoomDefinition = Record<string, PatternRoomDefinition[]>
+export type FeatureIdRoomDefinition = Record<string, Record<string, PatternRoomDefinition>>
 
 //#region 出口函数
 
@@ -189,19 +189,18 @@ export async function generateBuildingSchema(
     [mainCategoryKey]: selectPatternKey(candidate, mainCategoryKey),
     ...containedCategoryPatterns
   }
+  console.log(patternKeys);
 
   // 产出 Pattern Distribution 方案
   const patternDistribution = decidePatternDistribution(candidate, patternKeys)
   // 对 Base Schema 应用 Pattern Distribution 方案
-  const patternAppliedBaseSchemaEntries = Object.entries(patternDistribution).map( ([fId, distr]) => {
-    const baseSchema = ALL_CATEGORIES[distr.category].base_schema
-    const baseSchemaRooms = baseSchema ? Object.values(baseSchema.rooms).filter(r => typeof r !== 'boolean') : []
-    return [fId, [...baseSchemaRooms, ...distr.rooms]]
-  })
-  // 键为 feature id
-  const patternAppliedBaseSchema: FeatureIdRoomDefinition = Object.fromEntries(patternAppliedBaseSchemaEntries)
+  const patternAppliedBaseSchema = applyCategoryBaseSchemasToDistribution(patternDistribution)
 
   // 根据 candidate 创建仅有楼层数的空 Category Schema
+  // TODO 由于目前只支持 House，所以只支持产出 1 个 Category Schema
+  const categorySchema = buildCategorySchemaFromDistribution(patternAppliedBaseSchema, candidate)
+  console.log(`${candidate.detail.featureId}生成的 Category Schema:`);
+  console.log(categorySchema.levels);
 
   if (skipComplex) {
     return undefined;
@@ -324,7 +323,7 @@ function selectPatternKey(
  * @param categoryPatternKeys 键值对分别为 Category Key 和 Pattern Kye
  * @returns
  */
-function decidePatternDistribution(
+export function decidePatternDistribution(
   candidate: BuildingCandidate,
   categoryPatternKeys: Record<string, string>,
 ): PatternDistribution {
@@ -335,21 +334,55 @@ function decidePatternDistribution(
   // 对每个 Category Key 都获取其 Category 内容
   catPatKeyParis.forEach( ([cat, pat]) => {
     const category = ALL_CATEGORIES[cat]
+    result[featureId] ??= {categories: [], rooms: {}}
+    result[featureId].categories.push(cat)
+
     // 连 patterns 都没有的话，根本不存在可供分配的 PatternRoomDefinition
     // base schema 是不参与分配的
     if (!category.patterns) {
-      result[featureId] = {category: cat, rooms: []}
       return
     }
     const pattern = category.patterns[pat]
 
     if (candidate.scope === 'single') { // 单一建筑就直接组装 patternDistribution
-      result[featureId] = {category: cat, rooms: Object.values(pattern.rooms)}
+      result[featureId].rooms = {...result[featureId].rooms, ...pattern.rooms}
     } else { // TODO relation Building 应用特殊逻辑（LLM）
-      result[featureId] = {category: cat, rooms: Object.values(pattern.rooms)}
+      result[featureId].rooms = {...result[featureId].rooms, ...pattern.rooms}
     }
   })
   return result
+}
+
+/**
+ * 把各 Category 的 base schema 合并进 Pattern Distribution，保留房间 key。
+ *
+ * base schema 中的 self 表示当前 category 自身，应用后会改用 category key。
+ */
+export function applyCategoryBaseSchemasToDistribution(
+  patternDistribution: PatternDistribution,
+): FeatureIdRoomDefinition {
+  return Object.fromEntries(
+    Object.entries(patternDistribution).map(([featureId, distribution]) => {
+      const rooms: Record<string, PatternRoomDefinition> = {...distribution.rooms};
+
+      for (const categoryKey of distribution.categories) {
+        const category = ALL_CATEGORIES[categoryKey];
+        const baseSchema = category.base_schema;
+        if (!baseSchema) continue;
+
+        for (const [baseRoomKey, baseRoom] of Object.entries(baseSchema.rooms) as Array<[string, true | PatternRoomDefinition]>) {
+          const roomKey = baseRoomKey === "self" ? categoryKey : baseRoomKey;
+          const roomDefinition: PatternRoomDefinition = baseRoom === true ? {} : baseRoom;
+          rooms[roomKey] = {
+            desc: category.desc,
+            ...roomDefinition,
+          };
+        }
+      }
+
+      return [featureId, rooms];
+    }),
+  );
 }
 
 /**
@@ -363,6 +396,10 @@ function buildCategorySchemaFromDistribution(
   candidate: BuildingCandidate,
 ): CategorySchema {
   return buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate)
+}
+
+function decideSectorDistribution() {
+
 }
 
 //#region 共用逻辑函数
@@ -533,21 +570,6 @@ function toResolvedCandidate(
     buildingLevels,
     heightMeters,
     buildingValue: trimTagValue(detail.tags.building),
-  };
-}
-
-function buildBuildingSchema(
-  candidate: BuildingCandidate,
-  category: string,
-  patternKey: string,
-): BuildingSchema {
-  console.log(patternKey);
-  return {
-    featureId: candidate.detail.featureId,
-    category,
-    centerPosition: candidate.centerPosition,
-    theme: "default",
-    levels: buildResidentialLevels(candidate, category, patternKey),
   };
 }
 

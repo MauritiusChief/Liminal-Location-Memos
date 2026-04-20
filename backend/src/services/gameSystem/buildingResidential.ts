@@ -1,5 +1,5 @@
 import { loadServiceSql } from "@/db/sqlLoader.js";
-import { AnyCategoryKey, BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategorySchema, FeatureIdRoomDefinition, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, PatternDistribution, PatternRoomDefinition, pickRandom, RoomSchema, weightedBoolean } from "./buildingClassifier.js";
+import { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategorySchema, FeatureIdRoomDefinition, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, PatternRoomDefinition, pickRandom, RoomSchema, weightedBoolean } from "./buildingClassifier.js";
 import { query } from "@/db/client.js";
 import { distanceToPosition } from "../geometry.js";
 
@@ -15,6 +15,14 @@ interface DbHouseDetermingRow {
 
 interface DbNearbyParkingSignalRow {
   has_nearby_parking: boolean | null;
+}
+
+type ResidentialSectorDistribution = Record<string, string[]>;
+
+interface ResidentialResolvedRoom extends PatternRoomDefinition {
+  desc: string;
+  count: number;
+  access?: "entrance" | "vertical" | "internal";
 }
 
 //#region 常量
@@ -79,7 +87,7 @@ export const RESIDENTIAL_CATEGORIES: Record<string, CategoryDefinition> = {
 export const RESIDENTIAL_CATEGORY_KEYS = Object.keys(RESIDENTIAL_CATEGORIES)
 export const RESIDENTIAL_PATTERN_KEYS = Object.entries(RESIDENTIAL_CATEGORIES)
   .flatMap(([key, cat]) => {
-    if ('base_schema' in cat && cat.base_schema && 'self' in cat.base_schema) return key // 简单类型返回 Category Key 本身作为 Pattern Key
+    if ('base_schema' in cat && cat.base_schema && 'self' in cat.base_schema.rooms) return key // 简单类型返回 Category Key 本身作为 Pattern Key
     if ('patterns' in cat && cat.patterns) return Object.keys(cat.patterns)
   }).filter(k => k !== undefined)
 
@@ -245,11 +253,11 @@ async function determineResidentialBuildingKind(featureId: string): Promise<stri
   const row = result.rows[0];
 
   const areaSqm = row?.area_sqm ?? 0;
-  // console.log(`${featureId}: 面积${areaSqm}`);
+  console.log(`${featureId}: 面积${areaSqm}`);
   const neighborSampleCount = row?.neighbor_sample_count ?? 0;
-  // console.log(`周围建筑数${neighborSampleCount}`);
+  console.log(`周围建筑数${neighborSampleCount}`);
   const neighborAverageAreaSqm = row?.neighbor_average_area_sqm ?? 0;
-  // console.log(`周围平均面积${neighborAverageAreaSqm}`);
+  console.log(`周围平均面积${neighborAverageAreaSqm}`);
 
   // 进行判断
 
@@ -310,6 +318,7 @@ export function selectResidentialPatternKey(
   categoryKey: string, // TODO 当前只支持住宅
 ): string {
   // 简单建筑直接返回 Category Key 作为 Pattern Key
+  // console.log(RESIDENTIAL_PATTERN_KEYS);
   if (RESIDENTIAL_PATTERN_KEYS.includes(categoryKey)) return categoryKey
 
   // 当前复合住宅类别仍复用住宅 pattern 池。
@@ -365,29 +374,69 @@ export function buildHouseCategorySchemaFromDistribution(
   appliedBaseSchema: FeatureIdRoomDefinition,
   candidate: BuildingCandidate,
 ): CategorySchema {
-  const [PatternRoomDefinitions] = Object.values(appliedBaseSchema)
+  const [patternRoomDefinitions = {}] = Object.values(appliedBaseSchema)
   // 控制楼层数在 1 ~ 3 范围
   const buildingLevels = candidate.buildingLevels ? Math.min(3, candidate.buildingLevels) : 1 // 此处默认1层是合理的，因为 Pattern 本身就是被面积与楼层决定的，不会出现不够用的情况
-  const levelEntries: (string|CategoryLevelSchema)[][] = []
+
+  // 组装空的楼层
+  const levels: Record<string, CategoryLevelSchema> = {}
+  const concreteLevelKeys: string[] = []
   for (let i = 1; i <= buildingLevels; i++) {
     const levelKey = i === 1 ? "ground_level" : i === buildingLevels ? "top_level" : "middle_level"
-    levelEntries.push([levelKey, {
+    concreteLevelKeys.push(levelKey)
+    levels[levelKey] = {
       theme: "普通的住宅楼层",
       span: [i],
       rooms: {}, // 等待后续装填
-    }])
-  }
-  // 初步装填功能
-  PatternRoomDefinitions.forEach( def => {
-    if (def.prefered && def.prefered === TOP_LEVEL[0]) {
-      const rooms = levelEntries[buildingLevels-1][1] as CategoryLevelSchema
-
     }
-  })
+  }
+
+  // 初步装填功能
+  Object.entries(patternRoomDefinitions).forEach(([roomKey, definition]) => {
+    const levelKeys = resolveHouseCategorySchemaLevelKeys(definition.prefered, levels, concreteLevelKeys);
+    for (const levelKey of levelKeys) {
+      if (definition.chance && 1 - definition.chance > Math.random()) continue // 有概率直接跳过，不写入 levels
+      levels[levelKey].rooms[roomKey] = {
+        descrption: definition.desc ?? roomKey,
+      };
+    }
+  });
+
   return {
     theme: "普通的住宅",
-    levels: Object.fromEntries(levelEntries)
+    levels,
   }
+}
+
+/**
+ * 通过各种条件，选出 House 当中最适合填入某个建筑的楼层 key。
+ * @param prefered
+ * @param levels
+ * @param concreteLevelKeys 可被填的所有楼层
+ * @returns 需要填充的楼层的 key
+ */
+function resolveHouseCategorySchemaLevelKeys(
+  prefered: string | undefined,
+  levels: Record<string, CategoryLevelSchema>,
+  concreteLevelKeys: string[],
+): string[] {
+  if (prefered === ALL_LEVELS[0]) {
+    return concreteLevelKeys;
+  }
+
+  if (prefered && TOP_LEVEL.includes(prefered)) {
+    return [levels.top_level ? "top_level" : "ground_level"];
+  }
+
+  if (prefered && GROUND_LEVEL.includes(prefered)) {
+    return ["ground_level"];
+  }
+
+  if (prefered && levels[prefered]) {
+    return [prefered];
+  }
+
+  return [pickRandom(concreteLevelKeys)];
 }
 
 
@@ -419,7 +468,12 @@ function buildResidentialLevelsFromCategorySchema(
           sectorKeys.map((sectorKey) => [sectorKey, {
             area: candidate.areaSqm ?? 0,
             centerPosition: candidate.centerPosition,
-            rooms: levelSchema.rooms,
+            rooms: Object.fromEntries(
+              Object.entries(levelSchema.rooms).map(([roomKey, room]) => [roomKey, {
+                ...room,
+                count: 1,
+              }]),
+            ),
           }]),
         ),
       }];
@@ -601,6 +655,3 @@ function normalizeBuildingLevels(buildingLevels: number | null): number {
 function buildFloorSpan(buildingLevels: number): number[] {
   return Array.from({ length: buildingLevels }, (_, index) => index + 1);
 }
-
-
-
