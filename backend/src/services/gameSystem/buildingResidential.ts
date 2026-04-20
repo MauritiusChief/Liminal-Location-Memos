@@ -1,5 +1,5 @@
 import { loadServiceSql } from "@/db/sqlLoader.js";
-import { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategorySchema, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, PatternDistribution, PatternRoomDefinition, pickRandom, RoomSchema, weightedBoolean } from "./buildingClassifier.js";
+import { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategorySchema, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, PatternDistribution, PatternRoomDefinition, pickRandom, RoomSchema, SectorDistributionSchem, weightedBoolean } from "./buildingClassifier.js";
 import { query } from "@/db/client.js";
 import { distanceToPosition } from "../geometry.js";
 
@@ -513,41 +513,26 @@ function resolveHouseCategorySchemaLevelKeys(
 //#region 收尾逻辑
 //################
 
-
-/**
- * 把 residential C-Schema 和占位 Sector Distribution 转为最终 Building Schema levels。
- *
- * @param candidate 已标准化的建筑候选
- * @param categorySchema 已合成的 C-Schema
- * @param sectorDistribution 当前楼层到 sector 的占位分配
- * @returns Building Schema 的 levels 字段
- */
-function buildResidentialLevelsFromCategorySchema(
+export function finishHouseBuildingSchema(
+  schema: SectorDistributionSchem,
   candidate: BuildingCandidate,
-  categorySchema: CategorySchema,
-  sectorDistribution: ResidentialSectorDistribution,
-): BuildingSchema["levels"] {
-  return Object.fromEntries(
-    Object.entries(categorySchema.levels).map(([levelKey, levelSchema]) => {
-      const sectorKeys = sectorDistribution[levelKey] || ["main"];
-      return [levelKey, {
-        theme: levelSchema.theme,
-        span: levelSchema.span,
-        sectors: Object.fromEntries(
-          sectorKeys.map((sectorKey) => [sectorKey, {
-            area: candidate.areaSqm ?? 0,
-            centerPosition: candidate.centerPosition,
-            rooms: Object.fromEntries(
-              Object.entries(levelSchema.rooms).map(([roomKey, room]) => [roomKey, {
-                ...room,
-                count: 1,
-              }]),
-            ),
-          }]),
-        ),
-      }];
-    }),
-  );
+): BuildingSchema {
+  return
+}
+
+
+function determineSharedBedroomLimit(candidate: BuildingCandidate): number {
+  const { areaSqm, buildingLevels } = candidate;
+
+  if ((areaSqm === null || areaSqm <= SMALL_HOUSE_AREA_MAX_SQM) && (buildingLevels === null || buildingLevels <= 1)) {
+    return weightedBoolean(3, 1) ? 1 : 2;
+  }
+
+  if ((areaSqm === null || areaSqm <= MEDIUM_HOUSE_AREA_MAX_SQM) && (buildingLevels === null || buildingLevels <= 2)) {
+    return pickRandom([2, 3]);
+  }
+
+  return pickRandom([3, 4]);
 }
 
 
@@ -592,20 +577,6 @@ function applyHouseSharedRoomCounts(
   }
 }
 
-function determineSharedBedroomLimit(candidate: BuildingCandidate): number {
-  const { areaSqm, buildingLevels } = candidate;
-
-  if ((areaSqm === null || areaSqm <= SMALL_HOUSE_AREA_MAX_SQM) && (buildingLevels === null || buildingLevels <= 1)) {
-    return weightedBoolean(3, 1) ? 1 : 2;
-  }
-
-  if ((areaSqm === null || areaSqm <= MEDIUM_HOUSE_AREA_MAX_SQM) && (buildingLevels === null || buildingLevels <= 2)) {
-    return pickRandom([2, 3]);
-  }
-
-  return pickRandom([3, 4]);
-}
-
 function applyHouseAccessRooms(
   candidate: BuildingCandidate,
   rooms: Record<string, ResidentialResolvedRoom>,
@@ -634,93 +605,6 @@ function applyHouseAccessRooms(
   }
 }
 
-function buildCategorySchemaFromResidentialRooms(
-  candidate: BuildingCandidate,
-  rooms: Record<string, ResidentialResolvedRoom>,
-): CategorySchema {
-  const categorySchema: CategorySchema = {
-    theme: "default",
-    levels: {},
-  };
-  const levelOptions = buildResidentialLevelOptions(candidate);
-
-  for (const [roomKey, room] of Object.entries(rooms)) {
-    const targetLevelKeys = resolveResidentialTargetLevelKeys(room.prefered, levelOptions);
-    for (const levelKey of targetLevelKeys) {
-      const levelOption = levelOptions[levelKey];
-      if (!levelOption) continue;
-
-      categorySchema.levels[levelKey] ??= {
-        theme: "default",
-        span: levelOption.span,
-        rooms: {},
-      };
-      categorySchema.levels[levelKey].rooms[roomKey] = toCategoryRoomSchema(room);
-    }
-  }
-
-  return categorySchema;
-}
-
-function toCategoryRoomSchema(room: ResidentialResolvedRoom): RoomSchema {
-  return {
-    descrption: room.desc,
-    count: room.count,
-    ...(room.access ? { access: room.access } : {}),
-  };
-}
-
-function buildResidentialLevelOptions(candidate: BuildingCandidate): Record<string, { span: number[] }> {
-  const buildingLevels = normalizeBuildingLevels(candidate.buildingLevels);
-  const options: Record<string, { span: number[] }> = {
-    ground_level: { span: [1] },
-    all_levels: { span: buildFloorSpan(buildingLevels) },
-  };
-
-  if (buildingLevels > 1) {
-    options.top_level = { span: [buildingLevels] };
-    options.second_level = { span: [2] };
-  }
-  if (buildingLevels > 2) {
-    options.second_to_top_level = { span: [buildingLevels - 1] };
-  }
-  if (buildingLevels > 3) {
-    options.third_level = { span: [3] };
-    options.third_to_top_level = { span: [buildingLevels - 2] };
-  }
-
-  return options;
-}
-
-function resolveResidentialTargetLevelKeys(
-  prefered: string | undefined,
-  levelOptions: Record<string, { span: number[] }>,
-): string[] {
-  const levelKeys = Object.keys(levelOptions);
-  const concreteLevelKeys = levelKeys.filter((levelKey) => levelKey !== ALL_LEVELS[0]);
-  if (prefered === ALL_LEVELS[0]) {
-    return ["all_levels"];
-  }
-  if (!prefered) {
-    return [pickRandom(concreteLevelKeys.length > 0 ? concreteLevelKeys : levelKeys)];
-  }
-  if (prefered in levelOptions) {
-    return [prefered];
-  }
-  if (TOP_LEVEL.includes(prefered)) {
-    return [levelOptions.top_level ? "top_level" : "ground_level"];
-  }
-  if (GROUND_LEVEL.includes(prefered)) {
-    return [levelOptions.ground_level ? "ground_level" : pickRandom(levelKeys)];
-  }
-
-  return [pickRandom(concreteLevelKeys.length > 0 ? concreteLevelKeys : levelKeys)];
-}
-
 function normalizeBuildingLevels(buildingLevels: number | null): number {
   return Math.max(1, buildingLevels ?? 1);
-}
-
-function buildFloorSpan(buildingLevels: number): number[] {
-  return Array.from({ length: buildingLevels }, (_, index) => index + 1);
 }

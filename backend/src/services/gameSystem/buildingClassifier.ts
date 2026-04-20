@@ -3,7 +3,7 @@ import { loadServiceSql } from "@/db/sqlLoader.js";
 import { DbBuildingFeatureDetailRow, FeatureDetail, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
 import { dedupeOutlineReferences } from "@/services/osmNormalization/osmNormalizer.js";
 import { Position } from "./gameSessionStore.js";
-import { ambiguousResidentialCategory, buildHouseCategorySchemaFromDistribution, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
+import { ambiguousResidentialCategory, buildHouseCategorySchemaFromDistribution, finishHouseBuildingSchema, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
 import { trimTagValue } from "../utils.js";
 
 // Data Base 类型
@@ -89,6 +89,22 @@ export interface CategoryLevelSchema {
 export interface CategoryRoomSchema {
   descrption: string;
   access?: "entrance" | "vertical" | "internal";
+}
+
+/**
+ * 特指经过了 Sector Distributtion，但还没到收尾阶段的 Schema
+ */
+export interface SectorDistributionSchem {
+  theme: string;
+  levels: Record<string, { // key 为楼层种类名
+    theme: string;
+    span: number[]; // 使用该 C-Schema 的楼层
+    sectors: Record<string, { // key 为该 Sector 的名字
+      area: number;
+      centerPosition: Position;
+      rooms: Record<string, CategoryRoomSchema>; // key 为该房间的种类名
+    }>
+  }>
 }
 
 
@@ -197,6 +213,11 @@ export async function generateBuildingSchema(
   const categorySchema = buildCategorySchemaFromDistribution(patternAppliedBaseSchema, candidate)
   console.log(`${candidate.detail.featureId}生成的 Category Schema:`);
   console.log(categorySchema.levels);
+
+  // 产出 Sector Distribution 方案
+  const sectorDistributionSchem = decideSectorDistribution(categorySchema, candidate)
+  // 填充 Category Schema 没有的细节，生成完整 Building Schema
+  const buildingSchema = finishBuildingSchema(sectorDistributionSchem, candidate)
 
   if (skipComplex) {
     return undefined;
@@ -397,8 +418,44 @@ function buildCategorySchemaFromDistribution(
   return buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate)
 }
 
-function decideSectorDistribution() {
+/**
+ * TODO 当前是占位符，只返回单一的 PatternDistribution
+ * @param categorySchema
+ * @param candidate
+ */
+function decideSectorDistribution(
+  categorySchema: CategorySchema,
+  candidate: BuildingCandidate,
+): SectorDistributionSchem {
+  const levelsEntries = Object.entries(categorySchema.levels)
+  const levelsSectorEntries = levelsEntries.map( ([key, level]) => {
+    return [key, {
+      theme: level.theme,
+      span: level.span,
+      sectors: {main: {
+        area: candidate.areaSqm ?? 0,
+        centerPosition: candidate.centerPosition,
+        rooms: level.rooms,
+      }}
+    }]
+  })
+  return {
+    theme: categorySchema.theme,
+    levels: Object.fromEntries(levelsSectorEntries)
+  }
+}
 
+/**
+ * TODO 目前暂只支持住宅区
+ * @param schema
+ * @param candidate
+ * @returns
+ */
+function finishBuildingSchema(
+  schema: SectorDistributionSchem,
+  candidate: BuildingCandidate,
+) {
+  return finishHouseBuildingSchema(schema, candidate)
 }
 
 //#region 共用逻辑函数
