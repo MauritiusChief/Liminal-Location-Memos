@@ -144,10 +144,6 @@ export interface PatternRoomDefinition {
  * 键为 featureId，值为已分配到该地物的 Category Key 与房间定义
  */
 export type PatternDistribution = Record<string, {categories: string[], rooms: Record<string, PatternRoomDefinition>}>
-/**
- * 键为 featureId，值为 room key 到 PatternRoomDefinition 的映射
- */
-export type FeatureIdRoomDefinition = Record<string, Record<string, PatternRoomDefinition>>
 
 //#region 出口函数
 
@@ -360,7 +356,7 @@ export function decidePatternDistribution(
  */
 export function applyCategoryBaseSchemasToDistribution(
   patternDistribution: PatternDistribution,
-): FeatureIdRoomDefinition {
+): PatternDistribution {
   return Object.fromEntries(
     Object.entries(patternDistribution).map(([featureId, distribution]) => {
       const rooms: Record<string, PatternRoomDefinition> = {...distribution.rooms};
@@ -380,7 +376,10 @@ export function applyCategoryBaseSchemasToDistribution(
         }
       }
 
-      return [featureId, rooms];
+      return [featureId, {
+        categories: [...distribution.categories],
+        rooms,
+      }];
     }),
   );
 }
@@ -392,7 +391,7 @@ export function applyCategoryBaseSchemasToDistribution(
  * @returns
  */
 function buildCategorySchemaFromDistribution(
-  appliedBaseSchema: FeatureIdRoomDefinition,
+  appliedBaseSchema: PatternDistribution,
   candidate: BuildingCandidate,
 ): CategorySchema {
   return buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate)

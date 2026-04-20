@@ -1,5 +1,5 @@
 import { loadServiceSql } from "@/db/sqlLoader.js";
-import { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategorySchema, FeatureIdRoomDefinition, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, PatternRoomDefinition, pickRandom, RoomSchema, weightedBoolean } from "./buildingClassifier.js";
+import { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategorySchema, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, PatternDistribution, PatternRoomDefinition, pickRandom, RoomSchema, weightedBoolean } from "./buildingClassifier.js";
 import { query } from "@/db/client.js";
 import { distanceToPosition } from "../geometry.js";
 
@@ -116,6 +116,50 @@ const RESIDENTIAL_ACCESSORY_CONTEXT_RADIUS_METERS = 25;
 
 const SMALL_HOUSE_AREA_MAX_SQM = 90;
 const MEDIUM_HOUSE_AREA_MAX_SQM = 220;
+const RESIDENTIAL_THEME_MUTATION_CHANCE = 0.05;
+
+const RESIDENTIAL_DEFAULT_CATEGORY_THEMES: Record<string, string> = {
+  house: "普通的住宅",
+  garage: "普通的车库",
+  tool_shed: "普通的工具屋",
+};
+
+const RESIDENTIAL_CATEGORY_EVENT_THEMES: Record<string, string[]> = {
+  house: [
+    "正在举办小型聚会的住宅",
+    "刚刚完成大扫除的住宅",
+    "停电后点着应急灯的住宅",
+  ],
+  garage: [
+    "正在维修车辆的车库",
+    "堆满搬家纸箱的车库",
+    "临时改造成工作间的车库",
+  ],
+  tool_shed: [
+    "刚被翻找过的工具屋",
+    "正在整理园艺器具的工具屋",
+    "堆着临时维修材料的工具屋",
+  ],
+};
+
+const RESIDENTIAL_LEVEL_EVENT_THEMES: Record<string, string[]> = {
+  house: [
+    "正在整理生活用品的住宅楼层",
+    "刚结束家庭活动的住宅楼层",
+    "灯光异常昏暗的住宅楼层",
+  ],
+  garage: [
+    "充满机油味的车库楼层",
+    "摆着临时维修工具的车库楼层",
+    "堆放额外储物箱的车库楼层",
+  ],
+  tool_shed: [
+    "工具散放在地面的工具屋内部",
+    "新添了维修材料的工具屋内部",
+    "刚进行过园艺整理的工具屋内部",
+  ],
+};
+const RESIDENTIAL_FALLBACK_THEME = "普通的建筑";
 
 
 //#####################
@@ -371,10 +415,15 @@ function determineHousePatternPool(candidate: BuildingCandidate): string[] {
  * @param candidate
  */
 export function buildHouseCategorySchemaFromDistribution(
-  appliedBaseSchema: FeatureIdRoomDefinition,
+  appliedBaseSchema: PatternDistribution,
   candidate: BuildingCandidate,
 ): CategorySchema {
-  const [patternRoomDefinitions = {}] = Object.values(appliedBaseSchema)
+  const [distribution] = Object.values(appliedBaseSchema)
+  const mainCategory = distribution?.categories[0];
+  const patternRoomDefinitions = distribution.rooms;
+  // Category 的默认主题
+  const baseTheme = pickResidentialCategoryTheme(mainCategory);
+  const schemaTheme = pickResidentialEventTheme(mainCategory, RESIDENTIAL_CATEGORY_EVENT_THEMES) ?? baseTheme;
   // 控制楼层数在 1 ~ 3 范围
   const buildingLevels = candidate.buildingLevels ? Math.min(3, candidate.buildingLevels) : 1 // 此处默认1层是合理的，因为 Pattern 本身就是被面积与楼层决定的，不会出现不够用的情况
 
@@ -385,7 +434,7 @@ export function buildHouseCategorySchemaFromDistribution(
     const levelKey = i === 1 ? "ground_level" : i === buildingLevels ? "top_level" : "middle_level"
     concreteLevelKeys.push(levelKey)
     levels[levelKey] = {
-      theme: "普通的住宅楼层",
+      theme: pickResidentialEventTheme(mainCategory, RESIDENTIAL_LEVEL_EVENT_THEMES) ?? schemaTheme,
       span: [i],
       rooms: {}, // 等待后续装填
     }
@@ -403,9 +452,29 @@ export function buildHouseCategorySchemaFromDistribution(
   });
 
   return {
-    theme: "普通的住宅",
+    theme: schemaTheme,
     levels,
   }
+}
+
+function pickResidentialCategoryTheme(mainCategory: string): string {
+  return RESIDENTIAL_DEFAULT_CATEGORY_THEMES[mainCategory];
+}
+
+function pickResidentialEventTheme(
+  mainCategory: string,
+  eventThemePools: Record<string, string[]>,
+): string | null {
+  if (Math.random() >= RESIDENTIAL_THEME_MUTATION_CHANCE) {
+    return null;
+  }
+
+  const eventThemes = eventThemePools[mainCategory];
+  if (!eventThemes || eventThemes.length === 0) {
+    return null;
+  }
+
+  return pickRandom(eventThemes);
 }
 
 /**

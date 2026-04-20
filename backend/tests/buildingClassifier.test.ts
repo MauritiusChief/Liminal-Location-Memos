@@ -12,7 +12,7 @@ import {
   applyCategoryBaseSchemasToDistribution,
   BuildingCandidate,
   decidePatternDistribution,
-  FeatureIdRoomDefinition,
+  PatternDistribution,
 } from "../src/services/gameSystem/buildingClassifier";
 import { buildHouseCategorySchemaFromDistribution } from "../src/services/gameSystem/buildingResidential";
 
@@ -22,6 +22,7 @@ describe("building residential schema generation", () => {
   });
 
   it("preserves house pattern room keys through distribution", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
     const candidate = buildCandidate({ buildingLevels: 1 });
 
     const distribution = decidePatternDistribution(candidate, { house: "studio" });
@@ -29,12 +30,15 @@ describe("building residential schema generation", () => {
     const schema = buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate);
     const rooms = schema.levels.ground_level.rooms;
 
+    expect(schema.theme).toBe("普通的住宅");
+    expect(schema.levels.ground_level.theme).toBe("普通的住宅");
     expect(rooms.bedroom).toEqual({ descrption: "卧室" });
     expect(rooms.living_room).toEqual({ descrption: "与餐厅、厨房相连的客厅" });
     expect(rooms.bath_room).toEqual({ descrption: "带厕所的浴室" });
   });
 
   it("merges composite house and garage rooms without overwriting the feature distribution", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
     const candidate = buildCandidate({ areaSqm: 120, buildingLevels: 1 });
 
     const distribution = decidePatternDistribution(candidate, { house: "standard", garage: "garage" });
@@ -43,30 +47,52 @@ describe("building residential schema generation", () => {
     const rooms = schema.levels.ground_level.rooms;
 
     expect(distribution[candidate.detail.featureId].categories).toEqual(["house", "garage"]);
+    expect(appliedBaseSchema[candidate.detail.featureId].categories).toEqual(["house", "garage"]);
+    expect(schema.theme).toBe("普通的住宅");
+    expect(schema.levels.ground_level.theme).toBe("普通的住宅");
     expect(rooms.living_room).toEqual({ descrption: "客厅" });
     expect(rooms.kitchen).toEqual({ descrption: "带餐厅的厨房" });
     expect(rooms.garage).toEqual({ descrption: "车库" });
   });
 
   it("converts true self base schema rooms to category-keyed rooms with category descriptions", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
     const candidate = buildCandidate();
 
     const distribution = decidePatternDistribution(candidate, { tool_shed: "tool_shed" });
     const appliedBaseSchema = applyCategoryBaseSchemasToDistribution(distribution);
     const schema = buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate);
 
+    expect(schema.theme).toBe("普通的工具屋");
+    expect(schema.levels.ground_level.theme).toBe("普通的工具屋");
     expect(schema.levels.ground_level.rooms.tool_shed).toEqual({ descrption: "工具屋" });
+  });
+
+  it("uses garage as the schema theme when garage is the main category", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
+    const candidate = buildCandidate();
+
+    const distribution = decidePatternDistribution(candidate, { garage: "garage" });
+    const appliedBaseSchema = applyCategoryBaseSchemasToDistribution(distribution);
+    const schema = buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate);
+
+    expect(schema.theme).toBe("普通的车库");
+    expect(schema.levels.ground_level.theme).toBe("普通的车库");
+    expect(schema.levels.ground_level.rooms.garage).toEqual({ descrption: "车库" });
   });
 
   it("places rooms by preferred level and random fallback", () => {
     jest.spyOn(Math, "random").mockReturnValue(0.99);
     const candidate = buildCandidate({ buildingLevels: 2 });
-    const appliedBaseSchema: FeatureIdRoomDefinition = {
+    const appliedBaseSchema: PatternDistribution = {
       [candidate.detail.featureId]: {
-        top_room: { desc: "顶层房间", prefered: "top_level" },
-        ground_room: { desc: "底层房间", prefered: "ground_level" },
-        whole_room: { desc: "全楼层房间", prefered: "all_levels" },
-        fallback_room: { desc: "随机房间" },
+        categories: ["house"],
+        rooms: {
+          top_room: { desc: "顶层房间", prefered: "top_level" },
+          ground_room: { desc: "底层房间", prefered: "ground_level" },
+          whole_room: { desc: "全楼层房间", prefered: "all_levels" },
+          fallback_room: { desc: "随机房间" },
+        },
       },
     };
 
@@ -79,6 +105,38 @@ describe("building residential schema generation", () => {
     expect(schema.levels.all_levels).toBeUndefined();
     expect(schema.levels.top_level.rooms.fallback_room).toEqual({ descrption: "随机房间" });
     expect(schema.levels.ground_level.rooms.fallback_room).toBeUndefined();
+  });
+
+  it("applies a schema-level event theme to every level when schema theme mutates", () => {
+    jest.spyOn(Math, "random")
+      .mockReturnValueOnce(0.01)
+      .mockReturnValueOnce(0);
+    const candidate = buildCandidate({ buildingLevels: 2 });
+
+    const distribution = decidePatternDistribution(candidate, { house: "studio" });
+    const appliedBaseSchema = applyCategoryBaseSchemasToDistribution(distribution);
+    const schema = buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate);
+
+    expect(schema.theme).toBe("正在举办小型聚会的住宅");
+    expect(schema.levels.ground_level.theme).toBe("正在举办小型聚会的住宅");
+    expect(schema.levels.top_level.theme).toBe("正在举办小型聚会的住宅");
+  });
+
+  it("mutates only the matching level theme when schema theme stays normal", () => {
+    jest.spyOn(Math, "random")
+      .mockReturnValueOnce(0.99)
+      .mockReturnValueOnce(0.01)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.99);
+    const candidate = buildCandidate({ buildingLevels: 2 });
+
+    const distribution = decidePatternDistribution(candidate, { house: "studio" });
+    const appliedBaseSchema = applyCategoryBaseSchemasToDistribution(distribution);
+    const schema = buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate);
+
+    expect(schema.theme).toBe("普通的住宅");
+    expect(schema.levels.ground_level.theme).toBe("正在整理生活用品的住宅楼层");
+    expect(schema.levels.top_level.theme).toBe("普通的住宅");
   });
 });
 
