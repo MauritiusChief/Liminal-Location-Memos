@@ -7,6 +7,7 @@
 
 ## 近期计划
 
+* 为什么 statidum relation 中的 outer 建筑没有落入数据库？
 * World State 需存储 Game State Tool 运行记录
 * 前端继续游戏、重开游戏时的UI bug
 * 添加通过海拔高度 API 与 ele 标签计算建筑实际高度的功能

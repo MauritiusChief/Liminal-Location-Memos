@@ -1,7 +1,6 @@
 import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { DbBuildingFeatureDetailRow, FeatureDetail, FeatureId, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
-import { dedupeOutlineReferences } from "@/services/osmNormalization/osmNormalizer.js";
 import { Position } from "./gameSessionStore.js";
 import { ambiguousResidentialCategory, buildHouseCategorySchemaFromDistribution, finishHouseBuildingSchema, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
 import { trimTagValue } from "../utils.js";
@@ -120,15 +119,15 @@ type ScopeType = "single" | "building_relation";
 export interface BuildingCandidate {
   featureId: string;
   scope: ScopeType;
-  detail: FeatureDetail;
-  memberDetails?: FeatureDetail[];
+  details: FeatureDetail[];
+  outline?: FeatureId;
   areaSqm: number | null;
   centerPosition: Position;
   buildingLevels: number | null;
   heightMeters: number | null;
   buildingValue: string | null;
   categoryRecord?: Record<FeatureId, string[]>;
-  patternRecord?: Record<FeatureId, string>;
+  patternRecord?: Record<FeatureId, Record<string, string>>; // 每个 Category 都配一个 Pattern
 }
 
 //Definition 类型
@@ -193,6 +192,8 @@ export async function generateBuildingSchema(
 
   // TODO 再没有分类结果的话，还没定好怎么处理
   if (category.length === 0) return undefined;
+
+  // Category 信息存入 candidate
 
   // 根据候选建筑本身信息，为每个 Category 随机选择一个 pattern
   const [mainCategoryKey, ...containedCategoryKeys] = category
@@ -267,29 +268,40 @@ async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandid
   // 只有多体建筑的子建筑需要自动提升到 relation；直接传 relation 本体则维持原样。
   const shouldPromoteToRelation = feature.detail.osmType === "way" && relationReference;
   if (!shouldPromoteToRelation) {
-    return toResolvedCandidate("single", feature.detail, undefined, feature.areaSqm, feature.centerPosition);
+    const details = [feature.detail];
+    return toResolvedCandidate("single", feature.detail.featureId, details, pickOutlineFeatureId(details), feature.areaSqm, feature.centerPosition);
   }
 
-  const relationFeatureId = `relation/${relationReference.rel}`;
+  const relationFeatureId = `relation/${shouldPromoteToRelation.rel}`;
   const relationSnapshot = await fetchBuildingFeatureDetailById(relationFeatureId);
-  const relationMemberSnapshots = await fetchBuildingRelationMemberSnapshots(relationReference.rel);
+  const relationMemberSnapshots = await fetchBuildingRelationMemberSnapshots(shouldPromoteToRelation.rel);
 
   if (!relationSnapshot && relationMemberSnapshots.length === 0) {
-    return toResolvedCandidate("single", feature.detail, undefined, feature.areaSqm, feature.centerPosition);
+    const details = [feature.detail];
+    return toResolvedCandidate("single", feature.detail.featureId, details, pickOutlineFeatureId(details), feature.areaSqm, feature.centerPosition);
   }
 
   // 寻找 relation 并获取其信息的分支
-  const memberDetails = relationMemberSnapshots.map((snapshot) => snapshot.detail);
-  const relationDetail = relationSnapshot?.detail ?? synthesizeRelationDetail(relationFeatureId, memberDetails);
-  const relationAreaSqm = relationSnapshot?.areaSqm ?? sumAreas(relationMemberSnapshots.map((snapshot) => snapshot.areaSqm));
-  const relationCenterPosition = relationSnapshot?.centerPosition ?? computeMeanCenterPosition(
+  const relationMemberDetails = relationMemberSnapshots.map((snapshot) => snapshot.detail);
+  const details = relationSnapshot
+    ? [relationSnapshot.detail, ...relationMemberDetails]
+    : relationMemberDetails;
+  const outline = pickOutlineFeatureId(details);
+  const outlineSnapshot = outline ? await fetchBuildingFeatureDetailById(outline) : null;
+  const relationAreaSqm = outlineSnapshot?.areaSqm
+    ?? relationSnapshot?.areaSqm
+    ?? sumAreas(relationMemberSnapshots.map((snapshot) => snapshot.areaSqm));
+  const relationCenterPosition = outlineSnapshot?.centerPosition
+    ?? relationSnapshot?.centerPosition
+    ?? computeMeanCenterPosition(
     relationMemberSnapshots.map((snapshot) => snapshot.centerPosition),
   );
 
   return toResolvedCandidate(
     "building_relation",
-    relationDetail,
-    memberDetails,
+    relationFeatureId,
+    details,
+    outline,
     relationAreaSqm,
     relationCenterPosition || feature.centerPosition,
   );
@@ -309,6 +321,7 @@ async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandid
  * @returns category 列表，长度超过1代表复合 Category；若当前阶段仍无法稳定判断则返回空数组
  */
 function resolveExplicitCategory(candidate: BuildingCandidate): string[] {
+  // TODO: BuildingCandidate.detail 已废弃；后续改为 details 聚合或主 detail 策略。
   if (isExplicitBuilding(EXPLICIT_GARAGE_BUILDING_VALUES, candidate.detail.tags) || hasContainedPoiTag(candidate, "amenity", ["parking"])) return ["garage"];
   if (isExplicitBuilding(EXPLICIT_TOOL_SHED_BUILDING_VALUES, candidate.detail.tags)) return ["tool_shed"];
   if (isExplicitBuilding(EXPLICIT_HOUSE_BUILDING_VALUES, candidate.detail.tags)) return ["house"];
@@ -351,6 +364,7 @@ export function decidePatternDistribution(
   candidate: BuildingCandidate,
   categoryPatternKeys: Record<string, string>,
 ): PatternDistribution {
+  // TODO: BuildingCandidate.detail 已废弃；后续改为 candidate.featureId 或 details 主体策略。
   const featureId = candidate.detail.featureId
   const catPatKeyParis = Object.entries(categoryPatternKeys)
 
@@ -569,72 +583,44 @@ export function parseCompositeCategoryKey(categoryKey: string): {
 }
 
 /**
- * TODO 不要做成合成虚假 FeatureDetail，这样会阻碍后续 Pattern Distribution。
- *
- * 当 relation 本体自身无法直接查到完整细节时，
- * 使用其 member 建筑合成一个虚假的 relation 级 FeatureDetail。
- *
- * @param featureId relation 级 feature id
- * @param memberDetails 属于该 relation 的成员建筑细节
- * @returns 合成后的 relation 级 FeatureDetail（其实是假的，不存在于数据库中）
- */
-function synthesizeRelationDetail(featureId: string, memberDetails: FeatureDetail[]): FeatureDetail {
-  const parsed = parseBuildingFeatureId(featureId);
-  // member 上的 tags 只做“主值缺失时补洞”，避免次级成员覆盖掉主成员上更明确的标签。
-  const tags = memberDetails.reduce<Record<string, string>>(
-    (mergedTags, memberDetail) => mergeStringRecord(mergedTags, memberDetail.tags),
-    {},
-  );
-  const outlineReferences = dedupeOutlineReferences(
-    memberDetails.flatMap((memberDetail) => memberDetail.outlineReferences || []),
-  );
-  const containedPoisReferences = memberDetails.flatMap((memberDetail) => memberDetail.containedPoisReferences || []);
-
-  return {
-    featureId,
-    osmType: parsed.osmType,
-    osmId: parsed.osmId,
-    category: "building",
-    geometryType: "MultiPolygon",
-    tags,
-    relationReferences: [],
-    outlineReferences,
-    containedPoisReferences: containedPoisReferences.length > 0 ? containedPoisReferences : undefined,
-  };
-}
-
-/**
  * 把原始 detail 与衍生指标一起打包成分类阶段统一使用的候选结构。
  *
  * 衍生指标目前只包括面积、楼层数与高度，且优先使用主 detail，
- * 在缺失时再从 member 建筑中推断。
+ * 在缺失时再从其余 detail 中推断。
  *
  * @param scope 当前候选是单体建筑还是 relation 级建筑
- * @param detail 主体建筑 detail
- * @param memberDetails relation 级时的成员建筑细节
+ * @param featureId 当前候选身份 id
+ * @param details 当前候选关联的真实建筑细节
+ * @param outline relation outline 对应的 feature id
  * @param areaSqm 已解析出的面积
  * @returns 分类阶段统一使用的候选结构
  */
 function toResolvedCandidate(
   scope: ScopeType,
-  detail: FeatureDetail,
-  memberDetails: FeatureDetail[] | undefined,
+  featureId: FeatureId,
+  details: FeatureDetail[],
+  outline: FeatureId | undefined,
   areaSqm: number | null,
   centerPosition: Position,
 ): BuildingCandidate {
-  const buildingLevels = parseBuildingLevels(detail.tags) ?? inferLevelsFromMembers(memberDetails);
-  const heightMeters = parseHeightMeters(detail.tags.height) ?? inferHeightFromMembers(memberDetails);
+  const [primaryDetail, ...secondaryDetails] = details;
+  if (!primaryDetail) {
+    throw new Error(`BuildingCandidate ${featureId} has no feature details.`);
+  }
+
+  const buildingLevels = parseBuildingLevels(primaryDetail.tags) ?? inferLevelsFromDetails(secondaryDetails);
+  const heightMeters = parseHeightMeters(primaryDetail.tags.height) ?? inferHeightFromDetails(secondaryDetails);
 
   return {
-    featureId: detail.featureId,
+    featureId,
     scope,
-    detail,
-    memberDetails,
+    details,
+    outline,
     areaSqm,
     centerPosition,
     buildingLevels,
     heightMeters,
-    buildingValue: trimTagValue(detail.tags.building),
+    buildingValue: trimTagValue(primaryDetail.tags.building),
   };
 }
 
@@ -652,6 +638,15 @@ export function parseBuildingFeatureId(featureId: string): { osmType: string; os
   const [osmType, osmIdText] = featureId.split("/");
   const osmId = Number.parseInt(osmIdText, 10);
   return { osmType, osmId };
+}
+
+function pickOutlineFeatureId(details: FeatureDetail[]): FeatureId | undefined {
+  const outlineReference = details.flatMap((detail) => detail.outlineReferences || [])[0];
+  if (!outlineReference) {
+    return undefined;
+  }
+
+  return `${outlineReference.osmType}/${outlineReference.osmId}`;
 }
 
 
@@ -703,18 +698,18 @@ function parseHeightMeters(value: string | undefined): number | null {
 }
 
 /**
- * 在主 detail 缺少楼层信息时，使用 member 建筑中的最大楼层数作为保守推断。
+ * 在主 detail 缺少楼层信息时，使用其余 detail 中的最大楼层数作为保守推断。
  *
- * @param memberDetails relation 成员建筑细节
+ * @param details 可用于补充推断的建筑细节
  * @returns 推断出的楼层数；若无法推断则返回 null
  */
-function inferLevelsFromMembers(memberDetails: FeatureDetail[] | undefined): number | null {
-  if (!memberDetails || memberDetails.length === 0) {
+function inferLevelsFromDetails(details: FeatureDetail[]): number | null {
+  if (details.length === 0) {
     return null;
   }
 
-  const levels = memberDetails
-    .map((memberDetail) => parseBuildingLevels(memberDetail.tags))
+  const levels = details
+    .map((detail) => parseBuildingLevels(detail.tags))
     .filter((value): value is number => value !== null);
 
   if (levels.length === 0) {
@@ -725,18 +720,18 @@ function inferLevelsFromMembers(memberDetails: FeatureDetail[] | undefined): num
 }
 
 /**
- * 在主 detail 缺少高度信息时，使用 member 建筑中的最大高度作为保守推断。
+ * 在主 detail 缺少高度信息时，使用其余 detail 中的最大高度作为保守推断。
  *
- * @param memberDetails relation 成员建筑细节
+ * @param details 可用于补充推断的建筑细节
  * @returns 推断出的高度；若无法推断则返回 null
  */
-function inferHeightFromMembers(memberDetails: FeatureDetail[] | undefined): number | null {
-  if (!memberDetails || memberDetails.length === 0) {
+function inferHeightFromDetails(details: FeatureDetail[]): number | null {
+  if (details.length === 0) {
     return null;
   }
 
-  const heights = memberDetails
-    .map((memberDetail) => parseHeightMeters(memberDetail.tags.height))
+  const heights = details
+    .map((detail) => parseHeightMeters(detail.tags.height))
     .filter((value): value is number => value !== null);
 
   if (heights.length === 0) {
@@ -761,24 +756,6 @@ function sumAreas(areas: Array<number | null>): number | null {
   }
 
   return finiteAreas.reduce((sum, area) => sum + area, 0);
-}
-
-/**
- * 以 primary 为高优先级合并两份 tags，只在主值缺失时使用 fallback 补洞。
- *
- * @param primary 高优先级 tags
- * @param fallback 仅用于补洞的次级 tags
- * @returns 合并后的 tags
- */
-function mergeStringRecord(primary: Record<string, string>, fallback: Record<string, string>): Record<string, string> {
-  const merged = { ...primary };
-  for (const [key, value] of Object.entries(fallback)) {
-    if (!(key in merged)) {
-      merged[key] = value;
-    }
-  }
-
-  return merged;
 }
 
 function computeMeanCenterPosition(positions: Position[]): Position | null {
@@ -817,6 +794,7 @@ function hasContainedPoiTag(
   values: string[],
 ): boolean {
   const valueSet = new Set(values);
+  // TODO: BuildingCandidate.detail 已废弃；后续改为检查 candidate.details 的全部 contained POI。
   return (candidate.detail.containedPoisReferences || []).some((poi) => {
     const tagValue = trimTagValue(poi.tags[key]);
     return tagValue !== null && valueSet.has(tagValue);
@@ -831,7 +809,6 @@ function hasContainedPoiTag(
  */
 export function weightedBoolean(supportingWeight: number, nonSupportingWeight: number): boolean {
   const totalWeight = supportingWeight + nonSupportingWeight;
-  if (totalWeight === 0) return Math.random() < 0.5; // 总权重为0说明无决定因素，则完全随机
   return Math.random() * totalWeight < supportingWeight;
 }
 
