@@ -3,7 +3,7 @@ import { loadServiceSql } from "@/db/sqlLoader.js";
 import { DbBuildingFeatureDetailRow, FeatureDetail, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
 import { dedupeOutlineReferences } from "@/services/osmNormalization/osmNormalizer.js";
 import { Position } from "./gameSessionStore.js";
-import { ambiguousResidentialCategory, buildResidentialLevels, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
+import { ambiguousResidentialCategory, buildHouseCategorySchemaFromDistribution, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
 import { trimTagValue } from "../utils.js";
 
 // Data Base 类型
@@ -74,10 +74,21 @@ export interface CategorySchema {
   levels: Record<string, CategoryLevelSchema>; // key 为楼层种类名
 }
 
+/**
+ * 刻意由 Level 直接连接 Room
+ */
 export interface CategoryLevelSchema {
   theme: string;
   span: number[]; // 使用该 C-Schema 的楼层
-  rooms: Record<string, RoomSchema | SuiteSchema>; // key 为该房间/套房的种类名
+  rooms: Record<string, CategoryRoomSchema>; // key 为该房间的种类名
+}
+
+/**
+ * 刻意不包含数量信息；Suite 此时也由此类型表示
+ */
+export interface CategoryRoomSchema {
+  descrption: string;
+  access?: "entrance" | "vertical" | "internal";
 }
 
 
@@ -133,6 +144,10 @@ export interface PatternRoomDefinition {
  * 键为 featureId，值为 Category Key 与 PatternRoomDefinition 列
  */
 export type PatternDistribution = Record<string, {category: string, rooms: PatternRoomDefinition[]}>
+/**
+ * 键为 featureId，值为 PatternRoomDefinition 列
+ */
+export type FeatureIdRoomDefinition = Record<string, PatternRoomDefinition[]>
 
 //#region 出口函数
 
@@ -183,7 +198,8 @@ export async function generateBuildingSchema(
     const baseSchemaRooms = baseSchema ? Object.values(baseSchema.rooms).filter(r => typeof r !== 'boolean') : []
     return [fId, [...baseSchemaRooms, ...distr.rooms]]
   })
-  const patternAppliedBaseSchema: Record<string, PatternRoomDefinition[]> = Object.fromEntries(patternAppliedBaseSchemaEntries)
+  // 键为 feature id
+  const patternAppliedBaseSchema: FeatureIdRoomDefinition = Object.fromEntries(patternAppliedBaseSchemaEntries)
 
   // 根据 candidate 创建仅有楼层数的空 Category Schema
 
@@ -337,10 +353,16 @@ function decidePatternDistribution(
 }
 
 /**
- * 预留给下一阶段的 category/pattern -> Category Schema 应用入口。
+ * TODO 目前暂只支持住宅区
+ * @param appliedBaseSchema 键为 feature id
+ * @param candidate
+ * @returns
  */
-function applyPatternToCategorySchema(): void {
-  // TODO: 下一阶段在这里把 category/pattern 应用到真正的 Category Schema。
+function buildCategorySchemaFromDistribution(
+  appliedBaseSchema: FeatureIdRoomDefinition,
+  candidate: BuildingCandidate,
+): CategorySchema {
+  return buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate)
 }
 
 //#region 共用逻辑函数

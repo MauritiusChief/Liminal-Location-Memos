@@ -1,5 +1,5 @@
 import { loadServiceSql } from "@/db/sqlLoader.js";
-import { AnyCategoryKey, BuildingCandidate, BuildingSchema, CategoryDefinition, CategorySchema, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, PatternDistribution, PatternRoomDefinition, pickRandom, RoomSchema, weightedBoolean } from "./buildingClassifier.js";
+import { AnyCategoryKey, BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategorySchema, FeatureIdRoomDefinition, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, PatternDistribution, PatternRoomDefinition, pickRandom, RoomSchema, weightedBoolean } from "./buildingClassifier.js";
 import { query } from "@/db/client.js";
 import { distanceToPosition } from "../geometry.js";
 
@@ -348,75 +348,46 @@ function determineHousePatternPool(candidate: BuildingCandidate): string[] {
   return ["standard", "duplex"];
 }
 
-//TODO 添加 Pattern Distribution 占位函数，总是认为建筑只有一体，所以无 Pattern Distribution 问题
-
-/**
- * 根据 residential category 与 pattern 生成最终 Building Schema 的 levels。
- *
- * 当前仅实现最小可用流程：
- * - Pattern Distribution 占位：所有功能都属于当前建筑整体
- * - Sector Distribution 占位：每个楼层只有一个 main sector
- *
- * @param candidate 已标准化的建筑候选
- * @param categoryKey 已确定的 residential category，支持 `&` 连接的复合型 Category
- * @param patternKey 已选出的 pattern
- * @returns Building Schema 的 levels 字段
- */
-export function buildResidentialLevels(
-  candidate: BuildingCandidate,
-  categoryKey: string,
-  patternKey: string,
-): BuildingSchema["levels"] {
-  const patternDistribution = buildResidentialPatternDistribution(categoryKey, patternKey);
-  const categorySchema = applyResidentialPatternToCategorySchema(candidate, categoryKey, patternDistribution);
-  const sectorDistribution = buildResidentialSectorDistribution(categorySchema);
-
-  return buildResidentialLevelsFromCategorySchema(candidate, categorySchema, sectorDistribution);
-}
-
 
 //#####################
 //#region C-Schema 逻辑
 //#####################
 
-
 /**
- * 对 residential Category Base Schema 应用 Pattern Distribution
- *
- * @param candidate 已标准化的建筑候选
- * @param patternDistribution 当前单体/多体建筑应拥有的 pattern 功能
- * @returns feature id 为键的应用好的所有功能（包括 Pattern 与 Base Schema）
+ * TODO 默认仅 1 个地物，楼层数会控制为 1 到 3
+ * 从已应用 Pattern Distribution 的 Base Schema 中获取某住宅有哪些功能、有何种偏好，
+ * 然后从 Candidate 中获取此住宅的楼层，最后根据偏好的楼层把功能安插到楼层中去。
+ * （不涉及房间数量、出入口与通道、套房细节）
+ * @param appliedBaseSchema 仅 1 个地物
+ * @param candidate
  */
-export function applyResidentialPatternToBaseSchema(
+export function buildHouseCategorySchemaFromDistribution(
+  appliedBaseSchema: FeatureIdRoomDefinition,
   candidate: BuildingCandidate,
-  patternDistribution: PatternDistribution,
-): Record<string, PatternRoomDefinition[]> {
-  // 装载 Base Schema
-  const patternAppliedBaseSchemaEntries = Object.entries(patternDistribution).map( ([fId, distr]) => {
-    const baseSchema = RESIDENTIAL_CATEGORIES[distr.category].base_schema
-    const baseSchemaRooms = baseSchema ? Object.values(baseSchema.rooms).filter(r => typeof r !== 'boolean') : []
-    return [fId, [...baseSchemaRooms, ...distr.rooms]]
+): CategorySchema {
+  const [PatternRoomDefinitions] = Object.values(appliedBaseSchema)
+  // 控制楼层数在 1 ~ 3 范围
+  const buildingLevels = candidate.buildingLevels ? Math.min(3, candidate.buildingLevels) : 1 // 此处默认1层是合理的，因为 Pattern 本身就是被面积与楼层决定的，不会出现不够用的情况
+  const levelEntries: (string|CategoryLevelSchema)[][] = []
+  for (let i = 1; i <= buildingLevels; i++) {
+    const levelKey = i === 1 ? "ground_level" : i === buildingLevels ? "top_level" : "middle_level"
+    levelEntries.push([levelKey, {
+      theme: "普通的住宅楼层",
+      span: [i],
+      rooms: {}, // 等待后续装填
+    }])
+  }
+  // 初步装填功能
+  PatternRoomDefinitions.forEach( def => {
+    if (def.prefered && def.prefered === TOP_LEVEL[0]) {
+      const rooms = levelEntries[buildingLevels-1][1] as CategoryLevelSchema
+
+    }
   })
-  const patternAppliedBaseSchema: Record<string, PatternRoomDefinition[]> = Object.fromEntries(patternAppliedBaseSchemaEntries)
-
-  //
-
-
-  return buildCategorySchemaFromResidentialRooms(candidate, rooms);
-}
-
-/**
- * Sector Distribution 占位函数。
- *
- * 现阶段总是假设 C-Schema 中某个楼层只占一个 Sector。
- *
- * @param categorySchema 已合成的 C-Schema
- * @returns 每个 C-Schema 楼层中的 sector 分配
- */
-function buildResidentialSectorDistribution(categorySchema: CategorySchema): ResidentialSectorDistribution {
-  return Object.fromEntries(
-    Object.keys(categorySchema.levels).map((levelKey) => [levelKey, ["main"]]),
-  );
+  return {
+    theme: "普通的住宅",
+    levels: Object.fromEntries(levelEntries)
+  }
 }
 
 

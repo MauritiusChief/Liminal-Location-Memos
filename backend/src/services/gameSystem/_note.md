@@ -72,11 +72,11 @@ Game State 术语：
   - 如果*程序*判断是非常标准的独栋建筑，比如独栋酒店、办公楼，不存在分配问题，可以直接下一步
   - 如果是多体建筑，则需要让 *LLM* 把 Pattern 中的功能分配到多个建筑中（会提供各个建筑的 OSM tags 与所含 POI 作为参考）生成 Pattern Distribution
 4. 在 Category Base Schem 上应用 Pattern 或 Pattern Distribution，结合建筑楼层信息生成 Category Schema
-  - 如果是多层建筑，那么会读取 Category Schem 中每个功能所偏好的楼层（底层、顶层）和楼层分布频率（每一层都有、隔一层有一个），细化到每个楼层的程度
+  - 如果是多层建筑，那么会读取 Category Schem 中每个功能所偏好的楼层（底层、顶层）和楼层分布频率（每一层都有、隔一层有一个），细化到每个楼层的程度（不涉及房间数量、出入口与通道、 套房内容的敲定）
 5. 从 Category Schema 视情况生成 Sector Distribution
   - 如果*程序*判断面积不大，则不需要切分为 Sector，直接下一步
   - 面积较大的话则需要先按六边形网格切分 Sector，然后 *LLM* 把 Category Schema 中单一楼层的功能分配到多个 Sector 中（会提供各个 Sector 的方位、外部的附近道路或设施、所含的 POI 作为参考）
-6. 收尾工作
+6. Category Schema 中所没有的信息的补完工作
   - 根据楼层或者 Sector 面积填补各个房间的数量信息，或者根据房间的类型随机决定数量
   - 填补随机的 Suite Schema，比如仅仅指定为公寓或酒店后，内部的套房
   - 添加出入口和楼层间通道、多体建筑之间的通道
