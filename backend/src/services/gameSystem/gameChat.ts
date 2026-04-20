@@ -799,12 +799,6 @@ function formatFieldVisualDescriptionForPrompt(state: GameState, record: FieldVi
   ].join('\n');
 }
 
-function formatRelativeDirectionLabel(relativeBearingDegrees: number): string {
-  const labels = ['正前', '右前', '右', '右后', '正后', '左后', '左', '左前'];
-  const index = Math.round(relativeBearingDegrees / 45) % labels.length;
-  return labels[index]!;
-}
-
 //#region 帮助函数
 
 /**
