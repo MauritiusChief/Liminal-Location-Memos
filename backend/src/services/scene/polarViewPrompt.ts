@@ -1,6 +1,7 @@
 import { AREA_TAG_KEYS, BUILDING_TAG_KEYS, POI_TAG_KEYS, ROAD_TAG_KEYS } from "./sceneUtilLabel.js";
 import { PolarView, PolarViewCluster, PolarViewLevel } from "./polarViewLabeled.js";
 import { trimTagValue } from "../utils.js";
+import { normalizeBearingDegrees } from "../geometry.js";
 
 type PolarFeatureCategory = "building" | "area" | "poi" | "line";
 type MarkedPolarViewFeature = PolarViewCluster["features"][number];
@@ -272,8 +273,14 @@ function formatAngle(angleDegrees: number): string {
   return `${Math.round(angleDegrees)}°`;
 }
 
-function formatRelativeDirection(bearingDegrees: number, playerOrientation: number): string {
-  const relativeDegrees = normalizeRelativeDegrees(bearingDegrees - playerOrientation);
+/**
+ * 返回某一角度的方向与实际偏转角，正前方为 0°
+ * @param bearingDegrees 正北0°坐标下的绝对偏转角
+ * @param playerOrientation
+ * @returns 方向标记和实际角度的字符串
+ */
+export function formatRelativeDirection(bearingDegrees: number, playerOrientation: number): string {
+  const relativeDegrees = normalizeBearingDegrees(bearingDegrees - playerOrientation);
   const labels = [
     "前",
     "前偏右",
@@ -294,10 +301,6 @@ function formatRelativeDirection(bearingDegrees: number, playerOrientation: numb
   ] as const;
   const index = Math.floor((relativeDegrees + 11.25) / 22.5) % labels.length;
   return `${labels[index]}(${Math.round(relativeDegrees)}°)`;
-}
-
-function normalizeRelativeDegrees(angleDegrees: number): number {
-  return ((angleDegrees % 360) + 360) % 360;
 }
 
 function getLargestLevel(polarView: PolarView): 1 | 2 | 3 | undefined {

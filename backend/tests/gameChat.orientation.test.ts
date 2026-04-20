@@ -11,8 +11,8 @@ jest.mock("../src/services/scene/scenePrompt", () => ({
 jest.mock("../src/services/gameSystem/systemPrompts", () => ({
   BUILD_GAME_STATE_MANAGER_SYSTEM: jest.fn(() => ""),
   INITIAL_BOOK_MESSAGE_SYSTEM: "",
-  OUTDOOR_VISUAL_DESCRIPTION_SYSTEM: "",
   REGULAR_BOOK_MESSAGE_SYSTEM: "",
+  VISUAL_DESCRIPTION_SYSTEM: "",
 }));
 
 jest.mock("../src/services/gameSystem/gameDebug", () => ({
@@ -53,7 +53,6 @@ jest.mock("../src/services/osmNormalization/osmGate", () => {
 import { buildSceneFromRequest } from "../src/services/scene/sceneObject";
 import {
   generateJsonReplySingleMessage,
-  generateReplySingleMessage,
   streamReplyFullMessages,
 } from "../src/services/gameSystem/llm";
 import {
@@ -74,8 +73,10 @@ function buildGameState(): GameState {
     playerOrientation: 15,
     playerIndoorLocation: null,
     messageHistory: [],
-    activeOutdoorVisualDescriptions: [],
-    outdoorVisualDescriptions: {},
+    activeFieldVisualDescriptions: [],
+    fieldVisualDescriptions: {},
+    activeExteriorVisualDescriptions: [],
+    exteriorVisualDescriptions: {},
     buildingSchemas: {},
     levelVisualDescriptions: {},
   };
@@ -133,7 +134,6 @@ describe("applyGameStateToolCalls", () => {
 describe("streamGameTurn", () => {
   const mockedBuildSceneFromRequest = jest.mocked(buildSceneFromRequest);
   const mockedGenerateJsonReplySingleMessage = jest.mocked(generateJsonReplySingleMessage);
-  const mockedGenerateReplySingleMessage = jest.mocked(generateReplySingleMessage);
   const mockedStreamReplyFullMessages = jest.mocked(streamReplyFullMessages);
   const mockedWriteGameDebugRequest = jest.mocked(writeGameDebugRequest);
   const mockedWriteGameDebugResult = jest.mocked(writeGameDebugResult);
@@ -170,8 +170,11 @@ describe("streamGameTurn", () => {
       microGrid: { cells: [] } as never,
       polarView: undefined,
     });
-    mockedGenerateJsonReplySingleMessage.mockResolvedValue({
+    mockedGenerateJsonReplySingleMessage.mockResolvedValueOnce({
       reply: "[]",
+      reasoning: "",
+    }).mockResolvedValueOnce({
+      reply: JSON.stringify({ field: "visual notes", exteriors: [] }),
       reasoning: "",
     });
     mockedStreamReplyFullMessages.mockImplementation(async function* () {
@@ -179,11 +182,6 @@ describe("streamGameTurn", () => {
       yield { replyDelta: "reply", done: false };
       yield { done: true };
     });
-    mockedGenerateReplySingleMessage.mockResolvedValue({
-      reply: "visual notes",
-      reasoning: "",
-    });
-
     const result = await streamGameTurn(session.sessionId, "观察四周", async (event) => {
       emitted.push(event.type);
     });
@@ -193,7 +191,7 @@ describe("streamGameTurn", () => {
       { role: "player", content: "观察四周" },
       { role: "book", content: "book reply" },
     ]);
-    expect(session.gameState.activeOutdoorVisualDescriptions).toHaveLength(1);
+    expect(session.gameState.activeFieldVisualDescriptions).toHaveLength(1);
     expect(emitted).toEqual([
       "player_message_accepted",
       "book_reply_delta",
@@ -236,19 +234,17 @@ describe("streamGameTurn", () => {
       microGrid: { cells: [] } as never,
       polarView: undefined,
     });
-    mockedGenerateJsonReplySingleMessage.mockResolvedValue({
+    mockedGenerateJsonReplySingleMessage.mockResolvedValueOnce({
       reply: "[]",
+      reasoning: "",
+    }).mockResolvedValueOnce({
+      reply: JSON.stringify({ field: "visual notes", exteriors: [] }),
       reasoning: "",
     });
     mockedStreamReplyFullMessages.mockImplementation(async function* () {
       yield { replyDelta: "queued reply", done: false };
       yield { done: true };
     });
-    mockedGenerateReplySingleMessage.mockResolvedValue({
-      reply: "visual notes",
-      reasoning: "",
-    });
-
     const turnPromise = streamGameTurn(session.sessionId, "排队消息", async (event) => {
       events.push(event.type);
       if (event.type === "queued_next_turn") {
@@ -265,5 +261,41 @@ describe("streamGameTurn", () => {
       role: "book",
       content: "queued reply",
     });
+  });
+
+  it("writes exterior visual descriptions by building id", async () => {
+    const session = buildSession();
+
+    mockedGetRuntimeSession.mockResolvedValue(session);
+    mockedBuildSceneFromRequest.mockResolvedValue({
+      largestLevel: 0,
+      microGrid: {
+        cells: [[{
+          baseKind: "building",
+          baseFeatureId: "way/123",
+          sourceFeatureIds: ["way/123"],
+        }]],
+      } as never,
+      polarView: undefined,
+    });
+    mockedGenerateJsonReplySingleMessage.mockResolvedValueOnce({
+      reply: "[]",
+      reasoning: "",
+    }).mockResolvedValueOnce({
+      reply: JSON.stringify({
+        field: "field notes",
+        exteriors: [{ buildingId: "way/123", content: "exterior notes" }],
+      }),
+      reasoning: "",
+    });
+    mockedStreamReplyFullMessages.mockImplementation(async function* () {
+      yield { replyDelta: "book reply", done: false };
+      yield { done: true };
+    });
+
+    await streamGameTurn(session.sessionId, "看那栋建筑", jest.fn());
+
+    expect(session.gameState.exteriorVisualDescriptions["way/123"]?.content).toBe("exterior notes");
+    expect(session.gameState.activeExteriorVisualDescriptions).toEqual(["way/123"]);
   });
 });

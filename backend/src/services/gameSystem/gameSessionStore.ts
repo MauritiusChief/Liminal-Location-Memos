@@ -21,9 +21,19 @@ export type GameMessage =
       content: string;
     };
 
-export interface OutdoorVisualDescriptionRecord {
+export interface FieldVisualDescriptionRecord {
   id: string;
   center: Position; // 绑定经纬度坐标
+  content: string; // 纯文本形式的列表
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 文本形式记录某一建筑外部相关的事实性细节
+ */
+export interface ExteriorVisualDescriptionRecord {
+  buildingId: string; // 绑定特定建筑的 featureId
   content: string; // 纯文本形式的列表
   createdAt: string;
   updatedAt: string;
@@ -55,8 +65,10 @@ export interface GameState {
   playerOrientation: number;
   playerIndoorLocation: PlayerIndoorLocation | null;
   messageHistory: GameMessage[];
-  activeOutdoorVisualDescriptions: string[];
-  outdoorVisualDescriptions: Record<string, OutdoorVisualDescriptionRecord>;
+  activeFieldVisualDescriptions: string[];
+  fieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
+  activeExteriorVisualDescriptions: string[];
+  exteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
   buildingSchemas: Record<string, BuildingSchema>;
   levelVisualDescriptions: Record<string, LevelVisualDescriptionRecord>;
 }
@@ -233,8 +245,10 @@ function createGameSave(sessionId: string): GameSave {
       playerOrientation: Math.floor(Math.random() * 360),
       playerIndoorLocation: null,
       messageHistory: [],
-      activeOutdoorVisualDescriptions: [],
-      outdoorVisualDescriptions: {},
+      activeFieldVisualDescriptions: [],
+      fieldVisualDescriptions: {},
+      activeExteriorVisualDescriptions: [],
+      exteriorVisualDescriptions: {},
       buildingSchemas: {},
       levelVisualDescriptions: {},
     },

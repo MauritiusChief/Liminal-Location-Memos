@@ -23,6 +23,7 @@ export default {
     "^\\./gameDebug\\.js$": "<rootDir>/src/services/gameSystem/gameDebug.ts",
     "^\\./llm\\.js$": "<rootDir>/src/services/gameSystem/llm.ts",
     "^\\./gameSessionStore\\.js$": "<rootDir>/src/services/gameSystem/gameSessionStore.ts",
+    "^\\./toolMovePlayer\\.js$": "<rootDir>/src/services/gameSystem/toolMovePlayer.ts",
     "^\\./buildingResidential\\.js$": "<rootDir>/src/services/gameSystem/buildingResidential.ts",
     "^\\./buildingClassifier\\.js$": "<rootDir>/src/services/gameSystem/buildingClassifier.ts",
     "^@/(.*)\\.js$": "<rootDir>/src/$1.ts",

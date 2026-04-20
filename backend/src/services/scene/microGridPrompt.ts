@@ -9,6 +9,7 @@ export interface LabeledMicroGridCell {
   col: number;
   center: [number, number];
   baseKind: 'building' | 'area' | 'empty';
+  baseFeatureId?: string;
   baseLabel: string;
   poiLabels: string[];
   roadLabels: string[];
@@ -87,6 +88,7 @@ function buildLabeledMicroGridCell(cell: MicroGridCell): LabeledMicroGridCell {
     col: cell.col,
     center: cell.center,
     baseKind: cell.baseKind,
+    baseFeatureId: cell.baseFeatureDetail?.featureId,
     baseLabel,
     poiLabels,
     roadLabels,

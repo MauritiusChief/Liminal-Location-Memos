@@ -154,7 +154,7 @@ function formatDebugMessageSection(
   if (message.role === 'tool') {
     const maskedToolMessage = {
       ...message,
-      content: '',
+      content: '（已移除）',
     };
 
     return [

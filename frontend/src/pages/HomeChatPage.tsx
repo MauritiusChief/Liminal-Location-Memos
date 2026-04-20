@@ -21,9 +21,14 @@ export function HomeChatPage() {
     request,
   } = useAppSelector(selectChatState);
 
-  const activeOutdoorVisualDescriptions = session
-    ? session.activeOutdoorVisualDescriptions
-        .map((id) => session.outdoorVisualDescriptions[id])
+  const activeFieldVisualDescriptions = session
+    ? session.activeFieldVisualDescriptions
+        .map((id) => session.fieldVisualDescriptions[id])
+        .filter((record): record is NonNullable<typeof record> => Boolean(record))
+    : [];
+  const activeExteriorVisualDescriptions = session
+    ? session.activeExteriorVisualDescriptions
+        .map((buildingId) => session.exteriorVisualDescriptions[buildingId])
         .filter((record): record is NonNullable<typeof record> => Boolean(record))
     : [];
 
@@ -131,16 +136,27 @@ export function HomeChatPage() {
             Queued Next Turn:{' '}
             {session?.hasQueuedPlayerMessage ? 'Yes' : 'No'}
           </p>
-          <h4>Active Outdoor Visual Descriptions</h4>
+          <h4>Active Field Visual Descriptions</h4>
           <div>
-            {activeOutdoorVisualDescriptions.length ? activeOutdoorVisualDescriptions.map((record) => (
+            {activeFieldVisualDescriptions.length ? activeFieldVisualDescriptions.map((record) => (
               <article key={record.id} style={{ marginBottom: '12px' }}>
                 <div>
                   <strong>{record.center.lat.toFixed(6)}, {record.center.lon.toFixed(6)}</strong>
                 </div>
                 <pre style={{ margin: '4px 0', whiteSpace: 'pre-wrap' }}>{record.content}</pre>
               </article>
-            )) : 'No active outdoor visual descriptions yet.'}
+            )) : 'No active field visual descriptions yet.'}
+          </div>
+          <h4>Active Exterior Visual Descriptions</h4>
+          <div>
+            {activeExteriorVisualDescriptions.length ? activeExteriorVisualDescriptions.map((record) => (
+              <article key={record.buildingId} style={{ marginBottom: '12px' }}>
+                <div>
+                  <strong>{record.buildingId}</strong>
+                </div>
+                <pre style={{ margin: '4px 0', whiteSpace: 'pre-wrap' }}>{record.content}</pre>
+              </article>
+            )) : 'No active exterior visual descriptions yet.'}
           </div>
         </aside>
       </div>

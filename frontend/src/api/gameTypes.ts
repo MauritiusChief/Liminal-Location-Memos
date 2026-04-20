@@ -13,9 +13,16 @@ export type GameMessage =
       content: string;
     };
 
-export interface OutdoorVisualDescriptionRecord {
+export interface FieldVisualDescriptionRecord {
   id: string;
   center: Position;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExteriorVisualDescriptionRecord {
+  buildingId: string;
   content: string;
   createdAt: string;
   updatedAt: string;
@@ -65,8 +72,10 @@ export interface GameSessionSnapshot {
   playerOrientation: number;
   playerIndoorLocation: PlayerIndoorLocation | null;
   messageHistory: GameMessage[];
-  activeOutdoorVisualDescriptions: string[];
-  outdoorVisualDescriptions: Record<string, OutdoorVisualDescriptionRecord>;
+  activeFieldVisualDescriptions: string[];
+  fieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
+  activeExteriorVisualDescriptions: string[];
+  exteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
   buildingSchemas: Record<string, BuildingSchema>;
   levelVisualDescriptions: Record<string, LevelVisualDescriptionRecord>;
   llmProvider?: string;
