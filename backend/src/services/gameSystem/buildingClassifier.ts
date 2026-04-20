@@ -211,13 +211,16 @@ export async function generateBuildingSchema(
   // 根据 candidate 创建仅有楼层数的空 Category Schema
   // TODO 由于目前只支持 House，所以只支持产出 1 个 Category Schema
   const categorySchema = buildCategorySchemaFromDistribution(patternAppliedBaseSchema, candidate)
-  console.log(`${candidate.detail.featureId}生成的 Category Schema:`);
-  console.log(categorySchema.levels);
+  // console.log(`${candidate.detail.featureId}生成的 Category Schema:`);
+  // console.log(categorySchema.levels);
 
   // 产出 Sector Distribution 方案
   const sectorDistributionSchem = decideSectorDistribution(categorySchema, candidate)
   // 填充 Category Schema 没有的细节，生成完整 Building Schema
-  const buildingSchema = finishBuildingSchema(sectorDistributionSchem, candidate)
+  const buildingSchema = finishBuildingSchema(sectorDistributionSchem, candidate, mainCategoryKey)
+  console.log(`${buildingSchema.featureId}：`);
+  console.log(buildingSchema.category)
+  console.log(buildingSchema.levels.ground_level?.sectors)
 
   if (skipComplex) {
     return undefined;
@@ -454,8 +457,9 @@ function decideSectorDistribution(
 function finishBuildingSchema(
   schema: SectorDistributionSchem,
   candidate: BuildingCandidate,
+  mainCategoryKey: string,
 ) {
-  return finishHouseBuildingSchema(schema, candidate)
+  return finishHouseBuildingSchema(schema, candidate, mainCategoryKey)
 }
 
 //#region 共用逻辑函数

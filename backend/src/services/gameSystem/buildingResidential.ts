@@ -1,5 +1,5 @@
 import { loadServiceSql } from "@/db/sqlLoader.js";
-import { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategorySchema, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, PatternDistribution, PatternRoomDefinition, pickRandom, RoomSchema, SectorDistributionSchem, weightedBoolean } from "./buildingClassifier.js";
+import { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategoryRoomSchema, CategorySchema, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, PatternDistribution, PatternRoomDefinition, pickRandom, RoomSchema, SectorDistributionSchem, weightedBoolean } from "./buildingClassifier.js";
 import { query } from "@/db/client.js";
 import { distanceToPosition } from "../geometry.js";
 
@@ -15,14 +15,6 @@ interface DbHouseDetermingRow {
 
 interface DbNearbyParkingSignalRow {
   has_nearby_parking: boolean | null;
-}
-
-type ResidentialSectorDistribution = Record<string, string[]>;
-
-interface ResidentialResolvedRoom extends PatternRoomDefinition {
-  desc: string;
-  count: number;
-  access?: "entrance" | "vertical" | "internal";
 }
 
 //#region 常量
@@ -516,8 +508,45 @@ function resolveHouseCategorySchemaLevelKeys(
 export function finishHouseBuildingSchema(
   schema: SectorDistributionSchem,
   candidate: BuildingCandidate,
+  mainCategoryKey: string,
 ): BuildingSchema {
-  return
+  const levels: BuildingSchema["levels"] = Object.fromEntries(
+    Object.entries(schema.levels).map(([levelKey, level]) => {
+      const sectors = Object.fromEntries(
+        Object.entries(level.sectors).map(([sectorKey, sector]) => {
+          const rooms = resolveResidentialSectorRooms(sector.rooms);
+
+          // 收尾阶段补齐 Category Schema 刻意省略的数量信息。
+          // 目前住宅仅按同一 sector 内的卧室组做共享上限控制，其余房间默认 1 间。
+          applyHouseSharedRoomCounts(candidate, rooms);
+
+          // 收尾阶段补齐进入建筑和楼层间移动所需的通道房间。
+          // 门厅只属于地面层；楼梯间需要在每个实际楼层都能被引用。
+          applyHouseAccessRooms(candidate, levelKey, rooms);
+
+          return [sectorKey, {
+            area: sector.area,
+            centerPosition: sector.centerPosition,
+            rooms,
+          }];
+        }),
+      );
+
+      return [levelKey, {
+        theme: level.theme,
+        span: level.span,
+        sectors,
+      }];
+    }),
+  );
+
+  return {
+    featureId: candidate.detail.featureId,
+    category: mainCategoryKey,
+    centerPosition: candidate.centerPosition,
+    theme: schema.theme || RESIDENTIAL_FALLBACK_THEME,
+    levels,
+  };
 }
 
 
@@ -542,9 +571,29 @@ function isHouseFamilyCategory(category: string): boolean {
   return category === "house" || category === "house&garage";
 }
 
+/**
+ * 把 CategoryRoomSchema 转为最终 RoomSchema。
+ *
+ * Category 阶段只表达“有什么功能”，不表达数量；这里先给每个房间默认 1，
+ * 后续 helper 再按住宅规则调整共享卧室组、入口和楼梯间。
+ * @param rooms Sector Distribution 中的房间定义
+ * @returns 可写入 BuildingSchema 的房间定义
+ */
+function resolveResidentialSectorRooms(
+  rooms: Record<string, CategoryRoomSchema>,
+): Record<string, RoomSchema> {
+  return Object.fromEntries(
+    Object.entries(rooms).map(([roomKey, room]) => [roomKey, {
+      descrption: room.descrption,
+      count: 1,
+      ...(room.access ? { access: room.access } : {}),
+    }]),
+  );
+}
+
 function applyHouseSharedRoomCounts(
   candidate: BuildingCandidate,
-  rooms: Record<string, ResidentialResolvedRoom>,
+  rooms: Record<string, RoomSchema>,
 ): void {
   if (!rooms.bedroom) return;
 
@@ -579,17 +628,18 @@ function applyHouseSharedRoomCounts(
 
 function applyHouseAccessRooms(
   candidate: BuildingCandidate,
-  rooms: Record<string, ResidentialResolvedRoom>,
+  levelKey: string,
+  rooms: Record<string, RoomSchema>,
 ): void {
   const buildingLevels = normalizeBuildingLevels(candidate.buildingLevels);
   const isSmallSingleLevel = (candidate.areaSqm === null || candidate.areaSqm <= SMALL_HOUSE_AREA_MAX_SQM) && buildingLevels <= 1;
+  const isGroundLevel = levelKey === "ground_level";
 
-  if (isSmallSingleLevel && rooms.living_room) {
+  if (isGroundLevel && isSmallSingleLevel && rooms.living_room) {
     rooms.living_room.access = "entrance";
-  } else {
+  } else if (isGroundLevel) {
     rooms.hall = {
-      desc: "门厅",
-      prefered: GROUND_LEVEL[0],
+      descrption: "门厅",
       count: 1,
       access: "entrance",
     };
@@ -597,8 +647,7 @@ function applyHouseAccessRooms(
 
   if (buildingLevels > 1) {
     rooms.stairwell = {
-      desc: "楼梯间",
-      prefered: ALL_LEVELS[0],
+      descrption: "楼梯间",
       count: 1,
       access: "vertical",
     };
