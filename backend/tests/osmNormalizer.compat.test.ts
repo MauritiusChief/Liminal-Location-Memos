@@ -13,10 +13,6 @@ type CanonicalRelationReference = {
 type CanonicalOutlineReference = {
   osmType: string;
   osmId: number;
-  role: string;
-  rel: number;
-  reltags: Record<string, string>;
-  tags: Record<string, string>;
 };
 
 type CanonicalFeature = {
@@ -88,43 +84,20 @@ function normalizeOutlineReferences(value: unknown): CanonicalOutlineReference[]
       const record = entry as AnyRecord;
       if (
         typeof record.osmType !== "string" ||
-        typeof record.osmId !== "number" ||
-        typeof record.role !== "string" ||
-        typeof record.rel !== "number"
+        typeof record.osmId !== "number"
       ) {
         return null;
       }
 
-      const reltags = (record.reltags && typeof record.reltags === "object" && !Array.isArray(record.reltags))
-        ? Object.fromEntries(
-            Object.entries(record.reltags as AnyRecord)
-              .filter(([, v]) => typeof v === "string")
-              .map(([k, v]) => [k, v as string]),
-          )
-        : {};
-      const tags = (record.tags && typeof record.tags === "object" && !Array.isArray(record.tags))
-        ? Object.fromEntries(
-            Object.entries(record.tags as AnyRecord)
-              .filter(([, v]) => typeof v === "string")
-              .map(([k, v]) => [k, v as string]),
-          )
-        : {};
-
       return {
         osmType: record.osmType,
         osmId: record.osmId,
-        role: record.role,
-        rel: record.rel,
-        reltags: sortObject(reltags),
-        tags: sortObject(tags),
       };
     })
     .filter((entry): entry is CanonicalOutlineReference => entry !== null)
     .sort((a, b) => {
-      if (a.rel !== b.rel) return a.rel - b.rel;
       if (a.osmType !== b.osmType) return a.osmType.localeCompare(b.osmType);
-      if (a.osmId !== b.osmId) return a.osmId - b.osmId;
-      return a.role.localeCompare(b.role);
+      return a.osmId - b.osmId;
     });
 }
 
@@ -265,6 +238,59 @@ const EXPECTED_BY_CASE: Record<string, CanonicalFeature[]> = {
   ],
   "handles building relation outline/part consistently": [
     {
+      "id": "way/301",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              120.3,
+              30.3
+            ],
+            [
+              120.31,
+              30.3
+            ],
+            [
+              120.31,
+              30.31
+            ],
+            [
+              120.3,
+              30.31
+            ],
+            [
+              120.3,
+              30.3
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "osmType": "way",
+        "osmId": 301,
+        "tags": {
+          "building": "yes",
+          "height": "20"
+        },
+        "relationReferences": [
+          {
+            "role": "outline",
+            "rel": 1003,
+            "reltags": {
+              "building": "commercial",
+              "name": "Complex A",
+              "type": "building"
+            }
+          }
+        ],
+        "outlineReferences": [],
+        "meta": {},
+        "tainted": false,
+        "containedPoiReferences": []
+      }
+    },
+    {
       "id": "way/302",
       "geometry": {
         "type": "Polygon",
@@ -317,18 +343,7 @@ const EXPECTED_BY_CASE: Record<string, CanonicalFeature[]> = {
         "outlineReferences": [
           {
             "osmType": "way",
-            "osmId": 301,
-            "role": "outline",
-            "rel": 1003,
-            "reltags": {
-              "building": "commercial",
-              "name": "Complex A",
-              "type": "building"
-            },
-            "tags": {
-              "building": "yes",
-              "height": "20"
-            }
+            "osmId": 301
           }
         ],
         "meta": {},
@@ -371,6 +386,59 @@ const EXPECTED_BY_CASE: Record<string, CanonicalFeature[]> = {
     }
   ],
   "keeps building relation refs when same feature also belongs to route relation": [
+    {
+      "id": "way/5101",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              121.1,
+              31.1
+            ],
+            [
+              121.11,
+              31.1
+            ],
+            [
+              121.11,
+              31.11
+            ],
+            [
+              121.1,
+              31.11
+            ],
+            [
+              121.1,
+              31.1
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "osmType": "way",
+        "osmId": 5101,
+        "tags": {
+          "building": "yes",
+          "height": "18"
+        },
+        "relationReferences": [
+          {
+            "role": "outline",
+            "rel": 9101,
+            "reltags": {
+              "building": "office",
+              "name": "Mixed Membership Building",
+              "type": "building"
+            }
+          }
+        ],
+        "outlineReferences": [],
+        "meta": {},
+        "tainted": false,
+        "containedPoiReferences": []
+      }
+    },
     {
       "id": "way/5102",
       "geometry": {
@@ -424,18 +492,7 @@ const EXPECTED_BY_CASE: Record<string, CanonicalFeature[]> = {
         "outlineReferences": [
           {
             "osmType": "way",
-            "osmId": 5101,
-            "role": "outline",
-            "rel": 9101,
-            "reltags": {
-              "building": "office",
-              "name": "Mixed Membership Building",
-              "type": "building"
-            },
-            "tags": {
-              "building": "yes",
-              "height": "18"
-            }
+            "osmId": 5101
           }
         ],
         "meta": {},
@@ -492,6 +549,59 @@ const EXPECTED_BY_CASE: Record<string, CanonicalFeature[]> = {
   ],
   "dedupes duplicated building outline references consistently": [
     {
+      "id": "way/5301",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              121.3,
+              31.3
+            ],
+            [
+              121.31,
+              31.3
+            ],
+            [
+              121.31,
+              31.31
+            ],
+            [
+              121.3,
+              31.31
+            ],
+            [
+              121.3,
+              31.3
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "osmType": "way",
+        "osmId": 5301,
+        "tags": {
+          "building": "yes",
+          "name": "Outline A"
+        },
+        "relationReferences": [
+          {
+            "role": "outline",
+            "rel": 9301,
+            "reltags": {
+              "building": "yes",
+              "name": "Duplicate Outline Building",
+              "type": "building"
+            }
+          }
+        ],
+        "outlineReferences": [],
+        "meta": {},
+        "tainted": false,
+        "containedPoiReferences": []
+      }
+    },
+    {
       "id": "way/5302",
       "geometry": {
         "type": "Polygon",
@@ -542,18 +652,7 @@ const EXPECTED_BY_CASE: Record<string, CanonicalFeature[]> = {
         "outlineReferences": [
           {
             "osmType": "way",
-            "osmId": 5301,
-            "role": "outline",
-            "rel": 9301,
-            "reltags": {
-              "building": "yes",
-              "name": "Duplicate Outline Building",
-              "type": "building"
-            },
-            "tags": {
-              "building": "yes",
-              "name": "Outline A"
-            }
+            "osmId": 5301
           }
         ],
         "meta": {},

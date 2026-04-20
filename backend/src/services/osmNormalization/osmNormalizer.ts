@@ -13,10 +13,6 @@ export interface RelationReference {
 export interface OutlineReference {
   osmType: string;
   osmId: number;
-  tags: Record<string, string>;
-  role: string;
-  rel: number;
-  reltags: Record<string, string>;
 }
 
 export interface ContainedPoiReference {
@@ -110,10 +106,6 @@ export function convertOverpassToNormalizedFeatures(raw: OverpassJson): Normaliz
       return false;
     }
 
-    if (isBuildingRelationOutlineFeature(feature, buildingRelationIndex)) {
-      return false;
-    }
-
     if (isBuildingPartLineFeature(feature, buildingRelationIndex)) {
       return false;
     }
@@ -152,7 +144,9 @@ function finalizeFeature(
   const outlineReferences = isBuildingRelationFeature(feature, buildingRelationIndex) || isBuildingPartPolygonFeature(feature, buildingRelationIndex)
     ? buildingRelationIndex.get(feature.properties.osmId)?.outlineReferences || []
     : isPolygonGeometry(feature)
-      ? collectBuildingOutlineReferences(filteredRelations, buildingRelationIndex)
+      ? isBuildingRelationOutlineMember(feature, buildingRelationIndex)
+        ? []
+        : collectBuildingOutlineReferences(filteredRelations, buildingRelationIndex)
       : [];
   const tags = elevateBuildingTags(feature, buildingRelationIndex);
 
@@ -316,13 +310,9 @@ function buildIndexBuildingRelation(
         ),
       }));
 
-    const outlineReferences = outlineMembers.map<OutlineReference>(({ member, tags }) => ({
+    const outlineReferences = outlineMembers.map<OutlineReference>(({ member }) => ({
         osmType: member.type,
         osmId: member.ref,
-        role: member.role,
-        rel: buildingRelation.rel,
-        reltags: buildingRelation.reltags,
-        tags,
       }));
     const inheritedTags = outlineMembers.reduce<Record<string, string>>(
       (tags, outlineMember) => mergeTagsPreferPrimary(tags, outlineMember.tags),
@@ -398,7 +388,7 @@ function isAbstractLineRelationFeature(feature: NormalizedFeature, relationLineI
  * @param buildingRelationIndex building relation 信息索引
  * @returns 是否为 building outline way
  */
-function isBuildingRelationOutlineFeature(
+function isBuildingRelationOutlineMember(
   feature: NormalizedFeature,
   buildingRelationIndex: Map<number, BuildingRelationInfo>,
 ): boolean {
@@ -562,7 +552,7 @@ export function dedupeOutlineReferences(references: OutlineReference[]): Outline
   const deduped: OutlineReference[] = [];
 
   for (const reference of references) {
-    const key = `${reference.osmType}/${reference.osmId}:${reference.role}:${reference.rel}`;
+    const key = `${reference.osmType}/${reference.osmId}`;
     if (seen.has(key)) {
       continue;
     }
