@@ -1,6 +1,6 @@
 import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
-import { DbBuildingFeatureDetailRow, FeatureDetail, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
+import { DbBuildingFeatureDetailRow, FeatureDetail, FeatureId, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
 import { dedupeOutlineReferences } from "@/services/osmNormalization/osmNormalizer.js";
 import { Position } from "./gameSessionStore.js";
 import { ambiguousResidentialCategory, buildHouseCategorySchemaFromDistribution, finishHouseBuildingSchema, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
@@ -115,8 +115,10 @@ type ScopeType = "single" | "building_relation";
 
 /**
  * 根据 featureId 获取的候选地物，包含所有分类所需的信息
+ * Category 信息和 Pattern 信息也借助此处流转
  */
 export interface BuildingCandidate {
+  featureId: string;
   scope: ScopeType;
   detail: FeatureDetail;
   memberDetails?: FeatureDetail[];
@@ -125,6 +127,8 @@ export interface BuildingCandidate {
   buildingLevels: number | null;
   heightMeters: number | null;
   buildingValue: string | null;
+  categoryRecord?: Record<FeatureId, string[]>;
+  patternRecord?: Record<FeatureId, string>;
 }
 
 //Definition 类型
@@ -622,6 +626,7 @@ function toResolvedCandidate(
   const heightMeters = parseHeightMeters(detail.tags.height) ?? inferHeightFromMembers(memberDetails);
 
   return {
+    featureId: detail.featureId,
     scope,
     detail,
     memberDetails,
@@ -742,7 +747,8 @@ function inferHeightFromMembers(memberDetails: FeatureDetail[] | undefined): num
 }
 
 /**
- * TODO: 不合理，容易多算重叠部分的面积
+ * TODO: 不合理，容易多算重叠部分的面积；也许可以靠读取 outline 建筑的面积
+ *
  * 对一组可空面积求和；若没有任何有效面积，则保留 null。
  *
  * @param areas 待求和的面积列表

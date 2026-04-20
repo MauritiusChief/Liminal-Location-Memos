@@ -29,4 +29,5 @@
 * 拿到纸和笔之后，可以画地图
   * 画的图仅有点和线，点的话放一个图标表示建筑
 
+* 数据库把 relations 和 outline_reference 优化一下，只存必要的内容
 * gameChat 当中把 Scene Object 也加入流转，避免反复 sql 消耗性能

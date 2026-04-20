@@ -41,6 +41,11 @@ export interface FeatureDetail {
   containedPoisReferences?: ContainedPoiReference[];
 }
 
+/**
+ * 单纯为了提示的类型，本质上就是字符串
+ */
+export type FeatureId = string
+
 //#region 主函数
 
 /**
