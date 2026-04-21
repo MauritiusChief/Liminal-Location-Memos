@@ -3,6 +3,7 @@ import { OverpassJson } from "overpass-ts";
 import osmtogeojsonModule, { type OsmToGeoJSON } from "osmtogeojson";
 
 const osmtogeojson = osmtogeojsonModule as unknown as OsmToGeoJSON;
+const ABSTRACT_LINE_RELATION_TYPES = new Set(['route']);
 
 export interface RelationReference {
   role: string;
@@ -57,7 +58,8 @@ type RawRelationMember = {
 };
 
 /**
- * building 的与 relation 相关的信息
+ * building 的与 relation 相关的信息。
+ * outline / outer / inner 都会作为可继承标签来源，只有 outline 会继续落 outlineReferences。
  */
 type BuildingRelationInfo = {
   rel: number;
@@ -87,7 +89,6 @@ export function convertOverpassToNormalizedFeatures(raw: OverpassJson): Normaliz
   // 建立原始信息索引
   const rawWayTagIndex = buildIndexRawWayTag(raw);
   const buildingRelationOutlineIndex = buildIndexBuildingRelationOutline(raw);
-  const lineRelationIds = buildLineRelationIndex(raw);
 
   // 转化整理原始数据
   const converted = osmtogeojson(raw as OsmToGeoJsonInput, { flatProperties: false }) as FeatureCollection;
@@ -96,6 +97,12 @@ export function convertOverpassToNormalizedFeatures(raw: OverpassJson): Normaliz
   );
 
   // 建立规整化信息的索引
+  const lineRelationCarrierIds = buildLineRelationIndex(normalizedFeatures);
+  const lineRelationIds = new Set([
+    ...lineRelationCarrierIds,
+    ...buildIndexAbstractLineRelation(raw),
+  ]);
+  const lineRelationTagIndex = buildIndexLineRelationMemberTags(raw, lineRelationCarrierIds, rawWayTagIndex);
   const featureTagIndex = buildIndexFeatureTag(normalizedFeatures);
   const buildingRelationIndex = buildIndexBuildingRelation(buildingRelationOutlineIndex, featureTagIndex, rawWayTagIndex);
   const areaRelationIds = buildAreaRelationIndex(normalizedFeatures);
@@ -123,7 +130,7 @@ export function convertOverpassToNormalizedFeatures(raw: OverpassJson): Normaliz
     }
 
     return true;
-  }).map((feature) => finalizeFeature(feature, lineRelationIds, buildingRelationIndex));
+  }).map((feature) => finalizeFeature(feature, lineRelationIds, lineRelationTagIndex, buildingRelationIndex));
 }
 
 /**
@@ -136,6 +143,7 @@ export function convertOverpassToNormalizedFeatures(raw: OverpassJson): Normaliz
 function finalizeFeature(
   feature: NormalizedFeature,
   relationLineIds: Set<number>,
+  lineRelationTagIndex: Map<number, Record<string, string>>,
   buildingRelationIndex: Map<number, BuildingRelationInfo>,
 ): NormalizedFeature {
   const filteredRelations = feature.properties.relationReferences.filter( relation => {
@@ -148,7 +156,12 @@ function finalizeFeature(
         ? []
         : collectBuildingOutlineReferences(filteredRelations, buildingRelationIndex)
       : [];
-  const tags = elevateBuildingTags(feature, buildingRelationIndex);
+  const tags = elevateLineRelationTags(
+    elevateBuildingTags(feature, buildingRelationIndex),
+    feature,
+    relationLineIds,
+    lineRelationTagIndex,
+  );
 
   const resolvedOutlineReferences = isBuildingPartPolygonFeature(feature, buildingRelationIndex)
     ? collectBuildingOutlineReferences(filteredRelations, buildingRelationIndex)
@@ -226,7 +239,8 @@ function buildIndexRawWayTag(raw: OverpassJson): Map<number, RawWayElement> {
 }
 
 /**
- * 先从未被 osmtogeojson 改写的 raw relation 中提取 outline members，保留原始 number 型 ref。
+ * 先从未被 osmtogeojson 改写的 raw relation 中提取 building 的 outline-like members，保留原始 number 型 ref。
+ * outline / outer / inner 都用于补齐 relation 标签；outer / inner 主要服务环状建筑 relation 的本体几何。
  * @param raw overpass 原始响应
  * @returns 以 relation id 为键的 building relation 信息索引骨架
  */
@@ -238,12 +252,17 @@ function buildIndexBuildingRelationOutline(raw: OverpassJson): Map<number, Build
       continue;
     }
     const reltags = toStringRecord(element.tags);
-    if (reltags.type !== 'building') {
+    if (!isBuildingRelationTags(reltags)) {
       continue;
     }
 
     const outlineMembers = toRelationMembers(element.members)
-      .filter((member) => member.type === 'way' && member.role === 'outline');
+      .filter((member) => {
+        return (
+          member.type === 'way'
+          && (member.role === 'outline' || member.role === 'outer' || member.role === 'inner')
+        );
+      });
 
     relationIndex.set(element.id, {
       rel: element.id,
@@ -288,6 +307,7 @@ function buildIndexFeatureTag(features: NormalizedFeature[]): Map<string, Featur
 
 /**
  * 为 building relation 汇总 outline 引用与可继承标签，供最终 relation feature 提升信息。
+ * outer / inner 的标签会进入 inheritedTags，但其几何由 relation 本体承载，不写入 outlineReferences。
  * @param relationOutlineIndex 基于原始 raw relation 提前提取出的成员索引
  * @param featureTagIndex 已转换 polygon feature 的标签索引
  * @param rawWayTagIndex 原始 way tags 索引
@@ -310,7 +330,9 @@ function buildIndexBuildingRelation(
         ),
       }));
 
-    const outlineReferences = outlineMembers.map<OutlineReference>(({ member }) => ({
+    const outlineReferences = outlineMembers
+      .filter(({ member }) => member.role === 'outline')
+      .map<OutlineReference>(({ member }) => ({
         osmType: member.type,
         osmId: member.ref,
       }));
@@ -349,11 +371,31 @@ function buildAreaRelationIndex(features: NormalizedFeature[]): Set<number> {
 }
 
 /**
- * 建立线状 relation 的 id 索引，后续用于去掉已被 relation 本体覆盖的成员 way。
+ * 建立线状 relation 的 id 索引，后续用于去掉已被 relation 本体覆盖的成员 line way。
+ * 这里按 osmtogeojson 产出的最终几何判断，适用于所有线类 relation。
  * @param features 全量规整化候选地物
  * @returns 线状 relation id 集合
  */
-function buildLineRelationIndex(raw: OverpassJson): Set<number> {
+function buildLineRelationIndex(features: NormalizedFeature[]): Set<number> {
+  const relationIds = new Set<number>();
+
+  for (const feature of features) {
+    if (feature.properties.osmType !== 'relation' || !isLinearGeometry(feature)) {
+      continue;
+    }
+
+    relationIds.add(feature.properties.osmId);
+  }
+
+  return relationIds;
+}
+
+/**
+ * 建立抽象线状 relation 的 raw id 索引，即使 osmtogeojson 未产出本体也能过滤其成员引用。
+ * @param raw overpass 原始响应
+ * @returns 抽象线状 relation id 集合
+ */
+function buildIndexAbstractLineRelation(raw: OverpassJson): Set<number> {
   const relationIds = new Set<number>();
 
   for (const element of raw.elements) {
@@ -361,8 +403,7 @@ function buildLineRelationIndex(raw: OverpassJson): Set<number> {
       continue;
     }
 
-    const relationType = toStringRecord(element.tags).type;
-    if (relationType === 'route' || relationType === 'waterway') {
+    if (ABSTRACT_LINE_RELATION_TYPES.has(toStringRecord(element.tags).type)) {
       relationIds.add(element.id);
     }
   }
@@ -370,16 +411,53 @@ function buildLineRelationIndex(raw: OverpassJson): Set<number> {
   return relationIds;
 }
 
+/**
+ * 汇总线状 relation 成员 way 的 tags，供 relation 本体在吸收成员线后补齐分类信息。
+ * @param raw overpass 原始响应
+ * @param lineRelationIds 已确认是线状 relation 的 id 集合
+ * @param rawWayTagIndex 原始 way tags 索引
+ * @returns 以 relation id 为键的成员 tags 补洞索引
+ */
+function buildIndexLineRelationMemberTags(
+  raw: OverpassJson,
+  lineRelationIds: Set<number>,
+  rawWayTagIndex: Map<number, RawWayElement>,
+): Map<number, Record<string, string>> {
+  const relationTags = new Map<number, Record<string, string>>();
+
+  for (const element of raw.elements) {
+    if (element.type !== 'relation' || typeof element.id !== 'number' || !lineRelationIds.has(element.id)) {
+      continue;
+    }
+
+    const inheritedTags = toRelationMembers(element.members).reduce<Record<string, string>>((tags, member) => {
+      if (member.type !== 'way') {
+        return tags;
+      }
+
+      return mergeTagsPreferPrimary(tags, rawWayTagIndex.get(member.ref)?.tags || {});
+    }, {});
+
+    relationTags.set(element.id, inheritedTags);
+  }
+
+  return relationTags;
+}
+
 //#region 过滤函数
 
 /**
- * 判断当前 feature 是否是抽象线状 relation 本体；这类 relation 本身不直接落库。
+ * 判断当前 feature 是否是抽象线状 relation 本体；目前只有 route 这类抽象覆盖层不直接落库。
  * @param feature 待判断地物
  * @param relationLineIds 线状 relation id 集合
  * @returns 是否为抽象 line relation
  */
 function isAbstractLineRelationFeature(feature: NormalizedFeature, relationLineIds: Set<number>): boolean {
-  return feature.properties.osmType === 'relation' && relationLineIds.has(feature.properties.osmId);
+  return (
+    feature.properties.osmType === 'relation'
+    && relationLineIds.has(feature.properties.osmId)
+    && ABSTRACT_LINE_RELATION_TYPES.has(feature.properties.tags.type)
+  );
 }
 
 /**
@@ -498,7 +576,7 @@ function isRelationOutlineCoveredByPolygon(feature: NormalizedFeature, areaRelat
 }
 
 /**
- * 判断线状成员 way 是否已被线状 relation 本体覆盖。
+ * 判断线状成员 way 是否已被任意线状 relation 本体覆盖。
  * @param feature 待判断线地物
  * @param relationLineIds 线状 relation id 集合
  * @returns 是否应被 relation line 吸收
@@ -508,14 +586,7 @@ function isMemberLineCoveredByRelationLine(feature: NormalizedFeature, relationL
     return false;
   }
 
-  return feature.properties.relationReferences.some((relation) => {
-    if (!relationLineIds.has(relation.rel)) {
-      return false;
-    }
-
-    const relationType = relation.reltags.type;
-    return relationType === 'route' || relationType === 'waterway';
-  });
+  return feature.properties.relationReferences.some((relation) => relationLineIds.has(relation.rel));
 }
 
 //#region 帮助函数
@@ -602,6 +673,27 @@ function elevateBuildingTags(
 
     return mergeTagsPreferPrimary(tags, buildingRelation.inheritedTags);
   }, feature.properties.tags);
+}
+
+/**
+ * 为保留下来的线状 relation 本体补齐成员线的 tags，避免吸收成员后丢失分类信息。
+ * @param tags 已经完成其他提升步骤的 tags
+ * @param feature 当前待收口的 feature
+ * @param relationLineIds 线状 relation id 集合
+ * @param lineRelationTagIndex 线状 relation 的成员 tags 补洞索引
+ * @returns 合并好 tags 的结果；非线状 relation 原样返回
+ */
+function elevateLineRelationTags(
+  tags: Record<string, string>,
+  feature: NormalizedFeature,
+  relationLineIds: Set<number>,
+  lineRelationTagIndex: Map<number, Record<string, string>>,
+): Record<string, string> {
+  if (feature.properties.osmType !== 'relation' || !relationLineIds.has(feature.properties.osmId)) {
+    return tags;
+  }
+
+  return mergeTagsPreferPrimary(tags, lineRelationTagIndex.get(feature.properties.osmId) || {});
 }
 
 /**
@@ -794,6 +886,25 @@ function isAreaRelationFeature(feature: NormalizedFeature): boolean {
 
   const relationType = feature.properties.tags.type;
   return relationType === 'multipolygon' || relationType === 'boundary';
+}
+
+/**
+ * 判断 relation tags 是否应进入 building relation 继承索引。
+ * type=building 保留原有行为；带 building/man_made 的 multipolygon/boundary 用于环状建筑。
+ * @param tags relation tags
+ * @returns 是否是 building-like relation
+ */
+function isBuildingRelationTags(tags: Record<string, string>): boolean {
+  if (tags.type === 'building') {
+    return true;
+  }
+
+  const hasBuildingTags = typeof tags.building === 'string' || typeof tags.man_made === 'string';
+  if (!hasBuildingTags) {
+    return false;
+  }
+
+  return tags.type === 'multipolygon' || tags.type === 'boundary';
 }
 
 /**

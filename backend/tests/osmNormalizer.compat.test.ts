@@ -694,7 +694,126 @@ const EXPECTED_BY_CASE: Record<string, CanonicalFeature[]> = {
     }
   ],
   "filters non-string values from tags and reltags consistently": [],
-  "removes only line relations when a way belongs to waterway and non-line relations": []
+  "keeps member line when osmtogeojson skips non-abstract line relations": [
+    {
+      "id": "way/5701",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            121.7,
+            31.7
+          ],
+          [
+            121.71,
+            31.7
+          ]
+        ]
+      },
+      "properties": {
+        "osmType": "way",
+        "osmId": 5701,
+        "tags": {
+          "name": "Hybrid Membership Line",
+          "waterway": "canal"
+        },
+        "relationReferences": [
+          {
+            "role": "",
+            "rel": 9701,
+            "reltags": {
+              "name": "Waterway Relation",
+              "type": "waterway",
+              "waterway": "canal"
+            }
+          },
+          {
+            "role": "",
+            "rel": 9702,
+            "reltags": {
+              "name": "Non Line Relation",
+              "network": "local",
+              "type": "network"
+            }
+          }
+        ],
+        "outlineReferences": [],
+        "meta": {},
+        "tainted": false,
+        "containedPoiReferences": []
+      }
+    }
+  ],
+  "merges ring building outer inner tags into relation carrier": [
+    {
+      "id": "relation/9801",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              121.8,
+              31.8
+            ],
+            [
+              121.82,
+              31.8
+            ],
+            [
+              121.82,
+              31.82
+            ],
+            [
+              121.8,
+              31.82
+            ],
+            [
+              121.8,
+              31.8
+            ]
+          ],
+          [
+            [
+              121.805,
+              31.805
+            ],
+            [
+              121.805,
+              31.815
+            ],
+            [
+              121.815,
+              31.815
+            ],
+            [
+              121.815,
+              31.805
+            ],
+            [
+              121.805,
+              31.805
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "osmType": "relation",
+        "osmId": 9801,
+        "tags": {
+          "building": "stadium",
+          "building:levels": "2",
+          "height": "22",
+          "name": "Ring Stadium",
+          "type": "multipolygon"
+        },
+        "relationReferences": [],
+        "outlineReferences": [],
+        "meta": {},
+        "tainted": false,
+        "containedPoiReferences": []
+      }
+    }
+  ]
 };
 
 function assertCanonicalResult(caseName: string, raw: unknown): void {
@@ -1101,7 +1220,7 @@ describe("edge cases likely to diverge", () => {
     assertCanonicalResult("filters non-string values from tags and reltags consistently", raw);
   });
 
-  it("removes only line relations when a way belongs to waterway and non-line relations", () => {
+  it("keeps member line when osmtogeojson skips non-abstract line relations", () => {
     const raw = {
       elements: [
         node(1701, 31.7, 121.7),
@@ -1128,6 +1247,58 @@ describe("edge cases likely to diverge", () => {
       ],
     };
 
-    assertCanonicalResult("removes only line relations when a way belongs to waterway and non-line relations", raw);
+    assertCanonicalResult("keeps member line when osmtogeojson skips non-abstract line relations", raw);
+  });
+
+  it("merges ring building outer inner tags into relation carrier", () => {
+    const raw = {
+      elements: [
+        node(1801, 31.8, 121.8),
+        node(1802, 31.8, 121.82),
+        node(1803, 31.82, 121.82),
+        node(1804, 31.82, 121.8),
+        node(1805, 31.805, 121.805),
+        node(1806, 31.805, 121.815),
+        node(1807, 31.815, 121.815),
+        node(1808, 31.815, 121.805),
+        {
+          type: "way",
+          id: 5801,
+          nodes: [1801, 1802, 1803, 1804, 1801],
+          geometry: [
+            { lat: 31.8, lon: 121.8 },
+            { lat: 31.8, lon: 121.82 },
+            { lat: 31.82, lon: 121.82 },
+            { lat: 31.82, lon: 121.8 },
+            { lat: 31.8, lon: 121.8 },
+          ],
+          tags: { building: "yes", height: "22" },
+        },
+        {
+          type: "way",
+          id: 5802,
+          nodes: [1805, 1806, 1807, 1808, 1805],
+          geometry: [
+            { lat: 31.805, lon: 121.805 },
+            { lat: 31.805, lon: 121.815 },
+            { lat: 31.815, lon: 121.815 },
+            { lat: 31.815, lon: 121.805 },
+            { lat: 31.805, lon: 121.805 },
+          ],
+          tags: { "building:levels": "2" },
+        },
+        {
+          type: "relation",
+          id: 9801,
+          members: [
+            { type: "way", ref: 5801, role: "outer" },
+            { type: "way", ref: 5802, role: "inner" },
+          ],
+          tags: { type: "multipolygon", building: "stadium", name: "Ring Stadium" },
+        },
+      ],
+    };
+
+    assertCanonicalResult("merges ring building outer inner tags into relation carrier", raw);
   });
 });

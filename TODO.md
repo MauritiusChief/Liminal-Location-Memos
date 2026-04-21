@@ -7,7 +7,6 @@
 
 ## 近期计划
 
-* 为什么 statidum relation 中的 outer 建筑没有落入数据库？
 * World State 需存储 Game State Tool 运行记录
 * 前端继续游戏、重开游戏时的UI bug
 * 添加通过海拔高度 API 与 ele 标签计算建筑实际高度的功能
@@ -30,5 +29,4 @@
 * 拿到纸和笔之后，可以画地图
   * 画的图仅有点和线，点的话放一个图标表示建筑
 
-* 数据库把 relations 和 outline_reference 优化一下，只存必要的内容
 * gameChat 当中把 Scene Object 也加入流转，避免反复 sql 消耗性能

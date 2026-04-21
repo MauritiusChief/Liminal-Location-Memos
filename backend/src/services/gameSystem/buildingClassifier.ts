@@ -126,8 +126,8 @@ export interface BuildingCandidate {
   buildingLevels: number | null;
   heightMeters: number | null;
   buildingValue: string | null;
-  categoryRecord?: Record<FeatureId, string[]>;
-  patternRecord?: Record<FeatureId, Record<string, string>>; // 每个 Category 都配一个 Pattern
+  categoryRecord?: string[]; // 整个 candidate 使用同一组 Category
+  patternRecord?: Record<string, string>; // 每个 Category 都配一个 Pattern
 }
 
 //Definition 类型
@@ -257,24 +257,23 @@ const ALL_PATTERN_KEYS = [...RESIDENTIAL_PATTERN_KEYS]
  */
 async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandidate | null> {
   const feature = await fetchBuildingFeatureDetailById(featureId);
-  if (!feature) {
-    return null;
-  }
+  if (!feature) return null
 
+  // 寻找该地物是否通过 Relation Reference 指向一个多体建筑
   const relationReference = feature.detail.relationReferences?.find((relation) => {
     return relation.reltags.type === "building";
   });
 
-  // 只有多体建筑的子建筑需要自动提升到 relation；直接传 relation 本体则维持原样。
-  const shouldPromoteToRelation = feature.detail.osmType === "way" && relationReference;
-  if (!shouldPromoteToRelation) {
+  // 不指向多体建筑，说明该地物只是单体建筑
+  if (!relationReference) {
     const details = [feature.detail];
     return toResolvedCandidate("single", feature.detail.featureId, details, pickOutlineFeatureId(details), feature.areaSqm, feature.centerPosition);
   }
 
-  const relationFeatureId = `relation/${shouldPromoteToRelation.rel}`;
+  // 多体建筑的子建筑（特征：包含 Relation Reference）
+  const relationFeatureId = `relation/${relationReference.rel}`;
   const relationSnapshot = await fetchBuildingFeatureDetailById(relationFeatureId);
-  const relationMemberSnapshots = await fetchBuildingRelationMemberSnapshots(shouldPromoteToRelation.rel);
+  const relationMemberSnapshots = await fetchBuildingRelationMemberSnapshots(relationReference.rel);
 
   if (!relationSnapshot && relationMemberSnapshots.length === 0) {
     const details = [feature.detail];
@@ -640,6 +639,11 @@ export function parseBuildingFeatureId(featureId: string): { osmType: string; os
   return { osmType, osmId };
 }
 
+/**
+ * 找出该地物的 Outline Reference 所指的地物
+ * @param details
+ * @returns
+ */
 function pickOutlineFeatureId(details: FeatureDetail[]): FeatureId | undefined {
   const outlineReference = details.flatMap((detail) => detail.outlineReferences || [])[0];
   if (!outlineReference) {
