@@ -2,6 +2,7 @@ import { loadServiceSql } from "@/db/sqlLoader.js";
 import { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategoryRoomSchema, CategorySchema, fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, PatternDistribution, PatternRoomDefinition, pickRandom, RoomSchema, SectorDistributionSchem, weightedBoolean } from "./buildingClassifier.js";
 import { query } from "@/db/client.js";
 import { distanceToPosition } from "../geometry.js";
+import { FeatureId } from "../featureDetail.js";
 
 /**
  * 与 SQL 查询结果表一致的扁平类型
@@ -164,15 +165,16 @@ const RESIDENTIAL_FALLBACK_THEME = "普通的建筑";
  * 结合覆盖区域、周边道路和已有 schema 判断当前建筑是否位于独栋住宅区。
  * @param candidate
  * @param existingSchemas
- * @returns 已分类好的 Category，或者表示不位于独栋住宅区的的 null
+ * @returns 已分类好的 Category，或者表示不位于独栋住宅区的的空 []
  */
 export async function ambiguousResidentialCategory(
   candidate: BuildingCandidate,
-  existingSchemas: Record<string, BuildingSchema>,
+  existingSchemas: BuildingSchema[],
 ): Promise<string[]> {
   const [coveringAreas, roadKinds] = await Promise.all([
-    fetchBuildingCoveringAreas(candidate.detail.featureId),
-    fetchBuildingRoadKinds(candidate.detail.featureId),
+    // 只是查询周边状况，精度不用很高，整个 details list 随便选一个就能代表全体周边状况
+    fetchBuildingCoveringAreas(candidate.details[0].featureId),
+    fetchBuildingRoadKinds(candidate.details[0].featureId),
   ]);
   // console.log('覆盖区域: ',coveringAreas);
   // console.log('周边道路: ',roadKinds);
@@ -187,14 +189,16 @@ export async function ambiguousResidentialCategory(
   }
 
   const [buildingKind, hasNearbyParking] = await Promise.all([
-    determineResidentialBuildingKind(candidate.detail.featureId),
-    determineNearbyParkingSignal(candidate.detail.featureId),
+    // 只是查询周边状况，精度不用很高，整个 details list 随便选一个就能代表全体周边状况
+    determineResidentialBuildingKind(candidate.details[0].featureId),
+    determineNearbyParkingSignal(candidate.details[0].featureId),
   ]);
-  const nearbySchemas = Object.values(existingSchemas).filter((schema) => {
+  const nearbySchemas = existingSchemas.filter((schema) => {
     return distanceToPosition(schema.centerPosition, candidate.centerPosition) <= RESIDENTIAL_ACCESSORY_CONTEXT_RADIUS_METERS;
   });
 
-  if (buildingKind === "house") { // 如果是住宅则根据是否有外置停车地点来判断本体需不需要车库
+  // 如果是住宅则根据是否有外置停车地点来判断本体需不需要车库
+  if (buildingKind === "house") {
     const hasNearbyGarage = nearbySchemas.some((schema) => schema.category === "garage");
     if (hasNearbyParking || hasNearbyGarage) {
       return ["house"];
@@ -205,8 +209,9 @@ export async function ambiguousResidentialCategory(
       : ["house"];
   }
 
+  // 如果是附属建筑，首先根据周围住宅是否有内置车库来判断，已有内置车库就不需要车库了
   const hasNearbyHouseGarage = nearbySchemas.some((schema) => schema.category === "house&garage");
-  if (hasNearbyHouseGarage) { // 如果是附属建筑，首先根据是否有内置车库来判断，已有内置车库就不需要车库了
+  if (hasNearbyHouseGarage) {
     return ["tool_shed"];
   }
 
@@ -233,7 +238,7 @@ export async function ambiguousResidentialCategory(
  */
 function computeResidentialDistrictWeights(
   candidate: BuildingCandidate,
-  existingSchemas: Record<string, BuildingSchema>,
+  existingSchemas: BuildingSchema[],
   coveringAreas: string[],
   roadKinds: string[],
 ): { residential: number; nonResidential: number } {
@@ -254,7 +259,7 @@ function computeResidentialDistrictWeights(
     nonResidential += weights.nonResidential;
   }
 
-  const nearbyHouseSchemas = Object.values(existingSchemas).filter((schema) => {
+  const nearbyHouseSchemas = existingSchemas.filter((schema) => {
     return isHouseFamilyCategory(schema.category)
       && distanceToPosition(schema.centerPosition, candidate.centerPosition) <= RESIDENTIAL_DISTRICT_SCHEMA_RADIUS_METERS;
   });
@@ -399,54 +404,61 @@ function determineHousePatternPool(candidate: BuildingCandidate): string[] {
 //#####################
 
 /**
- * TODO 默认仅 1 个地物，楼层数会控制为 1 到 3
+ * 因默认为 House 类，所以楼层数会控制为 1 到 3；
  * 从已应用 Pattern Distribution 的 Base Schema 中获取某住宅有哪些功能、有何种偏好，
  * 然后从 Candidate 中获取此住宅的楼层，最后根据偏好的楼层把功能安插到楼层中去。
  * （不涉及房间数量、出入口与通道、套房细节）
- * @param appliedBaseSchema 仅 1 个地物
+ * @param appliedBaseSchema
  * @param candidate
+ * @returns 以 Feature ID 为键的 CategorySchema
  */
 export function buildHouseCategorySchemaFromDistribution(
   appliedBaseSchema: PatternDistribution,
   candidate: BuildingCandidate,
-): CategorySchema {
-  const [distribution] = Object.values(appliedBaseSchema)
-  const mainCategory = distribution?.categories[0];
-  const patternRoomDefinitions = distribution.rooms;
+): Record<FeatureId, CategorySchema> {
+  if (!candidate.categoryRecord) return {} // 如果此时还没有 Category 结果，说明肯定是出问题了
+  const mainCategory = candidate.categoryRecord[0]
   // Category 的默认主题
   const baseTheme = pickResidentialCategoryTheme(mainCategory);
   const schemaTheme = pickResidentialEventTheme(mainCategory, RESIDENTIAL_CATEGORY_EVENT_THEMES) ?? baseTheme;
   // 控制楼层数在 1 ~ 3 范围
   const buildingLevels = candidate.buildingLevels ? Math.min(3, candidate.buildingLevels) : 1 // 此处默认1层是合理的，因为 Pattern 本身就是被面积与楼层决定的，不会出现不够用的情况
 
-  // 组装空的楼层
-  const levels: Record<string, CategoryLevelSchema> = {}
-  const concreteLevelKeys: string[] = []
-  for (let i = 1; i <= buildingLevels; i++) {
-    const levelKey = i === 1 ? "ground_level" : i === buildingLevels ? "top_level" : "middle_level"
-    concreteLevelKeys.push(levelKey)
-    levels[levelKey] = {
-      theme: pickResidentialEventTheme(mainCategory, RESIDENTIAL_LEVEL_EVENT_THEMES) ?? schemaTheme,
-      span: [i],
-      rooms: {}, // 等待后续装填
-    }
-  }
+  const result: Record<FeatureId, CategorySchema> = {}
+  Object.entries(appliedBaseSchema).forEach(([featureId, roomDefs]) => {
 
-  // 初步装填功能
-  Object.entries(patternRoomDefinitions).forEach(([roomKey, definition]) => {
-    const levelKeys = resolveHouseCategorySchemaLevelKeys(definition.prefered, levels, concreteLevelKeys);
-    for (const levelKey of levelKeys) {
-      if (definition.chance && 1 - definition.chance > Math.random()) continue // 有概率直接跳过，不写入 levels
-      levels[levelKey].rooms[roomKey] = {
-        descrption: definition.desc ?? roomKey,
-      };
+    // 组装空的楼层
+    const levels: Record<string, CategoryLevelSchema> = {}
+    const concreteLevelKeys: string[] = []
+    for (let i = 1; i <= buildingLevels; i++) {
+      const levelKey = i === 1 ? "ground_level" : i === buildingLevels ? "top_level" : "middle_level"
+      concreteLevelKeys.push(levelKey)
+      levels[levelKey] = {
+        theme: pickResidentialEventTheme(mainCategory, RESIDENTIAL_LEVEL_EVENT_THEMES) ?? schemaTheme,
+        span: [i], // span 固定只有1层的范围
+        rooms: {}, // 等待后续装填
+      }
+    }
+
+    // 每个建筑所对应的功能房间都要决定一次装填到哪个楼层
+    Object.entries(roomDefs).forEach(([roomKey, definition]) => {
+      // 决定去哪个/哪些楼层，返回这些楼层的 key
+      const levelKeys = resolveHouseCategorySchemaLevelKeys(definition.prefered, levels, concreteLevelKeys);
+      for (const levelKey of levelKeys) {
+        if (definition.chance && 1 - definition.chance > Math.random()) continue // 有概率直接跳过，不写入 levels
+        levels[levelKey].rooms[roomKey] = {
+          descrption: definition.desc ?? roomKey,
+        };
+      }
+    });
+
+    result[featureId] = {
+      theme: schemaTheme,
+      levels
     }
   });
 
-  return {
-    theme: schemaTheme,
-    levels,
-  }
+  return result
 }
 
 function pickResidentialCategoryTheme(mainCategory: string): string {
@@ -506,47 +518,51 @@ function resolveHouseCategorySchemaLevelKeys(
 //################
 
 export function finishHouseBuildingSchema(
-  schema: SectorDistributionSchem,
+  schemas: Record<FeatureId, SectorDistributionSchem>,
   candidate: BuildingCandidate,
-  mainCategoryKey: string,
-): BuildingSchema {
-  const levels: BuildingSchema["levels"] = Object.fromEntries(
-    Object.entries(schema.levels).map(([levelKey, level]) => {
-      const sectors = Object.fromEntries(
-        Object.entries(level.sectors).map(([sectorKey, sector]) => {
-          const rooms = resolveResidentialSectorRooms(sector.rooms);
+): Record<FeatureId, BuildingSchema>  {
+  const result: Record<FeatureId, BuildingSchema> = {}
+  Object.entries(schemas).forEach(([featureId, schema]) => {
+    // 装填楼层中缺失的信息
+    const levels: BuildingSchema["levels"] = Object.fromEntries(
+      Object.entries(schema.levels).map(([levelKey, level]) => {
+        const sectors = Object.fromEntries(
+          Object.entries(level.sectors).map(([sectorKey, sector]) => {
+            const rooms = resolveResidentialSectorRooms(sector.rooms);
 
-          // 收尾阶段补齐 Category Schema 刻意省略的数量信息。
-          // 目前住宅仅按同一 sector 内的卧室组做共享上限控制，其余房间默认 1 间。
-          applyHouseSharedRoomCounts(candidate, rooms);
+            // 收尾阶段补齐 Category Schema 刻意省略的数量信息。
+            // 目前住宅仅按同一 sector 内的卧室组做共享上限控制，其余房间默认 1 间。
+            applyHouseSharedRoomCounts(candidate, rooms);
 
-          // 收尾阶段补齐进入建筑和楼层间移动所需的通道房间。
-          // 门厅只属于地面层；楼梯间需要在每个实际楼层都能被引用。
-          applyHouseAccessRooms(candidate, levelKey, rooms);
+            // 收尾阶段补齐进入建筑和楼层间移动所需的通道房间。
+            // 门厅只属于地面层；楼梯间需要在每个实际楼层都能被引用。
+            applyHouseAccessRooms(candidate, levelKey, rooms);
 
-          return [sectorKey, {
-            area: sector.area,
-            centerPosition: sector.centerPosition,
-            rooms,
-          }];
-        }),
-      );
+            return [sectorKey, {
+              area: sector.area,
+              centerPosition: sector.centerPosition,
+              rooms,
+            }];
+          }),
+        );
 
-      return [levelKey, {
-        theme: level.theme,
-        span: level.span,
-        sectors,
-      }];
-    }),
-  );
+        return [levelKey, {
+          theme: level.theme,
+          span: level.span,
+          sectors,
+        }];
+      }),
+    );
 
-  return {
-    featureId: candidate.detail.featureId,
-    category: mainCategoryKey,
-    centerPosition: candidate.centerPosition,
-    theme: schema.theme || RESIDENTIAL_FALLBACK_THEME,
-    levels,
-  };
+    result[featureId] = {
+      featureId,
+      category: candidate.categoryRecord?.join('&') || '出错', // 输出到 Building Schema 后，因为不再用到 category 了，就直接组合为单一字符串了
+      centerPosition: candidate.centerPosition,
+      theme: schema.theme || RESIDENTIAL_FALLBACK_THEME,
+      levels,
+    };
+  })
+  return result
 }
 
 

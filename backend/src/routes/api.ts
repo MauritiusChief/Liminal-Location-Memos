@@ -465,7 +465,7 @@ apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
       ...(polarView?.levels.flatMap( l => l.clusters.flatMap( c => c.features.flatMap( f => f.featureId))) ?? [])
     ]
     featureIds.forEach(async id => {
-      const b = await generateBuildingSchema(id, {})
+      const b = await generateBuildingSchema(id, [])
       // if (b) console.log(b)
     }) // TODO 当前仅打印
     const scenePrompt = buildScenePrompt(sceneObject, playerOrientation)

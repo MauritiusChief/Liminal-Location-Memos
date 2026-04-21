@@ -325,7 +325,7 @@ async function streamInitialBookMessage(
   //   ...microGrid.cells.flatMap(cell => cell).flatMap(cell => cell.sourceFeatureIds),
   //   ...(polarView?.levels.flatMap( l => l.clusters.flatMap( c => c.features.flatMap( f => f.featureId))) ?? [])
   // ]
-  // featureIds.forEach( async id => await generateBuildingSchema(id, state.buildingSchemas)) // TODO 当前仅打印
+  // featureIds.forEach( async id => await generateBuildingSchema(id, Object.values(state.buildingSchemas))) // TODO 当前仅打印
   await writeGameDebugRequest({
     mode: 'user-message',
     functionName: 'streamInitialBookMessage',
