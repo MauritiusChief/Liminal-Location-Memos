@@ -25,6 +25,11 @@ const GROUND_LEVEL = ["ground_level", "second_level", "third_level"];
 const ALL_LEVELS = ["all_levels"];
 
 /**
+ * House 仅可出现的三种楼层
+ */
+const HOUSE_LEVELS = ["ground_level", "middle_level", "top_level"]
+
+/**
  * 兼作分类结果（单独把 key 提取出来）和 Pattern 记录
  * 此表内容仅表示种类，不表示数量或与面积的关联
  * - prefered：代表该功能应优先出现的楼层
@@ -87,15 +92,19 @@ export const RESIDENTIAL_PATTERN_KEYS = Object.entries(RESIDENTIAL_CATEGORIES)
 const RESIDENTIAL_DISTRICT_SCHEMA_RADIUS_METERS = 120;
 
 const RESIDENTIAL_DISTRICT_AREA_WEIGHTS: Record<string, { residential: number; nonResidential: number }> = {
+  // 正向促进
   "landuse:residential": { residential: 6, nonResidential: 0 },
+  // 负向促进
   "landuse:commercial": { residential: 0, nonResidential: 5 },
   "landuse:industrial": { residential: 0, nonResidential: 6 },
   "amenity:school": { residential: 0, nonResidential: 4 },
   "amenity:university": { residential: 0, nonResidential: 5 },
 };
 const RESIDENTIAL_DISTRICT_ROAD_WEIGHTS: Record<string, { residential: number; nonResidential: number }> = {
+  // 正向促进
   "highway:residential": { residential: 3, nonResidential: 0 },
   "highway:service": { residential: 1, nonResidential: 0 },
+  // 负向促进
   "highway:primary": { residential: 0, nonResidential: 3 },
   "highway:trunk": { residential: 0, nonResidential: 4 },
   "highway:motorway": { residential: 0, nonResidential: 5 },
@@ -431,7 +440,7 @@ export function buildHouseCategorySchemaFromDistribution(
     const levels: Record<string, CategoryLevelSchema> = {}
     const concreteLevelKeys: string[] = []
     for (let i = 1; i <= buildingLevels; i++) {
-      const levelKey = i === 1 ? "ground_level" : i === buildingLevels ? "top_level" : "middle_level"
+      const levelKey = HOUSE_LEVELS[i-1]
       concreteLevelKeys.push(levelKey)
       levels[levelKey] = {
         theme: pickResidentialEventTheme(mainCategory, RESIDENTIAL_LEVEL_EVENT_THEMES) ?? schemaTheme,
@@ -451,6 +460,8 @@ export function buildHouseCategorySchemaFromDistribution(
         };
       }
     });
+
+    // TODO 如果各楼层的房间分布不均匀，则挪一挪
 
     result[featureId] = {
       theme: schemaTheme,
