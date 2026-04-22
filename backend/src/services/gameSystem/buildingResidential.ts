@@ -162,6 +162,7 @@ const TINY_RESIDENTIAL_BUILDING_AREA_MAX_SQM = 30;
 const APARTMENT_AREA_MIN_SQM = 220;
 const APARTMENT_LEVELS_MIN = 2;
 const APARTMENT_SUITE_AREA_SQM = 80;
+const APARTMENT_GROUND_ORDINARY_ROOM_AREA_SQM = 40;
 const SMALL_APARTMENT_PATTERN_AREA_MAX_SQM = 400;
 const SMALL_HOUSE_AREA_MAX_SQM = 90;
 const MEDIUM_HOUSE_AREA_MAX_SQM = 220;
@@ -702,10 +703,12 @@ export function buildApartmentCategorySchemaFromDistribution(
 
     Object.entries(roomDefs).forEach(([roomKey, definition]) => {
       if (definition.chance && 1 - definition.chance > Math.random()) return
-      const levelKey = resolveApartmentCategorySchemaLevelKey(roomKey, definition.prefered);
-      levels[levelKey].rooms[roomKey] = {
-        descrption: definition.desc ?? roomKey,
-      };
+      const levelKeys = resolveApartmentCategorySchemaLevelKeys(roomKey, definition.prefered);
+      levelKeys.forEach((levelKey) => {
+        levels[levelKey].rooms[roomKey] = {
+          descrption: definition.desc ?? roomKey,
+        };
+      });
     });
 
     result[featureId] = {
@@ -788,19 +791,20 @@ function resolveHouseCategorySchemaLevelKeys(
 
 /**
  * 把公寓 Category 中的抽象位置收束到 ground_floor / residential_floor。
- * 所有 *_suite 固定进入居住层；其他公共设施和设备房默认进入地面层。
+ * 所有 *_suite 固定进入居住层，同时复制到地面层作为候选；
+ * 其他公共设施和设备房默认进入地面层。
  * @param roomKey
  * @param prefered
- * @returns
+ * @returns 需要填充的公寓楼层 key
  */
-function resolveApartmentCategorySchemaLevelKey(
+function resolveApartmentCategorySchemaLevelKeys(
   roomKey: string,
   prefered: string | undefined,
-): string {
-  if (RESIDENTIAL_SUITE_KEYS.includes(roomKey)) return APARTMENT_FLOORS[1];
-  if (prefered === ALL_LEVELS[0]) return APARTMENT_FLOORS[1];
-  if (TOP_LEVEL.includes(prefered ?? "")) return APARTMENT_FLOORS[1];
-  return APARTMENT_FLOORS[0];
+): string[] {
+  if (RESIDENTIAL_SUITE_KEYS.includes(roomKey)) return APARTMENT_FLOORS;
+  if (prefered === ALL_LEVELS[0]) return [APARTMENT_FLOORS[1]];
+  if (TOP_LEVEL.includes(prefered ?? "")) return [APARTMENT_FLOORS[1]];
+  return [APARTMENT_FLOORS[0]];
 }
 
 
@@ -928,10 +932,11 @@ export function finishApartmentBuildingSchema(
       Object.entries(schema.levels).map(([levelKey, level]) => {
         const sectors = Object.fromEntries(
           Object.entries(level.sectors).map(([sectorKey, sector]) => {
-            const rooms = resolveApartmentSectorRooms(candidate, levelKey, level.theme, sector.rooms);
+            const rooms = resolveApartmentSectorRooms(level.theme, sector.rooms);
 
             // 公寓入口与垂直交通是整栋建筑级能力，不属于任何单个套房。
             applyApartmentAccessRooms(candidate, levelKey, rooms);
+            applyApartmentSuiteCapacity(candidate, levelKey, sector.area, rooms);
 
             return [sectorKey, {
               area: sector.area,
@@ -1008,15 +1013,11 @@ function resolveResidentialSectorRooms(
 
 /**
  * 将公寓的 CategoryRoomSchema 转为最终房间结构。
- * *_suite 在此处膨胀为 SuiteSchema；其他公共功能仍按普通房间处理。
- * @param candidate
- * @param levelKey
+ * *_suite 在此处膨胀为 SuiteSchema 候选；具体数量和是否保留在容量校验阶段处理。
  * @param rooms
  * @returns
  */
 function resolveApartmentSectorRooms(
-  candidate: BuildingCandidate,
-  levelKey: string,
   levelTheme: string,
   rooms: Record<string, CategoryRoomSchema>,
 ): Record<string, RoomSchema | SuiteSchema> {
@@ -1025,10 +1026,9 @@ function resolveApartmentSectorRooms(
   Object.entries(rooms).forEach(([roomKey, room]) => {
     if (RESIDENTIAL_SUITE_KEYS.includes(roomKey)) {
       const suite = buildApartmentSuiteSchema(roomKey, levelTheme);
-      const suiteCount = determineApartmentSuiteCount(candidate, levelKey);
       result[roomKey] = {
         theme: suite.theme,
-        count: suiteCount,
+        count: suite.count,
         subRooms: suite.subRooms,
       };
       return
@@ -1086,19 +1086,64 @@ function buildApartmentSuiteSubRooms(
 }
 
 /**
- * 用单层面积与楼层粗略估算每个居住层中的套房数量。
+ * 用单层面积与楼层粗略估算套房数量。
+ *
+ * 一楼需要先按普通房间数量预留公共/设备/通道空间；如果剩余面积不足一套，
+ * 收尾阶段会移除 Category Schema 中提前放入的一楼套房候选。
  * @param candidate
  * @param levelKey
+ * @param sectorArea
+ * @param rooms
  * @returns
  */
 function determineApartmentSuiteCount(
   candidate: BuildingCandidate,
   levelKey: string,
+  sectorArea: number,
+  rooms: Record<string, RoomSchema | SuiteSchema>,
 ): number {
-  if (levelKey !== APARTMENT_FLOORS[1]) return 1;
+  if (levelKey === APARTMENT_FLOORS[0]) {
+    const ordinaryRoomCount = countApartmentOrdinaryRooms(rooms);
+    const floorArea = (sectorArea || candidate.areaSqm || 0) * (1 - Math.random() * 0.4); // 添加浮动的面积，在 100% ~ 60% 浮动
+    const suiteArea = floorArea - ordinaryRoomCount * APARTMENT_GROUND_ORDINARY_ROOM_AREA_SQM;
+    return Math.max(0, Math.floor(suiteArea / APARTMENT_SUITE_AREA_SQM));
+  }
 
-  const floorArea = (candidate.areaSqm ?? APARTMENT_SUITE_AREA_SQM*4) * (1 - Math.random() * 0.4); // 添加浮动的面积，在 100% ~ 60% 浮动
+  const floorArea = (sectorArea || candidate.areaSqm || APARTMENT_SUITE_AREA_SQM*4) * (1 - Math.random() * 0.4); // 添加浮动的面积，在 100% ~ 60% 浮动
   return Math.max(1, Math.floor(floorArea / APARTMENT_SUITE_AREA_SQM));
+}
+
+function applyApartmentSuiteCapacity(
+  candidate: BuildingCandidate,
+  levelKey: string,
+  sectorArea: number,
+  rooms: Record<string, RoomSchema | SuiteSchema>,
+): void {
+  const suiteKeys = Object.keys(rooms).filter(isApartmentSuiteRoomKey);
+  if (suiteKeys.length === 0) return;
+
+  // Category Schema 会先把一楼套房作为候选放入；这里才按可用面积决定保留数量或删除。
+  const suiteCount = determineApartmentSuiteCount(candidate, levelKey, sectorArea, rooms);
+  suiteKeys.forEach((suiteKey) => {
+    if (suiteCount <= 0) {
+      delete rooms[suiteKey];
+      return;
+    }
+    rooms[suiteKey].count = suiteCount;
+  });
+}
+
+function countApartmentOrdinaryRooms(
+  rooms: Record<string, RoomSchema | SuiteSchema>,
+): number {
+  return Object.entries(rooms).reduce((count, [roomKey, room]) => {
+    if (isApartmentSuiteRoomKey(roomKey)) return count;
+    return count + room.count;
+  }, 0);
+}
+
+function isApartmentSuiteRoomKey(roomKey: string): boolean {
+  return RESIDENTIAL_SUITE_KEYS.includes(roomKey);
 }
 
 /**

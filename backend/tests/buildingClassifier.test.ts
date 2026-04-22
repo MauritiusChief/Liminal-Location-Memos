@@ -148,6 +148,8 @@ describe("building residential schema generation", () => {
     expect(schema.levels.residential_floor.span).toEqual([2, 3, 4]);
     expect(schema.levels.residential_floor.rooms.standard_suite).toEqual({ descrption: "标准公寓套房" });
     expect(schema.levels.residential_floor.rooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
+    expect(schema.levels.ground_floor.rooms.standard_suite).toEqual({ descrption: "标准公寓套房" });
+    expect(schema.levels.ground_floor.rooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
     expect(schema.levels.ground_floor.rooms.cleaning_room).toEqual({ descrption: "清洁间" });
     expect(schema.levels.ground_floor.rooms.mail_room).toEqual({ descrption: "收发室" });
     expect(schema.levels.ground_floor.rooms.laundry_room).toEqual({ descrption: "公共洗衣房" });
@@ -170,6 +172,7 @@ describe("building residential schema generation", () => {
           span: [1],
           rooms: {
             cleaning_room: { descrption: "清洁间" },
+            studio_suite: { descrption: "单间公寓套房" },
           },
         },
         residential_floor: {
@@ -186,12 +189,17 @@ describe("building residential schema generation", () => {
     const schema = schemas[candidate.details[0].featureId];
     const groundRooms = schema.levels.ground_floor.sectors.main.rooms;
     const residentialRooms = schema.levels.residential_floor.sectors.main.rooms;
+    const groundSuite = groundRooms.studio_suite;
     const suite = residentialRooms.studio_suite;
 
     expect(schema.category).toBe("apartment");
     expect(groundRooms.lobby).toEqual({ descrption: "公寓大厅", count: 1, access: "entrance" });
     expect(groundRooms.stairwell).toEqual({ descrption: "楼梯间", count: 1, access: "vertical" });
     expect(residentialRooms.stairwell).toEqual({ descrption: "楼梯间", count: 1, access: "vertical" });
+    expect("subRooms" in groundSuite).toBe(true);
+    if ("subRooms" in groundSuite) {
+      expect(groundSuite.count).toBe(2);
+    }
     expect("subRooms" in suite).toBe(true);
     if ("subRooms" in suite) {
       expect(suite.theme).toBe("普通的公寓楼");
@@ -203,6 +211,48 @@ describe("building residential schema generation", () => {
       expect(suite.subRooms.bedroom).toBeUndefined();
       expect(suite.subRooms.bedroom_wild).toBeUndefined();
     }
+  });
+
+  it("removes ground floor apartment suites when shared rooms leave no suite capacity", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0);
+    const candidate = buildCandidate({
+      areaSqm: 180,
+      buildingLevels: 2,
+      categoryRecord: ["apartment"],
+      patternRecord: { apartment: "studio_apt" },
+    });
+    const sectorSchema = buildSectorDistributionSchema(candidate, {
+      theme: "普通的公寓楼",
+      levels: {
+        ground_floor: {
+          theme: "普通的公寓楼",
+          span: [1],
+          rooms: {
+            cleaning_room: { descrption: "清洁间" },
+            trash_room: { descrption: "垃圾站" },
+            electrical_room: { descrption: "配电间" },
+            studio_suite: { descrption: "单间公寓套房" },
+          },
+        },
+        residential_floor: {
+          theme: "普通的公寓楼",
+          span: [2],
+          rooms: {
+            studio_suite: { descrption: "单间公寓套房" },
+          },
+        },
+      },
+    });
+
+    const schemas = finishApartmentBuildingSchema(sectorSchema, candidate);
+    const schema = schemas[candidate.details[0].featureId];
+    const groundRooms = schema.levels.ground_floor.sectors.main.rooms;
+    const residentialRooms = schema.levels.residential_floor.sectors.main.rooms;
+
+    expect(groundRooms.studio_suite).toBeUndefined();
+    expect(groundRooms.lobby).toEqual({ descrption: "公寓大厅", count: 1, access: "entrance" });
+    expect(groundRooms.stairwell).toEqual({ descrption: "楼梯间", count: 1, access: "vertical" });
+    expect(residentialRooms.studio_suite).toBeDefined();
   });
 
   it("keeps studio apartment pattern limited to studio suites", () => {
@@ -217,10 +267,13 @@ describe("building residential schema generation", () => {
     const distribution = decidePatternDistribution(candidate);
     const appliedBaseSchema = applyCategoryBaseSchemasToDistribution(candidate, distribution);
     const schemas = buildApartmentCategorySchemaFromDistribution(appliedBaseSchema, candidate);
-    const rooms = schemas[candidate.details[0].featureId].levels.residential_floor.rooms;
+    const groundRooms = schemas[candidate.details[0].featureId].levels.ground_floor.rooms;
+    const residentialRooms = schemas[candidate.details[0].featureId].levels.residential_floor.rooms;
 
-    expect(rooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
-    expect(rooms.standard_suite).toBeUndefined();
+    expect(groundRooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
+    expect(groundRooms.standard_suite).toBeUndefined();
+    expect(residentialRooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
+    expect(residentialRooms.standard_suite).toBeUndefined();
   });
 
   it("can finish standard and studio suites from the same apartment floor", () => {
@@ -253,7 +306,7 @@ describe("building residential schema generation", () => {
     expect("subRooms" in standardSuite).toBe(true);
     if ("subRooms" in standardSuite) {
       expect(standardSuite.theme).toBe("普通的公寓楼");
-      expect(standardSuite.count).toBe(4);
+      expect(standardSuite.count).toBe(2);
       expect(standardSuite.subRooms).toEqual({
         bedroom_wild: { descrption: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 2 },
         living_room: { descrption: "客厅", count: 1 },
@@ -269,7 +322,7 @@ describe("building residential schema generation", () => {
     expect("subRooms" in studioSuite).toBe(true);
     if ("subRooms" in studioSuite) {
       expect(studioSuite.theme).toBe("普通的公寓楼");
-      expect(studioSuite.count).toBe(4);
+      expect(studioSuite.count).toBe(2);
       expect(studioSuite.subRooms).toEqual({
         bedroom_wild: { descrption: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 1 },
         living_room: { descrption: "与厨房相连的客厅", count: 1 },
