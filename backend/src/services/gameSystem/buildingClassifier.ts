@@ -409,8 +409,19 @@ export function applyCategoryBaseSchemasToDistribution(
   const baseSchemaEntries = categoryRecord.flatMap( cat => {
     const baseSchema = ALL_CATEGORIES[cat].base_schema
     if (!baseSchema) return []
-    const roomsEntries = Object.entries(baseSchema.rooms).filter(([key, room]) => typeof room !== 'boolean')
-    return roomsEntries
+    return Object.entries(baseSchema.rooms).flatMap(([roomKey, room]) => {
+      if (room === true) return []
+
+      if (roomKey === "self") {
+        // self 只表示“该 Category 本体就是一个房间功能”，最终 Schema 仍使用 Category Key 与 Category 描述。
+        return [[cat, {
+          ...room,
+          desc: ALL_CATEGORIES[cat].desc,
+        }]]
+      }
+
+      return [[roomKey, room]]
+    })
   })
   const baseSchemaApplied = patternDistributionEntries.map( ([featureId, roomDefs]) => {
     // 每个 Category 里的 base schema 都会应用给所有子建筑

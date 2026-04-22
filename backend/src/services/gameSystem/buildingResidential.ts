@@ -75,7 +75,7 @@ export const RESIDENTIAL_CATEGORIES: Record<string, CategoryDefinition> = {
   // 带车库的住宅通过应用复合型 Category “住宅 - 内含 车库” 表示
   // 就像 “图书馆 - 内含 咖啡厅”
   garage: {desc: "车库", base_schema: {rooms: {self: {prefered: GROUND_LEVEL[0]}}}},
-  tool_shed: {desc: "工具屋", base_schema: {rooms: {self: true}}},
+  tool_shed: {desc: "工具屋", base_schema: {rooms: {self: {prefered: GROUND_LEVEL[0]}}}},
 } as const;
 export const RESIDENTIAL_CATEGORY_KEYS = Object.keys(RESIDENTIAL_CATEGORIES)
 export const RESIDENTIAL_PATTERN_KEYS = Object.entries(RESIDENTIAL_CATEGORIES)
@@ -294,11 +294,11 @@ async function determineResidentialBuildingKind(featureId: string): Promise<stri
   const row = result.rows[0];
 
   const areaSqm = row?.area_sqm ?? 0;
-  console.log(`${featureId}: 面积${areaSqm}`);
+  // console.log(`${featureId}: 面积${areaSqm}`);
   const neighborSampleCount = row?.neighbor_sample_count ?? 0;
-  console.log(`周围建筑数${neighborSampleCount}`);
+  // console.log(`周围建筑数${neighborSampleCount}`);
   const neighborAverageAreaSqm = row?.neighbor_average_area_sqm ?? 0;
-  console.log(`周围平均面积${neighborAverageAreaSqm}`);
+  // console.log(`周围平均面积${neighborAverageAreaSqm}`);
 
   // 进行判断
 
@@ -522,6 +522,8 @@ export function finishHouseBuildingSchema(
   candidate: BuildingCandidate,
 ): Record<FeatureId, BuildingSchema>  {
   const result: Record<FeatureId, BuildingSchema> = {}
+  const categoryKey = candidate.categoryRecord?.join('&') || '出错';
+  const shouldApplyHouseFinalizers = isHouseFamilyCategory(categoryKey);
   Object.entries(schemas).forEach(([featureId, schema]) => {
     // 装填楼层中缺失的信息
     const levels: BuildingSchema["levels"] = Object.fromEntries(
@@ -530,13 +532,15 @@ export function finishHouseBuildingSchema(
           Object.entries(level.sectors).map(([sectorKey, sector]) => {
             const rooms = resolveResidentialSectorRooms(sector.rooms);
 
-            // 收尾阶段补齐 Category Schema 刻意省略的数量信息。
-            // 目前住宅仅按同一 sector 内的卧室组做共享上限控制，其余房间默认 1 间。
-            applyHouseSharedRoomCounts(candidate, rooms);
+            if (shouldApplyHouseFinalizers) {
+              // 住宅主体才需要补齐卧室组、入口和垂直通道；独立车库/工具屋只保留自身功能房间。
+              // 目前住宅仅按同一 sector 内的卧室组做共享上限控制，其余房间默认 1 间。
+              applyHouseSharedRoomCounts(candidate, rooms);
 
-            // 收尾阶段补齐进入建筑和楼层间移动所需的通道房间。
-            // 门厅只属于地面层；楼梯间需要在每个实际楼层都能被引用。
-            applyHouseAccessRooms(candidate, levelKey, rooms);
+              // 收尾阶段补齐进入建筑和楼层间移动所需的通道房间。
+              // 门厅只属于地面层；楼梯间需要在每个实际楼层都能被引用。
+              applyHouseAccessRooms(candidate, levelKey, rooms);
+            }
 
             return [sectorKey, {
               area: sector.area,
@@ -556,7 +560,7 @@ export function finishHouseBuildingSchema(
 
     result[featureId] = {
       featureId,
-      category: candidate.categoryRecord?.join('&') || '出错', // 输出到 Building Schema 后，因为不再用到 category 了，就直接组合为单一字符串了
+      category: categoryKey, // 输出到 Building Schema 后，因为不再用到 category 了，就直接组合为单一字符串了
       centerPosition: candidate.centerPosition,
       theme: schema.theme || RESIDENTIAL_FALLBACK_THEME,
       levels,

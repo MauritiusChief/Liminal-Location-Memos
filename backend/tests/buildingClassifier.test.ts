@@ -75,7 +75,52 @@ describe("building residential schema generation", () => {
 
     expect(rooms.living_room).toEqual({ descrption: "客厅" });
     expect(rooms.kitchen).toEqual({ descrption: "带餐厅的厨房" });
-    expect(rooms.self).toEqual({ descrption: "self" });
+    expect(rooms.garage).toEqual({ descrption: "车库" });
+    expect(rooms.self).toBeUndefined();
+  });
+
+  it("finishes a standalone garage without house access rooms", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
+    const candidate = buildCandidate({
+      buildingLevels: 2,
+      categoryRecord: ["garage"],
+      patternRecord: { garage: "garage" },
+    });
+
+    const categorySchemas = buildAccessoryCategorySchemas(candidate);
+    const sectorSchema = buildSectorDistributionSchema(candidate, categorySchemas[candidate.details[0].featureId]);
+    const schemas = finishHouseBuildingSchema(sectorSchema, candidate);
+    const schema = schemas[candidate.details[0].featureId];
+    const groundRooms = schema.levels.ground_level.sectors.main.rooms;
+    const topRooms = schema.levels.top_level.sectors.main.rooms;
+
+    expect(schema.category).toBe("garage");
+    expect(groundRooms.garage).toEqual({ descrption: "车库", count: 1 });
+    expect(groundRooms.hall).toBeUndefined();
+    expect(groundRooms.stairwell).toBeUndefined();
+    expect(topRooms.stairwell).toBeUndefined();
+  });
+
+  it("finishes a standalone tool shed without house access rooms", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
+    const candidate = buildCandidate({
+      buildingLevels: 2,
+      categoryRecord: ["tool_shed"],
+      patternRecord: { tool_shed: "tool_shed" },
+    });
+
+    const categorySchemas = buildAccessoryCategorySchemas(candidate);
+    const sectorSchema = buildSectorDistributionSchema(candidate, categorySchemas[candidate.details[0].featureId]);
+    const schemas = finishHouseBuildingSchema(sectorSchema, candidate);
+    const schema = schemas[candidate.details[0].featureId];
+    const groundRooms = schema.levels.ground_level.sectors.main.rooms;
+    const topRooms = schema.levels.top_level.sectors.main.rooms;
+
+    expect(schema.category).toBe("tool_shed");
+    expect(groundRooms.tool_shed).toEqual({ descrption: "工具屋", count: 1 });
+    expect(groundRooms.hall).toBeUndefined();
+    expect(groundRooms.stairwell).toBeUndefined();
+    expect(topRooms.stairwell).toBeUndefined();
   });
 
   it("places rooms by preferred level and random fallback", () => {
@@ -222,6 +267,12 @@ function buildSectorDistributionSchema(
       ),
     },
   };
+}
+
+function buildAccessoryCategorySchemas(candidate: BuildingCandidate) {
+  const distribution = decidePatternDistribution(candidate);
+  const appliedBaseSchema = applyCategoryBaseSchemasToDistribution(candidate, distribution);
+  return buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate);
 }
 
 function buildDbBuildingRow(overrides: Partial<DbBuildingFeatureDetailRow & {
