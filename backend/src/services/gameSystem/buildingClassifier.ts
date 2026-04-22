@@ -2,7 +2,7 @@ import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { DbBuildingFeatureDetailRow, FeatureDetail, FeatureId, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
 import { Position } from "./gameSessionStore.js";
-import { ambiguousResidentialCategory, buildHouseCategorySchemaFromDistribution, buildResidentialAccessoryCategorySchemaFromDistribution, finishHouseBuildingSchema, finishResidentialAccessoryBuildingSchema, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
+import { ambiguousResidentialCategory, buildApartmentCategorySchemaFromDistribution, buildHouseCategorySchemaFromDistribution, buildResidentialAccessoryCategorySchemaFromDistribution, finishApartmentBuildingSchema, finishHouseBuildingSchema, finishResidentialAccessoryBuildingSchema, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
 import { trimTagValue } from "../utils.js";
 
 // Data Base 类型
@@ -257,6 +257,7 @@ export async function buildColocatedDebugBuildingSchemas(
 // 直接用在 generateBuildingSchema 函数中
 
 const EXPLICIT_HOUSE_BUILDING_VALUES = new Set(["house", "detached", "residential"]);
+const EXPLICIT_APARTMENT_BUILDING_VALUES = new Set(["apartment", "apartments"]);
 const EXPLICIT_GARAGE_BUILDING_VALUES = new Set(["garage", "garages", "carport"]);
 const EXPLICIT_TOOL_SHED_BUILDING_VALUES = new Set(["shed"]);
 
@@ -328,6 +329,7 @@ function resolveExplicitCategory(candidate: BuildingCandidate): string[] {
   const category: string[] = []
   const tagsList = candidate.details.map( d => d.tags )
   // 以下顺序按照重要程度从大到小排列，保证最主体的分类可以排为复合分类的主分类
+  if (isExplicitBuilding(EXPLICIT_APARTMENT_BUILDING_VALUES, tagsList)) return ["apartment"];
   if (isExplicitBuilding(EXPLICIT_HOUSE_BUILDING_VALUES, tagsList)) return ["house"];
   if (isExplicitBuilding(EXPLICIT_GARAGE_BUILDING_VALUES, tagsList) || hasContainedPoiTag(candidate, "amenity", ["parking"])) return ["garage"];
   if (isExplicitBuilding(EXPLICIT_TOOL_SHED_BUILDING_VALUES, tagsList)) return ["tool_shed"];
@@ -446,6 +448,9 @@ function buildCategorySchemaFromDistribution(
   if (mainCategory === "house") {
     return buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate)
   }
+  if (mainCategory === "apartment") {
+    return buildApartmentCategorySchemaFromDistribution(appliedBaseSchema, candidate)
+  }
   if (mainCategory === "garage" || mainCategory === "tool_shed") {
     return buildResidentialAccessoryCategorySchemaFromDistribution(appliedBaseSchema, candidate)
   }
@@ -503,6 +508,9 @@ function finishBuildingSchema(
   const mainCategory = candidate.categoryRecord?.[0];
   if (mainCategory === "house") {
     return finishHouseBuildingSchema(schemas, candidate)
+  }
+  if (mainCategory === "apartment") {
+    return finishApartmentBuildingSchema(schemas, candidate)
   }
   if (mainCategory === "garage" || mainCategory === "tool_shed") {
     return finishResidentialAccessoryBuildingSchema(schemas, candidate)

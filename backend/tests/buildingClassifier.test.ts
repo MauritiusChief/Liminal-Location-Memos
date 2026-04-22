@@ -19,8 +19,10 @@ import {
   type SectorDistributionSchem,
 } from "../src/services/gameSystem/buildingClassifier";
 import {
+  buildApartmentCategorySchemaFromDistribution,
   buildHouseCategorySchemaFromDistribution,
   buildResidentialAccessoryCategorySchemaFromDistribution,
+  finishApartmentBuildingSchema,
   finishHouseBuildingSchema,
   finishResidentialAccessoryBuildingSchema,
 } from "../src/services/gameSystem/buildingResidential";
@@ -97,7 +99,7 @@ describe("building residential schema generation", () => {
 
     expect(schema.category).toBe("garage");
     expect(Object.keys(schema.levels)).toEqual(["default_floor"]);
-    expect(defaultRooms.garage).toEqual({ descrption: "车库", count: 1 });
+    expect(defaultRooms.garage).toEqual({ descrption: "车库", count: 1, access: "entrance" });
     expect(defaultRooms.hall).toBeUndefined();
     expect(defaultRooms.stairwell).toBeUndefined();
     expect(schema.levels.ground_floor).toBeUndefined();
@@ -120,11 +122,150 @@ describe("building residential schema generation", () => {
 
     expect(schema.category).toBe("tool_shed");
     expect(Object.keys(schema.levels)).toEqual(["default_floor"]);
-    expect(defaultRooms.tool_shed).toEqual({ descrption: "工具屋", count: 1 });
+    expect(defaultRooms.tool_shed).toEqual({ descrption: "工具屋", count: 1, access: "entrance" });
     expect(defaultRooms.hall).toBeUndefined();
     expect(defaultRooms.stairwell).toBeUndefined();
     expect(schema.levels.ground_floor).toBeUndefined();
     expect(schema.levels.top_floor).toBeUndefined();
+  });
+
+  it("builds apartment category schema with only ground and residential floors", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
+    const candidate = buildCandidate({
+      areaSqm: 320,
+      buildingLevels: 4,
+      categoryRecord: ["apartment", "apartment_utility"],
+      patternRecord: { apartment: "standard_apt", apartment_utility: "apartment_utility" },
+    });
+
+    const distribution = decidePatternDistribution(candidate);
+    const appliedBaseSchema = applyCategoryBaseSchemasToDistribution(candidate, distribution);
+    const schemas = buildApartmentCategorySchemaFromDistribution(appliedBaseSchema, candidate);
+    const schema = schemas[candidate.details[0].featureId];
+
+    expect(Object.keys(schema.levels)).toEqual(["ground_floor", "residential_floor"]);
+    expect(schema.levels.ground_floor.span).toEqual([1]);
+    expect(schema.levels.residential_floor.span).toEqual([2, 3, 4]);
+    expect(schema.levels.residential_floor.rooms.standard_suite).toEqual({ descrption: "标准公寓套房" });
+    expect(schema.levels.residential_floor.rooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
+    expect(schema.levels.ground_floor.rooms.cleaning_room).toEqual({ descrption: "清洁间" });
+    expect(schema.levels.ground_floor.rooms.mail_room).toEqual({ descrption: "收发室" });
+    expect(schema.levels.ground_floor.rooms.laundry_room).toEqual({ descrption: "公共洗衣房" });
+    expect(schema.levels.ground_floor.rooms.gym).toEqual({ descrption: "健身房" });
+  });
+
+  it("finishes apartment suites and access rooms", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0);
+    const candidate = buildCandidate({
+      areaSqm: 320,
+      buildingLevels: 2,
+      categoryRecord: ["apartment"],
+    });
+    const sectorSchema = buildSectorDistributionSchema(candidate, {
+      theme: "普通的公寓楼",
+      levels: {
+        ground_floor: {
+          theme: "普通的公寓楼",
+          span: [1],
+          rooms: {
+            cleaning_room: { descrption: "清洁间" },
+          },
+        },
+        residential_floor: {
+          theme: "普通的公寓楼",
+          span: [2],
+          rooms: {
+            studio_suite: { descrption: "单间公寓套房" },
+          },
+        },
+      },
+    });
+
+    const schemas = finishApartmentBuildingSchema(sectorSchema, candidate);
+    const schema = schemas[candidate.details[0].featureId];
+    const groundRooms = schema.levels.ground_floor.sectors.main.rooms;
+    const residentialRooms = schema.levels.residential_floor.sectors.main.rooms;
+    const suite = residentialRooms.studio_suite;
+
+    expect(schema.category).toBe("apartment");
+    expect(groundRooms.lobby).toEqual({ descrption: "公寓大厅", count: 1, access: "entrance" });
+    expect(groundRooms.stairwell).toEqual({ descrption: "楼梯间", count: 1, access: "vertical" });
+    expect(residentialRooms.stairwell).toEqual({ descrption: "楼梯间", count: 1, access: "vertical" });
+    expect("subRooms" in suite).toBe(true);
+    if ("subRooms" in suite) {
+      expect("theme" in suite).toBe(false);
+      expect(suite.subRooms).toEqual([
+        { descrption: "卧室、客厅、厨房一体空间", count: 2 },
+        { descrption: "带厕所浴室", count: 2 },
+      ]);
+    }
+  });
+
+  it("keeps studio apartment pattern limited to studio suites", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
+    const candidate = buildCandidate({
+      areaSqm: 320,
+      buildingLevels: 2,
+      categoryRecord: ["apartment"],
+      patternRecord: { apartment: "studio_apt" },
+    });
+
+    const distribution = decidePatternDistribution(candidate);
+    const appliedBaseSchema = applyCategoryBaseSchemasToDistribution(candidate, distribution);
+    const schemas = buildApartmentCategorySchemaFromDistribution(appliedBaseSchema, candidate);
+    const rooms = schemas[candidate.details[0].featureId].levels.residential_floor.rooms;
+
+    expect(rooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
+    expect(rooms.standard_suite).toBeUndefined();
+  });
+
+  it("can finish standard and studio suites from the same apartment floor", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
+    const candidate = buildCandidate({
+      areaSqm: 320,
+      buildingLevels: 2,
+      categoryRecord: ["apartment"],
+    });
+    const sectorSchema = buildSectorDistributionSchema(candidate, {
+      theme: "普通的公寓楼",
+      levels: {
+        residential_floor: {
+          theme: "普通的公寓楼",
+          span: [2],
+          rooms: {
+            standard_suite: { descrption: "标准公寓套房" },
+            studio_suite: { descrption: "单间公寓套房" },
+          },
+        },
+      },
+    });
+
+    const schemas = finishApartmentBuildingSchema(sectorSchema, candidate);
+    const rooms = schemas[candidate.details[0].featureId].levels.residential_floor.sectors.main.rooms;
+    const standardSuite = rooms.standard_suite;
+    const studioSuite = rooms.studio_suite;
+
+    expect("subRooms" in standardSuite).toBe(true);
+    if ("subRooms" in standardSuite) {
+      expect("theme" in standardSuite).toBe(false);
+      expect(standardSuite.subRooms).toEqual([
+        { descrption: "卧室", count: 2 },
+        { descrption: "客厅", count: 2 },
+        { descrption: "带餐厅的厨房", count: 2 },
+        { descrption: "带厕所浴室", count: 2 },
+        { descrption: "儿童卧室", count: 2 },
+        { descrption: "办公室", count: 2 },
+        { descrption: "储物间", count: 2 },
+      ]);
+    }
+    expect("subRooms" in studioSuite).toBe(true);
+    if ("subRooms" in studioSuite) {
+      expect(studioSuite.subRooms).toEqual([
+        { descrption: "卧室", count: 2 },
+        { descrption: "与厨房相连的客厅", count: 2 },
+        { descrption: "带厕所浴室", count: 2 },
+      ]);
+    }
   });
 
   it("places rooms by preferred level and random fallback", () => {
@@ -182,7 +323,7 @@ describe("building residential schema generation", () => {
     expect(schema.featureId).toBe(candidate.details[0].featureId);
     expect(schema.category).toBe("house");
     expect(schema.centerPosition).toEqual(candidate.centerPosition);
-    expect(rooms.bedroom).toEqual({ descrption: "卧室", count: 1 });
+    expect(rooms.bedroom).toEqual({ descrption: "卧室", count: 1, access: "vertical" });
     expect(rooms.living_room).toEqual({
       descrption: "与餐厅、厨房相连的客厅",
       count: 1,
@@ -215,9 +356,90 @@ describe("building residential schema generation", () => {
 
     expect(schema?.category).toBe("garage");
     expect(Object.keys(schema?.levels || {})).toEqual(["default_floor"]);
-    expect(schema?.levels.default_floor.sectors.main.rooms.garage).toEqual({ descrption: "车库", count: 1 });
+    expect(schema?.levels.default_floor.sectors.main.rooms.garage).toEqual({ descrption: "车库", count: 1, access: "entrance" });
     expect(schema?.levels.default_floor.sectors.main.rooms.hall).toBeUndefined();
     expect(schema?.levels.default_floor.sectors.main.rooms.stairwell).toBeUndefined();
+  });
+
+  it("generateBuildingSchema supports explicit apartment buildings", async () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
+    mockedQuery.mockResolvedValueOnce({
+      rows: [buildDbBuildingRow({
+        area_sqm: 320,
+        tags: { building: "apartments", "building:levels": "4" },
+      })],
+    } as never);
+
+    const schemas = await generateBuildingSchema("way/123", [], true);
+    const schema = schemas?.["way/123"];
+
+    expect(schema?.category).toBe("apartment");
+    expect(Object.keys(schema?.levels || {})).toEqual(["ground_floor", "residential_floor"]);
+    expect(schema?.levels.residential_floor.sectors.main.rooms.standard_suite).toBeDefined();
+  });
+
+  it("generateBuildingSchema can classify ambiguous large multi-level residential buildings as apartment utilities", async () => {
+    jest.spyOn(Math, "random").mockReturnValue(0);
+    mockedQuery
+      .mockResolvedValueOnce({
+        rows: [buildDbBuildingRow({
+          area_sqm: 320,
+          tags: { building: "yes", "building:levels": "2" },
+        })],
+      } as never)
+      .mockResolvedValueOnce({ rows: [{ covering_areas: ["landuse:residential"] }] } as never)
+      .mockResolvedValueOnce({ rows: [{ road_kinds: [] }] } as never)
+      .mockResolvedValueOnce({
+        rows: [{
+          area_sqm: 320,
+          neighbor_sample_count: 1,
+          neighbor_average_area_sqm: 120,
+          is_simple_rectangle: false,
+        }],
+      } as never)
+      .mockResolvedValueOnce({ rows: [{ has_nearby_parking: false }] } as never);
+
+    const schemas = await generateBuildingSchema("way/123", [], true);
+    const schema = schemas?.["way/123"];
+    const groundRooms = schema?.levels.ground_floor.sectors.main.rooms;
+
+    expect(schema?.category).toBe("apartment&apartment_utility");
+    expect(groundRooms?.mail_room).toEqual({ descrption: "收发室", count: 1 });
+    expect(groundRooms?.laundry_room).toEqual({ descrption: "公共洗衣房", count: 1 });
+    expect(groundRooms?.gym).toEqual({ descrption: "健身房", count: 1 });
+  });
+
+  it("generateBuildingSchema fixes tiny ambiguous residential buildings as tool sheds", async () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
+    mockedQuery
+      .mockResolvedValueOnce({
+        rows: [buildDbBuildingRow({
+          area_sqm: 20,
+          tags: { building: "yes", "building:levels": "1" },
+        })],
+      } as never)
+      .mockResolvedValueOnce({ rows: [{ covering_areas: ["landuse:residential"] }] } as never)
+      .mockResolvedValueOnce({ rows: [{ road_kinds: [] }] } as never)
+      .mockResolvedValueOnce({
+        rows: [{
+          area_sqm: 20,
+          neighbor_sample_count: 1,
+          neighbor_average_area_sqm: 120,
+          is_simple_rectangle: true,
+        }],
+      } as never)
+      .mockResolvedValueOnce({ rows: [{ has_nearby_parking: false }] } as never);
+
+    const schemas = await generateBuildingSchema("way/123", [], true);
+    const schema = schemas?.["way/123"];
+
+    expect(schema?.category).toBe("tool_shed");
+    expect(Object.keys(schema?.levels || {})).toEqual(["default_floor"]);
+    expect(schema?.levels.default_floor.sectors.main.rooms.tool_shed).toEqual({
+      descrption: "工具屋",
+      count: 1,
+      access: "entrance",
+    });
   });
 
   it("builds colocated debug existing schemas from the target feature center", async () => {
