@@ -52,11 +52,13 @@ export async function ensureOsmCoverageForRequest(request: RangedPosition): Prom
     return;
   }
 
+  console.log(`[${new Date().toISOString()}] 从 OSM 获取数据中...`);
   await syncOverpassCoverage({
     lat: request.lat,
     lon: request.lon,
     radius: COVERAGE_SYNC_RADIUS_METERS,
   });
+  console.log(`[${new Date().toISOString()}] OSM 获取数据完成`);
 }
 
 // #region 帮助函数

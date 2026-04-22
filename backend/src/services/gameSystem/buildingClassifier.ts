@@ -1,9 +1,8 @@
 import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
-import { DbBuildingFeatureDetailRow, FeatureDetail, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
-import { dedupeOutlineReferences } from "@/services/osmNormalization/osmNormalizer.js";
+import { DbBuildingFeatureDetailRow, FeatureDetail, FeatureId, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
 import { Position } from "./gameSessionStore.js";
-import { ambiguousResidentialCategory, buildHouseCategorySchemaFromDistribution, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
+import { ambiguousResidentialCategory, buildApartmentCategorySchemaFromDistribution, buildHouseCategorySchemaFromDistribution, buildResidentialAccessoryCategorySchemaFromDistribution, finishApartmentBuildingSchema, finishHouseBuildingSchema, finishResidentialAccessoryBuildingSchema, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
 import { trimTagValue } from "../utils.js";
 
 // Data Base 类型
@@ -58,7 +57,8 @@ export interface RoomSchema {
  */
 export interface SuiteSchema {
   theme: string;
-  subRooms: SubRoomSchema[];
+  count: number;
+  subRooms: Record<string, SubRoomSchema>;
 }
 
 /**
@@ -91,6 +91,22 @@ export interface CategoryRoomSchema {
   access?: "entrance" | "vertical" | "internal";
 }
 
+/**
+ * 特指经过了 Sector Distributtion，但还没到收尾阶段的 Schema
+ */
+export interface SectorDistributionSchem {
+  theme: string;
+  levels: Record<string, { // key 为楼层种类名
+    theme: string;
+    span: number[]; // 使用该 C-Schema 的楼层
+    sectors: Record<string, { // key 为该 Sector 的名字
+      area: number;
+      centerPosition: Position;
+      rooms: Record<string, CategoryRoomSchema>; // key 为该房间的种类名
+    }>
+  }>
+}
+
 
 /**
  * 单体建筑还是复合建筑
@@ -99,16 +115,20 @@ type ScopeType = "single" | "building_relation";
 
 /**
  * 根据 featureId 获取的候选地物，包含所有分类所需的信息
+ * Category 信息和 Pattern 信息也借助此处流转
  */
 export interface BuildingCandidate {
+  featureId: string;
   scope: ScopeType;
-  detail: FeatureDetail;
-  memberDetails?: FeatureDetail[];
+  details: FeatureDetail[];
+  outline?: FeatureId;
   areaSqm: number | null;
   centerPosition: Position;
   buildingLevels: number | null;
   heightMeters: number | null;
   buildingValue: string | null;
+  categoryRecord?: string[]; // 整个 candidate 使用同一组 Category
+  patternRecord?: Record<string, string>; // 每个 Category 都配一个 Pattern
 }
 
 //Definition 类型
@@ -141,25 +161,25 @@ export interface PatternRoomDefinition {
 }
 
 /**
- * 键为 featureId，值为已分配到该地物的 Category Key 与房间定义
+ * 键为 featureId，值为已分配到该地物的房间定义；
+ * 由于 Category 是整个多体建筑共用（不论是不是复合 Category），因此不能以 Category 为界限分类
  */
-export type PatternDistribution = Record<string, {categories: string[], rooms: Record<string, PatternRoomDefinition>}>
+export type PatternDistribution = Record<FeatureId, Record<string, PatternRoomDefinition>>
 
 //#region 出口函数
 
 /**
- * 输入 featureId, 自行从数据库获取相关数据后进行分类等操作，返回现成的 Building Schema
- * TODO: 添加最终 Building Schema 的组装逻辑。目前只做到 category/pattern 选择。
+ * 输入 featureId, 自行从数据库获取相关数据后进行分类等操作，返回现成的 Building Schema 记录。
  * @param featureId 支持传入单体 building 或 relation/part
  * @param existingSchemas 作为参考的来自 Game State 的 Building Schema
- * @param skipComplex 是否跳过太复杂需要 LLM 参与的步骤
- * @returns 现成的 Building Schema，或者表示被跳过的 undefined
+ * @param skipComplex 如果后续遇到必须依赖 LLM 才能判断的复杂分配，是否放弃此次生成
+ * @returns 现成的 Building Schema 记录，或者表示无法生成的 undefined
  */
 export async function generateBuildingSchema(
   featureId: string,
-  existingSchemas: Record<string, BuildingSchema>,
+  existingSchemas: BuildingSchema[],
   skipComplex: boolean = true
-): Promise<BuildingSchema | undefined> {
+): Promise<Record<FeatureId, BuildingSchema> | undefined> {
   // 先找到候选建筑
   const candidate = await fetchBuildingCandidate(featureId);
   if (!candidate) {
@@ -174,42 +194,71 @@ export async function generateBuildingSchema(
   // TODO 再没有分类结果的话，还没定好怎么处理
   if (category.length === 0) return undefined;
 
+  // Category 信息存入 candidate
+  candidate.categoryRecord = category
+
   // 根据候选建筑本身信息，为每个 Category 随机选择一个 pattern
-  const [mainCategoryKey, ...containedCategoryKeys] = category
-
-  const containedCategoryPatterns: Record<string, string> = {}
-  containedCategoryKeys.forEach(key => {
-    containedCategoryPatterns[key] = selectPatternKey(candidate, key)
+  const patternKeys: Record<string, string> = {}
+  category.forEach(key => {// 键为各个 Category Key，值为对应 Pattern Key
+    patternKeys[key] = selectPatternKey(candidate, key)
   })
-  const patternKeys = { // 键为各个 Category Key，值为对应 Pattern Key
-    [mainCategoryKey]: selectPatternKey(candidate, mainCategoryKey),
-    ...containedCategoryPatterns
-  }
-  console.log(patternKeys);
+  // console.log(patternKeys);
 
-  // 产出 Pattern Distribution 方案
-  const patternDistribution = decidePatternDistribution(candidate, patternKeys)
+  // Pattern 信息存入 candidate
+  candidate.patternRecord = patternKeys
+
+  // 产出 Pattern Distribution 方案。
+  // skipComplex 当前只作为未来 LLM 复杂分支的保留参数；已有逻辑都是确定性规则，不会因为它改变行为。
+  const patternDistribution = decidePatternDistribution(candidate, skipComplex)
   // 对 Base Schema 应用 Pattern Distribution 方案
-  const patternAppliedBaseSchema = applyCategoryBaseSchemasToDistribution(patternDistribution)
+  const patternAppliedBaseSchema = applyCategoryBaseSchemasToDistribution(candidate, patternDistribution)
 
   // 根据 candidate 创建仅有楼层数的空 Category Schema
-  // TODO 由于目前只支持 House，所以只支持产出 1 个 Category Schema
-  const categorySchema = buildCategorySchemaFromDistribution(patternAppliedBaseSchema, candidate)
-  console.log(`${candidate.detail.featureId}生成的 Category Schema:`);
-  console.log(categorySchema.levels);
+  const categorySchemas = buildCategorySchemaFromDistribution(patternAppliedBaseSchema, candidate)
 
-  if (skipComplex) {
+  // 产出 Sector Distribution 方案。
+  // 同 Pattern Distribution，目前实现尚未接入 LLM，因此这里只负责把参数继续穿透下去。
+  const sectorDistributionSchems = decideSectorDistribution(categorySchemas, candidate, skipComplex)
+  // 填充 Category Schema 没有的细节，生成完整 Building Schema
+  const buildingSchemas = finishBuildingSchema(sectorDistributionSchems, candidate)
+
+  return buildingSchemas;
+}
+
+/**
+ * 为 building schema debug route 构造最小 existingSchemas。
+ *
+ * 住宅模糊分类目前只读取已有 schema 的 category 和 centerPosition；
+ * 因此 debug mock 不需要填充楼层/房间细节，但位置必须与待测 feature 完全一致，
+ * 才能稳定命中“附近已有建筑类型”的判断逻辑。
+ *
+ * @param featureId 待测 building feature id
+ * @param categories 用户在 debug 页输入的已有 BuildingSchema category 列表
+ * @returns mock existingSchemas；若 feature 不存在则返回 undefined
+ */
+export async function buildColocatedDebugBuildingSchemas(
+  featureId: string,
+  categories: string[],
+): Promise<BuildingSchema[] | undefined> {
+  const candidate = await fetchBuildingCandidate(featureId);
+  if (!candidate) {
     return undefined;
   }
 
-  console.log('TODO: LLM 分支');
-  return undefined; // TODO 进入 LLM 分支
+  return categories.map((category, index) => ({
+    featureId: `debug-existing/${index + 1}`,
+    category,
+    centerPosition: candidate.centerPosition,
+    theme: "debug mock schema",
+    levels: {},
+  }));
 }
 
 //#region 主逻辑函数
 // 直接用在 generateBuildingSchema 函数中
 
 const EXPLICIT_HOUSE_BUILDING_VALUES = new Set(["house", "detached", "residential"]);
+const EXPLICIT_APARTMENT_BUILDING_VALUES = new Set(["apartment", "apartments"]);
 const EXPLICIT_GARAGE_BUILDING_VALUES = new Set(["garage", "garages", "carport"]);
 const EXPLICIT_TOOL_SHED_BUILDING_VALUES = new Set(["shed"]);
 
@@ -228,47 +277,44 @@ const ALL_PATTERN_KEYS = [...RESIDENTIAL_PATTERN_KEYS]
  */
 async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandidate | null> {
   const feature = await fetchBuildingFeatureDetailById(featureId);
-  if (!feature) {
-    return null;
-  }
+  if (!feature) return null
 
+  // 寻找该地物是否通过 Relation Reference 指向一个多体建筑
   const relationReference = feature.detail.relationReferences?.find((relation) => {
     return relation.reltags.type === "building";
   });
 
-  // 只有多体建筑的子建筑需要自动提升到 relation；直接传 relation 本体则维持原样。
-  const shouldPromoteToRelation = feature.detail.osmType === "way" && relationReference;
-  if (!shouldPromoteToRelation) {
-    return toResolvedCandidate("single", feature.detail, undefined, feature.areaSqm, feature.centerPosition);
+  // 不指向多体建筑，说明该地物只是单体建筑
+  // 由于 osmNormalization 逻辑当中，relation 会尽可能吸收其子要素，所以不存在 relation 与其子要素同时存在的情况；
+  // 所以这里其实兼顾了普通单体建筑与 relation 吸收其子要素生成的单体建筑
+  if (!relationReference) {
+    const details = [feature.detail];
+    return toResolvedCandidate("single", feature.detail.featureId, details, pickOutlineFeatureId(details), feature.areaSqm, feature.centerPosition);
   }
 
-  const relationFeatureId = `relation/${relationReference.rel}`;
-  const relationSnapshot = await fetchBuildingFeatureDetailById(relationFeatureId);
-  const relationMemberSnapshots = await fetchBuildingRelationMemberSnapshots(relationReference.rel);
-
-  if (!relationSnapshot && relationMemberSnapshots.length === 0) {
-    return toResolvedCandidate("single", feature.detail, undefined, feature.areaSqm, feature.centerPosition);
-  }
-
-  // 寻找 relation 并获取其信息的分支
-  const memberDetails = relationMemberSnapshots.map((snapshot) => snapshot.detail);
-  const relationDetail = relationSnapshot?.detail ?? synthesizeRelationDetail(relationFeatureId, memberDetails);
-  const relationAreaSqm = relationSnapshot?.areaSqm ?? sumAreas(relationMemberSnapshots.map((snapshot) => snapshot.areaSqm));
-  const relationCenterPosition = relationSnapshot?.centerPosition ?? computeMeanCenterPosition(
-    relationMemberSnapshots.map((snapshot) => snapshot.centerPosition),
+  // 多体建筑的子建筑（特征：包含 Relation Reference）
+  const relationMembers = await fetchBuildingRelationMembers(relationReference.rel);
+  const relationMemberDetails = relationMembers.map((snapshot) => snapshot.detail);
+  const outline = pickOutlineFeatureId(relationMemberDetails);
+  const outlineSnapshot = outline ? await fetchBuildingFeatureDetailById(outline) : null;
+  const relationAreaSqm = outlineSnapshot?.areaSqm
+    ?? sumAreas(relationMembers.map((snapshot) => snapshot.areaSqm));
+  const relationCenterPosition = outlineSnapshot?.centerPosition
+    ?? computeMeanCenterPosition(
+      relationMembers.map((snapshot) => snapshot.centerPosition),
   );
 
   return toResolvedCandidate(
     "building_relation",
-    relationDetail,
-    memberDetails,
+    `relation/${relationReference.rel}`, // 虽然此 osmId 的要素真实存在于 osm 的数据库，但不存在于本地数据库
+    relationMemberDetails,
+    outline,
     relationAreaSqm,
     relationCenterPosition || feature.centerPosition,
   );
 }
 
 /**
- * TODO 复合型 Category 目前尚未支持
  * 用强定向 tags / contained POI 直接判定当前候选是否属于已支持的简单类别。
  *
  * 当前顺序刻意偏保守：// TODO 当前只支持住宅
@@ -281,10 +327,15 @@ async function fetchBuildingCandidate(featureId: string): Promise<BuildingCandid
  * @returns category 列表，长度超过1代表复合 Category；若当前阶段仍无法稳定判断则返回空数组
  */
 function resolveExplicitCategory(candidate: BuildingCandidate): string[] {
-  if (isExplicitBuilding(EXPLICIT_GARAGE_BUILDING_VALUES, candidate.detail.tags) || hasContainedPoiTag(candidate, "amenity", ["parking"])) return ["garage"];
-  if (isExplicitBuilding(EXPLICIT_TOOL_SHED_BUILDING_VALUES, candidate.detail.tags)) return ["tool_shed"];
-  if (isExplicitBuilding(EXPLICIT_HOUSE_BUILDING_VALUES, candidate.detail.tags)) return ["house"];
-  return []
+  const category: string[] = []
+  const tagsList = candidate.details.map( d => d.tags )
+  // 以下顺序按照重要程度从大到小排列，保证最主体的分类可以排为复合分类的主分类
+  if (isExplicitBuilding(EXPLICIT_APARTMENT_BUILDING_VALUES, tagsList)) return ["apartment"];
+  if (isExplicitBuilding(EXPLICIT_HOUSE_BUILDING_VALUES, tagsList)) return ["house"];
+  if (isExplicitBuilding(EXPLICIT_GARAGE_BUILDING_VALUES, tagsList) || hasContainedPoiTag(candidate, "amenity", ["parking"])) return ["garage"];
+  if (isExplicitBuilding(EXPLICIT_TOOL_SHED_BUILDING_VALUES, tagsList)) return ["tool_shed"];
+
+  return category
 }
 
 /**
@@ -295,7 +346,7 @@ function resolveExplicitCategory(candidate: BuildingCandidate): string[] {
  */
 async function resolveAmbiguousCategory(
   candidate: BuildingCandidate,
-  existingSchemas: Record<string, BuildingSchema>
+  existingSchemas: BuildingSchema[]
 ): Promise<string[]> {
   return ambiguousResidentialCategory(candidate, existingSchemas);
 }
@@ -314,74 +365,73 @@ function selectPatternKey(
 }
 
 /**
- * TODO 当前是占位符，只返回单一的 PatternDistribution
+ * TODO 当前是占位符，只返回单一的 PatternDistribution。
+ *
+ * skipComplex 表示未来遇到必须靠 LLM 才能抉择的复杂分配时可以直接放弃生成；
+ * 当前实现仍全部是 deterministic fallback，因此接收该参数但暂不改变行为。
  * @param candidate 提供单体建筑或多体建筑
- * @param categoryPatternKeys 键值对分别为 Category Key 和 Pattern Kye
+ * @param skipComplex 是否跳过未来的 LLM-only 复杂分支
  * @returns
  */
-export function decidePatternDistribution(
-  candidate: BuildingCandidate,
-  categoryPatternKeys: Record<string, string>,
-): PatternDistribution {
-  const featureId = candidate.detail.featureId
-  const catPatKeyParis = Object.entries(categoryPatternKeys)
+export function decidePatternDistribution(candidate: BuildingCandidate, skipComplex: boolean = true): PatternDistribution {
+  void skipComplex;
+  const featureIds = candidate.details.map(d => d.featureId)
+  const categoryRecord = candidate.categoryRecord || []
+  const patternRecord = candidate.patternRecord || {}
+  // 把所有 rooms 全部提取到单一 Object
+  const patternRoomsEntries = categoryRecord.flatMap( cat => {
+    const patterns = ALL_CATEGORIES[cat].patterns
+    if (!patterns) return []
+    const patternKey = patternRecord[cat]
+    const rooms = patterns[patternKey].rooms
+    return Object.entries(rooms)
+  })
+  const patternRooms = Object.fromEntries(patternRoomsEntries)
+
+  // 单一建筑就直接组装 patternDistribution
+  if (candidate.scope === 'single' && candidate.details.length === 1) {
+    return {[featureIds[0]]: patternRooms}
+  }
 
   const result: PatternDistribution = {}
-  // 对每个 Category Key 都获取其 Category 内容
-  catPatKeyParis.forEach( ([cat, pat]) => {
-    const category = ALL_CATEGORIES[cat]
-    result[featureId] ??= {categories: [], rooms: {}}
-    result[featureId].categories.push(cat)
-
-    // 连 patterns 都没有的话，根本不存在可供分配的 PatternRoomDefinition
-    // base schema 是不参与分配的
-    if (!category.patterns) {
-      return
-    }
-    const pattern = category.patterns[pat]
-
-    if (candidate.scope === 'single') { // 单一建筑就直接组装 patternDistribution
-      result[featureId].rooms = {...result[featureId].rooms, ...pattern.rooms}
-    } else { // TODO relation Building 应用特殊逻辑（LLM）
-      result[featureId].rooms = {...result[featureId].rooms, ...pattern.rooms}
-    }
-  })
-  return result
+  // TODO 多体建筑未来需要应用特殊逻辑（LLM 或其他）。
+  // 目前还没有非确定性分支，因此即使 skipComplex 为 true 也继续使用第一个 feature 的保守分配。
+  return {[featureIds[0]]: patternRooms}
 }
 
 /**
  * 把各 Category 的 base schema 合并进 Pattern Distribution，保留房间 key。
- *
- * base schema 中的 self 表示当前 category 自身，应用后会改用 category key。
  */
 export function applyCategoryBaseSchemasToDistribution(
+  candidate: BuildingCandidate,
   patternDistribution: PatternDistribution,
 ): PatternDistribution {
-  return Object.fromEntries(
-    Object.entries(patternDistribution).map(([featureId, distribution]) => {
-      const rooms: Record<string, PatternRoomDefinition> = {...distribution.rooms};
+  const categoryRecord = candidate.categoryRecord || []
+  const patternDistributionEntries = Object.entries(patternDistribution)
+  // 提取所有 base schema 到单一 Object
+  const baseSchemaEntries = categoryRecord.flatMap( cat => {
+    const baseSchema = ALL_CATEGORIES[cat].base_schema
+    if (!baseSchema) return []
+    return Object.entries(baseSchema.rooms).flatMap(([roomKey, room]) => {
+      if (room === true) return []
 
-      for (const categoryKey of distribution.categories) {
-        const category = ALL_CATEGORIES[categoryKey];
-        const baseSchema = category.base_schema;
-        if (!baseSchema) continue;
-
-        for (const [baseRoomKey, baseRoom] of Object.entries(baseSchema.rooms) as Array<[string, true | PatternRoomDefinition]>) {
-          const roomKey = baseRoomKey === "self" ? categoryKey : baseRoomKey;
-          const roomDefinition: PatternRoomDefinition = baseRoom === true ? {} : baseRoom;
-          rooms[roomKey] = {
-            desc: category.desc,
-            ...roomDefinition,
-          };
-        }
+      if (roomKey === "self") {
+        // self 只表示“该 Category 本体就是一个房间功能”，最终 Schema 仍使用 Category Key 与 Category 描述。
+        return [[cat, {
+          ...room,
+          desc: ALL_CATEGORIES[cat].desc,
+        }]]
       }
 
-      return [featureId, {
-        categories: [...distribution.categories],
-        rooms,
-      }];
-    }),
-  );
+      return [[roomKey, room]]
+    })
+  })
+  const baseSchemaApplied = patternDistributionEntries.map( ([featureId, roomDefs]) => {
+    // 每个 Category 里的 base schema 都会应用给所有子建筑
+    const baseSchemaAppliedRoomDefs = {...roomDefs, ...Object.fromEntries(baseSchemaEntries)}
+    return [featureId, baseSchemaAppliedRoomDefs]
+  })
+  return Object.fromEntries(baseSchemaApplied)
 }
 
 /**
@@ -393,12 +443,80 @@ export function applyCategoryBaseSchemasToDistribution(
 function buildCategorySchemaFromDistribution(
   appliedBaseSchema: PatternDistribution,
   candidate: BuildingCandidate,
-): CategorySchema {
-  return buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate)
+): Record<FeatureId, CategorySchema> {
+  // 当前 schema builder 只支持住宅类；按主 Category 分支，避免独立附属建筑复用住宅楼层语义。
+  const mainCategory = candidate.categoryRecord?.[0];
+  if (mainCategory === "house") {
+    return buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate)
+  }
+  if (mainCategory === "apartment") {
+    return buildApartmentCategorySchemaFromDistribution(appliedBaseSchema, candidate)
+  }
+  if (mainCategory === "garage" || mainCategory === "tool_shed") {
+    return buildResidentialAccessoryCategorySchemaFromDistribution(appliedBaseSchema, candidate)
+  }
+  return {}
 }
 
-function decideSectorDistribution() {
+/**
+ * TODO 当前是占位符，只返回单一的 SectorDistribution。
+ *
+ * skipComplex 表示未来遇到必须靠 LLM 才能抉择的复杂分区时可以直接放弃生成；
+ * 当前 sector 分配只创建 main sector，因此接收该参数但暂不改变行为。
+ * @param categorySchema
+ * @param candidate
+ * @param skipComplex 是否跳过未来的 LLM-only 复杂分支
+ */
+function decideSectorDistribution(
+  categorySchemas: Record<FeatureId, CategorySchema>,
+  candidate: BuildingCandidate,
+  skipComplex: boolean = true,
+): Record<FeatureId, SectorDistributionSchem> {
+  void skipComplex;
+  const result: Record<FeatureId, SectorDistributionSchem> = {}
+  Object.entries(categorySchemas).forEach(([featureId, schema]) => {
+    const levelsEntries = Object.entries(schema.levels)
+    const levelsSectorEntries = levelsEntries.map( ([key, level]) => {
+      return [key, {
+        theme: level.theme,
+        span: level.span,
+        sectors: {main: {
+          area: candidate.areaSqm ?? 0,
+          centerPosition: candidate.centerPosition,
+          rooms: level.rooms,
+        }}
+      }]
+    })
+    result[featureId] = {
+      theme: schema.theme,
+      levels: Object.fromEntries(levelsSectorEntries)
+    }
+  })
+  return result
+}
 
+/**
+ * TODO 目前暂只支持住宅区
+ * @param schema
+ * @param candidate
+ * @returns
+ */
+function finishBuildingSchema(
+  schemas: Record<FeatureId, SectorDistributionSchem>,
+  candidate: BuildingCandidate,
+): Record<FeatureId, BuildingSchema> {
+  // 收尾同样按主 Category 分支；住宅主体需要入口/楼梯等补全，独立附属建筑不需要。
+  const mainCategory = candidate.categoryRecord?.[0];
+  if (mainCategory === "house") {
+    return finishHouseBuildingSchema(schemas, candidate)
+  }
+  if (mainCategory === "apartment") {
+    return finishApartmentBuildingSchema(schemas, candidate)
+  }
+  if (mainCategory === "garage" || mainCategory === "tool_shed") {
+    return finishResidentialAccessoryBuildingSchema(schemas, candidate)
+  }
+  return {}
 }
 
 //#region 共用逻辑函数
@@ -450,7 +568,7 @@ async function fetchBuildingFeatureDetailById(
  * @param relationOsmId building relation 的 osm id
  * @returns 每个成员建筑对应的 detail + 面积快照
  */
-async function fetchBuildingRelationMemberSnapshots(
+async function fetchBuildingRelationMembers(
   relationOsmId: number,
 ): Promise<Array<{ detail: FeatureDetail; areaSqm: number | null; centerPosition: Position }>> {
   const sql = await fetchBuildingRelationMemberDetailsSqlPromise;
@@ -504,71 +622,44 @@ export function parseCompositeCategoryKey(categoryKey: string): {
 }
 
 /**
- * TODO 不要做成合成虚假 FeatureDetail，这样会阻碍后续 Pattern Distribution。
- *
- * 当 relation 本体自身无法直接查到完整细节时，
- * 使用其 member 建筑合成一个虚假的 relation 级 FeatureDetail。
- *
- * @param featureId relation 级 feature id
- * @param memberDetails 属于该 relation 的成员建筑细节
- * @returns 合成后的 relation 级 FeatureDetail（其实是假的，不存在于数据库中）
- */
-function synthesizeRelationDetail(featureId: string, memberDetails: FeatureDetail[]): FeatureDetail {
-  const parsed = parseBuildingFeatureId(featureId);
-  // member 上的 tags 只做“主值缺失时补洞”，避免次级成员覆盖掉主成员上更明确的标签。
-  const tags = memberDetails.reduce<Record<string, string>>(
-    (mergedTags, memberDetail) => mergeStringRecord(mergedTags, memberDetail.tags),
-    {},
-  );
-  const outlineReferences = dedupeOutlineReferences(
-    memberDetails.flatMap((memberDetail) => memberDetail.outlineReferences || []),
-  );
-  const containedPoisReferences = memberDetails.flatMap((memberDetail) => memberDetail.containedPoisReferences || []);
-
-  return {
-    featureId,
-    osmType: parsed.osmType,
-    osmId: parsed.osmId,
-    category: "building",
-    geometryType: "MultiPolygon",
-    tags,
-    relationReferences: [],
-    outlineReferences,
-    containedPoisReferences: containedPoisReferences.length > 0 ? containedPoisReferences : undefined,
-  };
-}
-
-/**
  * 把原始 detail 与衍生指标一起打包成分类阶段统一使用的候选结构。
  *
  * 衍生指标目前只包括面积、楼层数与高度，且优先使用主 detail，
- * 在缺失时再从 member 建筑中推断。
+ * 在缺失时再从其余 detail 中推断。
  *
  * @param scope 当前候选是单体建筑还是 relation 级建筑
- * @param detail 主体建筑 detail
- * @param memberDetails relation 级时的成员建筑细节
+ * @param featureId 当前候选身份 id
+ * @param details 当前候选关联的真实建筑细节
+ * @param outline relation outline 对应的 feature id
  * @param areaSqm 已解析出的面积
  * @returns 分类阶段统一使用的候选结构
  */
 function toResolvedCandidate(
   scope: ScopeType,
-  detail: FeatureDetail,
-  memberDetails: FeatureDetail[] | undefined,
+  featureId: FeatureId,
+  details: FeatureDetail[],
+  outline: FeatureId | undefined,
   areaSqm: number | null,
   centerPosition: Position,
 ): BuildingCandidate {
-  const buildingLevels = parseBuildingLevels(detail.tags) ?? inferLevelsFromMembers(memberDetails);
-  const heightMeters = parseHeightMeters(detail.tags.height) ?? inferHeightFromMembers(memberDetails);
+  const [primaryDetail, ...secondaryDetails] = details;
+  if (!primaryDetail) {
+    throw new Error(`BuildingCandidate ${featureId} has no feature details.`);
+  }
+
+  const buildingLevels = parseBuildingLevels(primaryDetail.tags) ?? inferLevelsFromDetails(secondaryDetails);
+  const heightMeters = parseHeightMeters(primaryDetail.tags.height) ?? inferHeightFromDetails(secondaryDetails);
 
   return {
+    featureId,
     scope,
-    detail,
-    memberDetails,
+    details,
+    outline,
     areaSqm,
     centerPosition,
     buildingLevels,
     heightMeters,
-    buildingValue: trimTagValue(detail.tags.building),
+    buildingValue: trimTagValue(primaryDetail.tags.building),
   };
 }
 
@@ -586,6 +677,20 @@ export function parseBuildingFeatureId(featureId: string): { osmType: string; os
   const [osmType, osmIdText] = featureId.split("/");
   const osmId = Number.parseInt(osmIdText, 10);
   return { osmType, osmId };
+}
+
+/**
+ * 找出该地物的 Outline Reference 所指的地物
+ * @param details
+ * @returns
+ */
+function pickOutlineFeatureId(details: FeatureDetail[]): FeatureId | undefined {
+  const outlineReference = details.flatMap((detail) => detail.outlineReferences || [])[0];
+  if (!outlineReference) {
+    return undefined;
+  }
+
+  return `${outlineReference.osmType}/${outlineReference.osmId}`;
 }
 
 
@@ -637,18 +742,18 @@ function parseHeightMeters(value: string | undefined): number | null {
 }
 
 /**
- * 在主 detail 缺少楼层信息时，使用 member 建筑中的最大楼层数作为保守推断。
+ * 在主 detail 缺少楼层信息时，使用其余 detail 中的最大楼层数作为保守推断。
  *
- * @param memberDetails relation 成员建筑细节
+ * @param details 可用于补充推断的建筑细节
  * @returns 推断出的楼层数；若无法推断则返回 null
  */
-function inferLevelsFromMembers(memberDetails: FeatureDetail[] | undefined): number | null {
-  if (!memberDetails || memberDetails.length === 0) {
+function inferLevelsFromDetails(details: FeatureDetail[]): number | null {
+  if (details.length === 0) {
     return null;
   }
 
-  const levels = memberDetails
-    .map((memberDetail) => parseBuildingLevels(memberDetail.tags))
+  const levels = details
+    .map((detail) => parseBuildingLevels(detail.tags))
     .filter((value): value is number => value !== null);
 
   if (levels.length === 0) {
@@ -659,18 +764,18 @@ function inferLevelsFromMembers(memberDetails: FeatureDetail[] | undefined): num
 }
 
 /**
- * 在主 detail 缺少高度信息时，使用 member 建筑中的最大高度作为保守推断。
+ * 在主 detail 缺少高度信息时，使用其余 detail 中的最大高度作为保守推断。
  *
- * @param memberDetails relation 成员建筑细节
+ * @param details 可用于补充推断的建筑细节
  * @returns 推断出的高度；若无法推断则返回 null
  */
-function inferHeightFromMembers(memberDetails: FeatureDetail[] | undefined): number | null {
-  if (!memberDetails || memberDetails.length === 0) {
+function inferHeightFromDetails(details: FeatureDetail[]): number | null {
+  if (details.length === 0) {
     return null;
   }
 
-  const heights = memberDetails
-    .map((memberDetail) => parseHeightMeters(memberDetail.tags.height))
+  const heights = details
+    .map((detail) => parseHeightMeters(detail.tags.height))
     .filter((value): value is number => value !== null);
 
   if (heights.length === 0) {
@@ -681,7 +786,8 @@ function inferHeightFromMembers(memberDetails: FeatureDetail[] | undefined): num
 }
 
 /**
- * TODO: 不合理，容易多算重叠部分的面积
+ * TODO: 不合理，容易多算重叠部分的面积；也许可以靠读取 outline 建筑的面积
+ *
  * 对一组可空面积求和；若没有任何有效面积，则保留 null。
  *
  * @param areas 待求和的面积列表
@@ -694,24 +800,6 @@ function sumAreas(areas: Array<number | null>): number | null {
   }
 
   return finiteAreas.reduce((sum, area) => sum + area, 0);
-}
-
-/**
- * 以 primary 为高优先级合并两份 tags，只在主值缺失时使用 fallback 补洞。
- *
- * @param primary 高优先级 tags
- * @param fallback 仅用于补洞的次级 tags
- * @returns 合并后的 tags
- */
-function mergeStringRecord(primary: Record<string, string>, fallback: Record<string, string>): Record<string, string> {
-  const merged = { ...primary };
-  for (const [key, value] of Object.entries(fallback)) {
-    if (!(key in merged)) {
-      merged[key] = value;
-    }
-  }
-
-  return merged;
 }
 
 function computeMeanCenterPosition(positions: Position[]): Position | null {
@@ -750,7 +838,9 @@ function hasContainedPoiTag(
   values: string[],
 ): boolean {
   const valueSet = new Set(values);
-  return (candidate.detail.containedPoisReferences || []).some((poi) => {
+  // 把所有 details 包含的 poi 全部列在一起
+  const allContainedPoisRefs = candidate.details.flatMap(detail => detail.containedPoisReferences || [])
+  return allContainedPoisRefs.some((poi) => {
     const tagValue = trimTagValue(poi.tags[key]);
     return tagValue !== null && valueSet.has(tagValue);
   });
@@ -764,7 +854,6 @@ function hasContainedPoiTag(
  */
 export function weightedBoolean(supportingWeight: number, nonSupportingWeight: number): boolean {
   const totalWeight = supportingWeight + nonSupportingWeight;
-  if (totalWeight === 0) return Math.random() < 0.5; // 总权重为0说明无决定因素，则完全随机
   return Math.random() * totalWeight < supportingWeight;
 }
 
@@ -782,9 +871,9 @@ export function pickRandom<T>(values: T[]): T {
 /**
  * 判断 tags 是否直接指向 explicitTagSets 所指代的建筑
  *
- * @param tags building tags
+ * @param tagsList 所有 details 的 building tags
  * @returns 是否命中
  */
-function isExplicitBuilding(explicitTagSets: Set<string>, tags: Record<string, string>): boolean {
-  return explicitTagSets.has(trimTagValue(tags.building) || "");
+function isExplicitBuilding(explicitTagSets: Set<string>, tagsList: Record<string, string>[]): boolean {
+  return tagsList.some( tags => explicitTagSets.has(trimTagValue(tags.building) || ""));
 }

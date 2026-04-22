@@ -20,7 +20,7 @@ import { buildScenePrompt } from '@/services/scene/scenePrompt.js';
 import { getRuntimeSession, toClientGameSessionSnapshot } from '@/services/gameSystem/gameSessionStore.js';
 import { streamGameStart, streamGameTurn, type GameStreamEvent } from '@/services/gameSystem/gameChat.js';
 import type { Response } from 'express';
-import { generateBuildingSchema } from '@/services/gameSystem/buildingClassifier.js';
+import { buildColocatedDebugBuildingSchemas, generateBuildingSchema } from '@/services/gameSystem/buildingClassifier.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;
@@ -34,6 +34,12 @@ interface OverpassRequestBody {
 interface GameTurnRequestBody {
   sessionId?: string;
   message?: string;
+}
+
+interface DebugBuildingSchemaRequestBody {
+  featureId?: unknown;
+  existingSchemaCategories?: unknown;
+  skipComplex?: unknown;
 }
 
 interface OrientedDebugRequestBody extends Partial<RangedPosition> {
@@ -185,6 +191,43 @@ function parsePosition(body: Partial<RangedPosition>) {
       lon,
     },
   } as const;
+}
+
+function parseDebugBuildingSchemaRequest(body: DebugBuildingSchemaRequestBody):
+  | { value: { featureId: string; existingSchemaCategories: string[]; skipComplex: boolean } }
+  | { error: string } {
+  const featureId = typeof body.featureId === 'string' ? body.featureId.trim() : '';
+  if (!featureId) {
+    return { error: 'featureId is required.' };
+  }
+
+  if (!Array.isArray(body.existingSchemaCategories)) {
+    return { error: 'existingSchemaCategories must be an array of strings.' };
+  }
+
+  if (typeof body.skipComplex !== 'boolean') {
+    return { error: 'skipComplex must be a boolean.' };
+  }
+
+  const existingSchemaCategories: string[] = [];
+  for (const category of body.existingSchemaCategories) {
+    if (typeof category !== 'string') {
+      return { error: 'existingSchemaCategories must be an array of strings.' };
+    }
+
+    const trimmed = category.trim();
+    if (trimmed) {
+      existingSchemaCategories.push(trimmed);
+    }
+  }
+
+  return {
+    value: {
+      featureId,
+      existingSchemaCategories,
+      skipComplex: body.skipComplex,
+    },
+  };
 }
 
 /**
@@ -356,6 +399,38 @@ apiRouter.post('/debug/overpass', async (request, response) => {
   }
 });
 
+apiRouter.post('/debug/building-schema', async (request, response) => {
+  const parsed = parseDebugBuildingSchemaRequest(request.body as DebugBuildingSchemaRequestBody);
+  if ('error' in parsed) {
+    response.status(400).json({ error: parsed.error });
+    return;
+  }
+
+  const { featureId, existingSchemaCategories, skipComplex } = parsed.value;
+
+  try {
+    // Debug 页只 mock category 与共址 centerPosition；住宅模糊分类当前只依赖这两项附近上下文。
+    const existingSchemas = await buildColocatedDebugBuildingSchemas(featureId, existingSchemaCategories);
+    if (!existingSchemas) {
+      response.status(404).json({ error: 'Building feature not found.' });
+      return;
+    }
+
+    const schemas = await generateBuildingSchema(featureId, existingSchemas, skipComplex);
+
+    response.json({
+      featureId,
+      skipComplex,
+      existingSchemaCategories,
+      schemas: schemas ?? {},
+    });
+  } catch (error) {
+    response.status(502).json({
+      error: error instanceof Error ? error.message : 'Unexpected building schema debug error.',
+    });
+  }
+});
+
 apiRouter.post('/debug/db/sync-overpass', async (request, response) => {
   const parsed = parseNormalizedRequest(request.body as RangedPosition);
 
@@ -465,7 +540,7 @@ apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
       ...(polarView?.levels.flatMap( l => l.clusters.flatMap( c => c.features.flatMap( f => f.featureId))) ?? [])
     ]
     featureIds.forEach(async id => {
-      const b = await generateBuildingSchema(id, {})
+      const b = await generateBuildingSchema(id, [])
       // if (b) console.log(b)
     }) // TODO 当前仅打印
     const scenePrompt = buildScenePrompt(sceneObject, playerOrientation)
