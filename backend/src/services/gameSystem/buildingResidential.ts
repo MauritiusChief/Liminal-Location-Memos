@@ -201,7 +201,7 @@ const RESIDENTIAL_LEVEL_EVENT_THEMES: Record<string, Record<string, string[]>> =
   garage: {default_floor: []},
   tool_shed: {default_floor: []},
 };
-const RESIDENTIAL_SUITE_EVENT_THEMES = {
+const RESIDENTIAL_SUITE_EVENT_THEMES: Record<string, Record<string, string[]>> = {
   studio_suite: {
     studio: [],
     seperate_bedroom: [],
@@ -214,7 +214,7 @@ const RESIDENTIAL_SUITE_EVENT_THEMES = {
 const RESIDENTIAL_FALLBACK_THEME = "普通的建筑";
 
 // 套房模板只描述套房内部有哪些子房间；具体数量在收尾阶段按套房数量折算。
-const RESIDENTIAL_SUITE_TEMPLATES: Record<string, ApartmentSuiteTemplate[]> = {
+const RESIDENTIAL_SUITE_TEMPLATES: Record<string, Record<string, ApartmentSuiteTemplate>> = {
   studio_suite: {
     studio: {
       living_room: { desc: "卧室、客厅、厨房一体空间" },
@@ -248,6 +248,7 @@ const RESIDENTIAL_SUITE_TEMPLATES: Record<string, ApartmentSuiteTemplate[]> = {
     },
   },
 };
+const RESIDENTIAL_SUITE_KEYS = Object.keys(RESIDENTIAL_SUITE_TEMPLATES)
 
 
 //#####################
@@ -792,7 +793,7 @@ function resolveApartmentCategorySchemaLevelKey(
   roomKey: string,
   prefered: string | undefined,
 ): string {
-  if (isApartmentSuiteRoomKey(roomKey)) return APARTMENT_FLOORS[1];
+  if (RESIDENTIAL_SUITE_KEYS.includes(roomKey)) return APARTMENT_FLOORS[1];
   if (prefered === ALL_LEVELS[0]) return APARTMENT_FLOORS[1];
   if (TOP_LEVEL.includes(prefered ?? "")) return APARTMENT_FLOORS[1];
   return APARTMENT_FLOORS[0];
@@ -923,7 +924,7 @@ export function finishApartmentBuildingSchema(
       Object.entries(schema.levels).map(([levelKey, level]) => {
         const sectors = Object.fromEntries(
           Object.entries(level.sectors).map(([sectorKey, sector]) => {
-            const rooms = resolveApartmentSectorRooms(candidate, levelKey, sector.rooms);
+            const rooms = resolveApartmentSectorRooms(candidate, levelKey, level.theme, sector.rooms);
 
             // 公寓入口与垂直交通是整栋建筑级能力，不属于任何单个套房。
             applyApartmentAccessRooms(levelKey, rooms);
@@ -1012,15 +1013,17 @@ function resolveResidentialSectorRooms(
 function resolveApartmentSectorRooms(
   candidate: BuildingCandidate,
   levelKey: string,
+  levelTheme: string,
   rooms: Record<string, CategoryRoomSchema>,
 ): Record<string, RoomSchema | SuiteSchema> {
   const result: Record<string, RoomSchema | SuiteSchema> = {}
 
   Object.entries(rooms).forEach(([roomKey, room]) => {
-    if (isApartmentSuiteRoomKey(roomKey)) {
-      const suite = buildApartmentSuiteSchema(roomKey);
+    if (RESIDENTIAL_SUITE_KEYS.includes(roomKey)) {
+      const suite = buildApartmentSuiteSchema(roomKey, levelTheme);
       const suiteCount = determineApartmentSuiteCount(candidate, levelKey);
       result[roomKey] = {
+        theme: suite.theme,
         // SuiteSchema 自身没有 count 字段，因此把“本层有几套同模板套房”折算到子房间数量上。
         subRooms: suite.subRooms.map((subRoom) => ({
           ...subRoom,
@@ -1043,11 +1046,14 @@ function resolveApartmentSectorRooms(
 /**
  * 从指定套房类型的模板池中抽样，把模板中的 desc/chance 转成最终子房间。
  * @param suiteKey suite 房间 key
+ * @param fallbackTheme 没有触发 suite 随机事件时继承的楼层 theme
  * @returns 可写入 BuildingSchema 的 SuiteSchema
  */
-function buildApartmentSuiteSchema(suiteKey: string): SuiteSchema {
-  const templates = APARTMENT_SUITE_TEMPLATES[suiteKey] ?? APARTMENT_SUITE_TEMPLATES[STUDIO_SUITE_ROOM_KEY];
-  const template = pickRandom(templates);
+function buildApartmentSuiteSchema(suiteKey: string, fallbackTheme: string): SuiteSchema {
+  const templates = RESIDENTIAL_SUITE_TEMPLATES[suiteKey] ?? `出错：模板中不存在${suiteKey}`;
+  const templateKey = pickRandom(Object.keys(templates));
+  const template = templates[templateKey];
+  const theme = pickResidentialSuiteEventTheme(suiteKey, templateKey) ?? fallbackTheme;
   const subRooms = Object.entries(template).flatMap(([roomKey, definition]) => {
     if (definition.chance && 1 - definition.chance > Math.random()) return []
     return [{
@@ -1056,11 +1062,18 @@ function buildApartmentSuiteSchema(suiteKey: string): SuiteSchema {
     }];
   });
 
-  return { subRooms };
+  return { theme, subRooms };
+}
+
+function pickResidentialSuiteEventTheme(
+  suiteKey: string,
+  templateKey: string,
+): string | null {
+  return pickResidentialEventTheme(RESIDENTIAL_SUITE_EVENT_THEMES[suiteKey]?.[templateKey]);
 }
 
 /**
- * 用面积与楼层粗略估算每个居住层中的套房数量。
+ * 用单层面积与楼层粗略估算每个居住层中的套房数量。
  * @param candidate
  * @param levelKey
  * @returns
@@ -1071,13 +1084,8 @@ function determineApartmentSuiteCount(
 ): number {
   if (levelKey !== APARTMENT_FLOORS[1]) return 1;
 
-  const buildingLevels = Math.max(APARTMENT_LEVELS_MIN, candidate.buildingLevels ?? APARTMENT_LEVELS_MIN);
-  const floorArea = (candidate.areaSqm ?? APARTMENT_SUITE_AREA_SQM) / buildingLevels;
+  const floorArea = (candidate.areaSqm ?? APARTMENT_SUITE_AREA_SQM);
   return Math.max(1, Math.floor(floorArea / APARTMENT_SUITE_AREA_SQM));
-}
-
-function isApartmentSuiteRoomKey(roomKey: string): boolean {
-  return roomKey.endsWith("_suite");
 }
 
 /**

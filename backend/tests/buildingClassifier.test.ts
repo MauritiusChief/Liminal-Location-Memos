@@ -193,7 +193,7 @@ describe("building residential schema generation", () => {
     expect(residentialRooms.stairwell).toEqual({ descrption: "楼梯间", count: 1, access: "vertical" });
     expect("subRooms" in suite).toBe(true);
     if ("subRooms" in suite) {
-      expect("theme" in suite).toBe(false);
+      expect(suite.theme).toBe("普通的公寓楼");
       expect(suite.subRooms).toEqual([
         { descrption: "卧室、客厅、厨房一体空间", count: 2 },
         { descrption: "带厕所浴室", count: 2 },
@@ -247,12 +247,13 @@ describe("building residential schema generation", () => {
 
     expect("subRooms" in standardSuite).toBe(true);
     if ("subRooms" in standardSuite) {
-      expect("theme" in standardSuite).toBe(false);
+      expect(standardSuite.theme).toBe("普通的公寓楼");
       expect(standardSuite.subRooms).toEqual([
         { descrption: "卧室", count: 2 },
         { descrption: "客厅", count: 2 },
         { descrption: "带餐厅的厨房", count: 2 },
-        { descrption: "带厕所浴室", count: 2 },
+        { descrption: "浴室", count: 2 },
+        { descrption: "厕所", count: 2 },
         { descrption: "儿童卧室", count: 2 },
         { descrption: "办公室", count: 2 },
         { descrption: "储物间", count: 2 },
@@ -260,6 +261,7 @@ describe("building residential schema generation", () => {
     }
     expect("subRooms" in studioSuite).toBe(true);
     if ("subRooms" in studioSuite) {
+      expect(studioSuite.theme).toBe("普通的公寓楼");
       expect(studioSuite.subRooms).toEqual([
         { descrption: "卧室", count: 2 },
         { descrption: "与厨房相连的客厅", count: 2 },
