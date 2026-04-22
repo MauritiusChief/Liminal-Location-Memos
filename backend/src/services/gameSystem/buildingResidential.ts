@@ -421,6 +421,13 @@ async function determineResidentialBuildingKind(candidate: BuildingCandidate): P
     return "apartment";
   }
 
+  if ( // 面积超大且处在居住区，那只能是公寓了
+    areaSqm !== null
+    && areaSqm >= APARTMENT_AREA_MIN_SQM * 5
+  ) {
+    return "apartment";
+  }
+
   if ( // 没有其他建筑，按独栋住宅处理
     areaSqm === null
     || neighborSampleCount === null
@@ -924,7 +931,7 @@ export function finishApartmentBuildingSchema(
             const rooms = resolveApartmentSectorRooms(candidate, levelKey, level.theme, sector.rooms);
 
             // 公寓入口与垂直交通是整栋建筑级能力，不属于任何单个套房。
-            applyApartmentAccessRooms(levelKey, rooms);
+            applyApartmentAccessRooms(candidate, levelKey, rooms);
 
             return [sectorKey, {
               area: sector.area,
@@ -1181,6 +1188,7 @@ function applyHouseAccessRooms(
  * @param rooms
  */
 function applyApartmentAccessRooms(
+  candidate: BuildingCandidate,
   levelKey: string,
   rooms: Record<string, RoomSchema | SuiteSchema>,
 ): void {
@@ -1189,6 +1197,13 @@ function applyApartmentAccessRooms(
       descrption: "公寓大厅",
       count: 1,
       access: "entrance",
+    };
+  }
+
+  if (levelKey === APARTMENT_FLOORS[1]) {
+    rooms.hall = {
+      descrption: "走廊",
+      count: 1,
     };
   }
 
