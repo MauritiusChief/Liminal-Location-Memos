@@ -104,9 +104,10 @@ export const RESIDENTIAL_CATEGORIES: Record<string, CategoryDefinition> = {
   // 公寓
   apartment: {desc: "公寓楼",
     base_schema: {rooms: {
-      cleaning_room: {desc: "清洁间", prefered: GROUND_LEVEL[0]},
+      janitor_room: {desc: "清洁间", prefered: GROUND_LEVEL[0]},
       trash_room: {desc: "垃圾站", prefered: GROUND_LEVEL[0]},
-      electrical_room: {desc: "配电间", prefered: GROUND_LEVEL[0]},
+      electrical_room: {desc: "配电间", prefered: ALL_LEVELS[0]},
+      storage_unit: {desc: "迷你自存仓", prefered: GROUND_LEVEL[0], chance: 0.2},
     }},
     patterns: {
       studio_apt: {desc: "以小型单间公寓为主的公寓楼", rooms: {
@@ -1034,6 +1035,15 @@ function resolveApartmentSectorRooms(
       return
     }
 
+    if (roomKey === "storage_unit") {
+      result[roomKey] = {
+        descrption: room.descrption,
+        count: Math.ceil(4 + Math.random() * 8), // 迷你自存仓一般有多个
+        ...(room.access ? { access: room.access } : {}),
+      };
+      return
+    }
+
     result[roomKey] = {
       descrption: room.descrption,
       count: 1,
@@ -1329,6 +1339,11 @@ function applyApartmentAccessRooms(
 
   rooms.stairwell = {
     descrption: "楼梯间",
+    count: 1,
+    access: "vertical",
+  };
+  rooms.elevator = {
+    descrption: "电梯",
     count: 1,
     access: "vertical",
   };
