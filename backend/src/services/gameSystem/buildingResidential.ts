@@ -20,15 +20,22 @@ interface DbNearbyParkingSignalRow {
 
 //#region 常量
 
+// 下列常量特指功能空间的位置，只会出现在 CategoryDefinition 中
 const TOP_LEVEL = ["top_level", "second_to_top_level", "third_to_top_level"];
 const GROUND_LEVEL = ["ground_level", "second_level", "third_level"];
 const ALL_LEVELS = ["all_levels"];
+const ROOF_LEVEL = "roof_level" // 目前共享“屋顶下的阁楼”与“平房的露天屋顶”含义
+const BASE_LEVEL = "base_level"
 
+// 下列常量特指功能空间的名字，只会出现在 C-Schema 以及后续 Schema 中
 /**
- * House 仅可出现的三种楼层
+ * House 仅可安放常规功能空间的三种楼层
  */
-const HOUSE_LEVELS = ["ground_floor", "middle_floor", "top_floor"]
-const ACCESSORY_DEFAULT_LEVEL = "default_floor";
+const HOUSE_FLOORS = ["ground_floor", "middle_floor", "top_floor"];
+const ACCESSORY_DEFAULT_FLOOR = "default_floor";
+const ROOF_FLOOR = "roof";
+const ATTIC_FLOOR = "attic"
+const BASE_FLOOR = "basement";
 
 /**
  * 兼作分类结果（单独把 key 提取出来）和 Pattern 记录
@@ -37,6 +44,10 @@ const ACCESSORY_DEFAULT_LEVEL = "default_floor";
  */
 export const RESIDENTIAL_CATEGORIES: Record<string, CategoryDefinition> = {
   house: {desc: "住宅",
+    base_schema: {rooms: {
+      storage: {desc: "杂物存储空间", prefered: ROOF_LEVEL, chance: 0.5},
+      hvac: {desc: "空调-通风-供暖(HVAC)系统", prefered: ROOF_LEVEL},
+    }},
     patterns: {
       studio: {desc: "仅卧室、客厅、浴室的简单布局", rooms: {
         bedroom: {desc: "卧室", prefered: TOP_LEVEL[0]},
@@ -135,9 +146,11 @@ const RESIDENTIAL_CATEGORY_EVENT_THEMES: Record<string, string[]> = {
 
 const RESIDENTIAL_LEVEL_EVENT_THEMES: Record<string, Record<string, string[]>> = {
   house: {
+    basement: [],
     ground_floor: [],
     middle_floor: [],
     top_floor: [],
+    attic: [],
   },
   garage: {default_floor: []},
   tool_shed: {default_floor: []},
@@ -429,6 +442,12 @@ export function buildHouseCategorySchemaFromDistribution(
         rooms: {}, // 等待后续装填
       }
     }
+    levels[ATTIC_FLOOR] = { // 添加阁楼
+      theme: pickResidentialLevelEventTheme(mainCategory, ATTIC_FLOOR) ?? schemaTheme,
+      span: [buildingLevels+1],
+      rooms: {},
+    }
+    // TODO 添加地下室
 
     // 每个建筑所对应的功能房间都要决定一次装填到哪个楼层
     Object.entries(roomDefs).forEach(([roomKey, definition]) => {
@@ -472,7 +491,7 @@ export function buildResidentialAccessoryCategorySchemaFromDistribution(
   const result: Record<FeatureId, CategorySchema> = {}
   Object.entries(appliedBaseSchema).forEach(([featureId, roomDefs]) => {
     const level: CategoryLevelSchema = {
-      theme: pickResidentialLevelEventTheme(mainCategory, ACCESSORY_DEFAULT_LEVEL) ?? schemaTheme,
+      theme: pickResidentialLevelEventTheme(mainCategory, ACCESSORY_DEFAULT_FLOOR) ?? schemaTheme,
       span: [1],
       rooms: {},
     };
@@ -488,7 +507,7 @@ export function buildResidentialAccessoryCategorySchemaFromDistribution(
     result[featureId] = {
       theme: schemaTheme,
       levels: {
-        [ACCESSORY_DEFAULT_LEVEL]: level,
+        [ACCESSORY_DEFAULT_FLOOR]: level,
       },
     }
   });
@@ -522,15 +541,22 @@ function pickResidentialEventTheme(
   return pickRandom(eventThemes);
 }
 
+/**
+ * 根据 House 的建筑总楼层和当前楼层，返回当前这个楼层应该叫什么名字
+ * @param levelNumber
+ * @param buildingLevels
+ * @returns
+ */
 function resolveHouseConcreteLevelKey(levelNumber: number, buildingLevels: number): string {
-  if (buildingLevels === 1) return HOUSE_LEVELS[0];
-  if (levelNumber === 1) return HOUSE_LEVELS[0];
-  if (levelNumber === buildingLevels) return HOUSE_LEVELS[2];
-  return HOUSE_LEVELS[1];
+  if (buildingLevels === 1) return HOUSE_FLOORS[0];
+  if (levelNumber === 1) return HOUSE_FLOORS[0];
+  if (levelNumber === buildingLevels) return HOUSE_FLOORS[2];
+  return HOUSE_FLOORS[1];
 }
 
 /**
  * 通过各种条件，选出 House 当中最适合填入某个建筑的楼层 key。
+ * 相当于把位置 key 转化为具体楼层名字。
  * @param prefered
  * @param levels
  * @param concreteLevelKeys 可被填的所有楼层
@@ -541,21 +567,19 @@ function resolveHouseCategorySchemaLevelKeys(
   levels: Record<string, CategoryLevelSchema>,
   concreteLevelKeys: string[],
 ): string[] {
-  if (prefered === ALL_LEVELS[0]) {
-    return concreteLevelKeys;
-  }
+  if (prefered === ALL_LEVELS[0]) return concreteLevelKeys;
 
-  if (prefered && TOP_LEVEL.includes(prefered)) {
-    return [concreteLevelKeys[concreteLevelKeys.length - 1]];
-  }
+  if (!prefered) return [pickRandom(concreteLevelKeys)];
 
-  if (prefered && GROUND_LEVEL.includes(prefered)) {
-    return [concreteLevelKeys[0]];
-  }
+  if (TOP_LEVEL.includes(prefered)) return [concreteLevelKeys[concreteLevelKeys.length - 1]];
 
-  if (prefered && levels[prefered]) {
-    return [prefered];
-  }
+  if (GROUND_LEVEL.includes(prefered)) return [concreteLevelKeys[0]];
+
+  if (prefered === ROOF_LEVEL) return [ATTIC_FLOOR]
+
+  if (prefered === BASE_LEVEL) return [BASE_FLOOR]
+
+  if (levels[prefered]) return [prefered]; // 保底用，直接返回位置 key 碰碰运气
 
   return [pickRandom(concreteLevelKeys)];
 }
@@ -667,7 +691,11 @@ export function finishResidentialAccessoryBuildingSchema(
   return result
 }
 
-
+/**
+ * House 使用的卧室数量生成函数
+ * @param candidate
+ * @returns
+ */
 function determineSharedBedroomLimit(candidate: BuildingCandidate): number {
   const { areaSqm, buildingLevels } = candidate;
 
@@ -709,6 +737,12 @@ function resolveResidentialSectorRooms(
   );
 }
 
+/**
+ * 根据卧室数量上限，分配卧室预算给卧室、儿童卧室、办公室
+ * @param candidate
+ * @param rooms
+ * @returns
+ */
 function applyHouseSharedRoomCounts(
   candidate: BuildingCandidate,
   rooms: Record<string, RoomSchema>,
@@ -744,14 +778,21 @@ function applyHouseSharedRoomCounts(
   }
 }
 
+/**
+ * TODO 楼梯间有时会被替换为“带楼梯的走廊”，但必须整个 House 统一
+ * @param candidate
+ * @param levelKey
+ * @param rooms
+ */
 function applyHouseAccessRooms(
   candidate: BuildingCandidate,
   levelKey: string,
   rooms: Record<string, RoomSchema>,
 ): void {
   const buildingLevels = normalizeBuildingLevels(candidate.buildingLevels);
-  const isSmallSingleLevel = (candidate.areaSqm === null || candidate.areaSqm <= SMALL_HOUSE_AREA_MAX_SQM) && buildingLevels <= 1;
+  const isSmallSingleLevel = (candidate.areaSqm === null || candidate.areaSqm <= SMALL_HOUSE_AREA_MAX_SQM) && buildingLevels == 1;
   const isGroundLevel = levelKey === "ground_floor";
+  const isTopLevel = levelKey === "top_floor";
 
   if (isGroundLevel && isSmallSingleLevel && rooms.living_room) {
     rooms.living_room.access = "entrance";
@@ -763,9 +804,14 @@ function applyHouseAccessRooms(
     };
   }
 
+  if (((buildingLevels == 1 && isGroundLevel) || isTopLevel) && rooms.bedroom) {
+    rooms.bedroom.access = "vertical"
+  }
+  if (levelKey === ATTIC_FLOOR && rooms.hvac) rooms.hvac.access = "vertical"
+
   if (buildingLevels > 1) {
     rooms.stairwell = {
-      descrption: "楼梯间",
+      descrption: "带楼梯的走廊",
       count: 1,
       access: "vertical",
     };
