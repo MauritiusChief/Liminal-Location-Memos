@@ -27,7 +27,8 @@ const ALL_LEVELS = ["all_levels"];
 /**
  * House 仅可出现的三种楼层
  */
-const HOUSE_LEVELS = ["ground_level", "middle_level", "top_level"]
+const HOUSE_LEVELS = ["ground_floor", "middle_floor", "top_floor"]
+const ACCESSORY_DEFAULT_LEVEL = "default_floor";
 
 /**
  * 兼作分类结果（单独把 key 提取出来）和 Pattern 记录
@@ -127,39 +128,19 @@ const RESIDENTIAL_DEFAULT_CATEGORY_THEMES: Record<string, string> = {
 };
 
 const RESIDENTIAL_CATEGORY_EVENT_THEMES: Record<string, string[]> = {
-  house: [
-    "正在举办小型聚会的住宅",
-    "刚刚完成大扫除的住宅",
-    "停电后点着应急灯的住宅",
-  ],
-  garage: [
-    "正在维修车辆的车库",
-    "堆满搬家纸箱的车库",
-    "临时改造成工作间的车库",
-  ],
-  tool_shed: [
-    "刚被翻找过的工具屋",
-    "正在整理园艺器具的工具屋",
-    "堆着临时维修材料的工具屋",
-  ],
+  house: [],
+  garage: [],
+  tool_shed: [],
 };
 
-const RESIDENTIAL_LEVEL_EVENT_THEMES: Record<string, string[]> = {
-  house: [
-    "正在整理生活用品的住宅楼层",
-    "刚结束家庭活动的住宅楼层",
-    "灯光异常昏暗的住宅楼层",
-  ],
-  garage: [
-    "充满机油味的车库楼层",
-    "摆着临时维修工具的车库楼层",
-    "堆放额外储物箱的车库楼层",
-  ],
-  tool_shed: [
-    "工具散放在地面的工具屋内部",
-    "新添了维修材料的工具屋内部",
-    "刚进行过园艺整理的工具屋内部",
-  ],
+const RESIDENTIAL_LEVEL_EVENT_THEMES: Record<string, Record<string, string[]>> = {
+  house: {
+    ground_floor: [],
+    middle_floor: [],
+    top_floor: [],
+  },
+  garage: {default_floor: []},
+  tool_shed: {default_floor: []},
 };
 const RESIDENTIAL_FALLBACK_THEME = "普通的建筑";
 
@@ -429,7 +410,7 @@ export function buildHouseCategorySchemaFromDistribution(
   const mainCategory = candidate.categoryRecord[0]
   // Category 的默认主题
   const baseTheme = pickResidentialCategoryTheme(mainCategory);
-  const schemaTheme = pickResidentialEventTheme(mainCategory, RESIDENTIAL_CATEGORY_EVENT_THEMES) ?? baseTheme;
+  const schemaTheme = pickResidentialCategoryEventTheme(mainCategory) ?? baseTheme;
   // 控制楼层数在 1 ~ 3 范围
   const buildingLevels = candidate.buildingLevels ? Math.min(3, candidate.buildingLevels) : 1 // 此处默认1层是合理的，因为 Pattern 本身就是被面积与楼层决定的，不会出现不够用的情况
 
@@ -440,10 +421,10 @@ export function buildHouseCategorySchemaFromDistribution(
     const levels: Record<string, CategoryLevelSchema> = {}
     const concreteLevelKeys: string[] = []
     for (let i = 1; i <= buildingLevels; i++) {
-      const levelKey = HOUSE_LEVELS[i-1]
+      const levelKey = resolveHouseConcreteLevelKey(i, buildingLevels)
       concreteLevelKeys.push(levelKey)
       levels[levelKey] = {
-        theme: pickResidentialEventTheme(mainCategory, RESIDENTIAL_LEVEL_EVENT_THEMES) ?? schemaTheme,
+        theme: pickResidentialLevelEventTheme(mainCategory, levelKey) ?? schemaTheme,
         span: [i], // span 固定只有1层的范围
         rooms: {}, // 等待后续装填
       }
@@ -472,24 +453,73 @@ export function buildHouseCategorySchemaFromDistribution(
   return result
 }
 
+export function buildResidentialAccessoryCategorySchemaFromDistribution(
+  appliedBaseSchema: PatternDistribution,
+  candidate: BuildingCandidate,
+): Record<FeatureId, CategorySchema> {
+  if (!candidate.categoryRecord) return {}
+  const mainCategory = candidate.categoryRecord[0]
+  const baseTheme = pickResidentialCategoryTheme(mainCategory);
+  const schemaTheme = pickResidentialCategoryEventTheme(mainCategory) ?? baseTheme;
+
+  const result: Record<FeatureId, CategorySchema> = {}
+  Object.entries(appliedBaseSchema).forEach(([featureId, roomDefs]) => {
+    const level: CategoryLevelSchema = {
+      theme: pickResidentialLevelEventTheme(mainCategory, ACCESSORY_DEFAULT_LEVEL) ?? schemaTheme,
+      span: [1],
+      rooms: {},
+    };
+
+    // 独立附属建筑按单一功能空间建模，避免复用住宅的楼层命名和通道规则。
+    Object.entries(roomDefs).forEach(([roomKey, definition]) => {
+      if (definition.chance && 1 - definition.chance > Math.random()) return
+      level.rooms[roomKey] = {
+        descrption: definition.desc ?? roomKey,
+      };
+    });
+
+    result[featureId] = {
+      theme: schemaTheme,
+      levels: {
+        [ACCESSORY_DEFAULT_LEVEL]: level,
+      },
+    }
+  });
+
+  return result
+}
+
 function pickResidentialCategoryTheme(mainCategory: string): string {
   return RESIDENTIAL_DEFAULT_CATEGORY_THEMES[mainCategory];
 }
 
+function pickResidentialCategoryEventTheme(mainCategory: string): string | null {
+  return pickResidentialEventTheme(RESIDENTIAL_CATEGORY_EVENT_THEMES[mainCategory]);
+}
+
+function pickResidentialLevelEventTheme(mainCategory: string, levelKey: string): string | null {
+  return pickResidentialEventTheme(RESIDENTIAL_LEVEL_EVENT_THEMES[mainCategory]?.[levelKey]);
+}
+
 function pickResidentialEventTheme(
-  mainCategory: string,
-  eventThemePools: Record<string, string[]>,
+  eventThemes: string[] | undefined,
 ): string | null {
   if (Math.random() >= RESIDENTIAL_THEME_MUTATION_CHANCE) {
     return null;
   }
 
-  const eventThemes = eventThemePools[mainCategory];
   if (!eventThemes || eventThemes.length === 0) {
     return null;
   }
 
   return pickRandom(eventThemes);
+}
+
+function resolveHouseConcreteLevelKey(levelNumber: number, buildingLevels: number): string {
+  if (buildingLevels === 1) return HOUSE_LEVELS[0];
+  if (levelNumber === 1) return HOUSE_LEVELS[0];
+  if (levelNumber === buildingLevels) return HOUSE_LEVELS[2];
+  return HOUSE_LEVELS[1];
 }
 
 /**
@@ -509,11 +539,11 @@ function resolveHouseCategorySchemaLevelKeys(
   }
 
   if (prefered && TOP_LEVEL.includes(prefered)) {
-    return [levels.top_level ? "top_level" : "ground_level"];
+    return [concreteLevelKeys[concreteLevelKeys.length - 1]];
   }
 
   if (prefered && GROUND_LEVEL.includes(prefered)) {
-    return ["ground_level"];
+    return [concreteLevelKeys[0]];
   }
 
   if (prefered && levels[prefered]) {
@@ -534,7 +564,6 @@ export function finishHouseBuildingSchema(
 ): Record<FeatureId, BuildingSchema>  {
   const result: Record<FeatureId, BuildingSchema> = {}
   const categoryKey = candidate.categoryRecord?.join('&') || '出错';
-  const shouldApplyHouseFinalizers = isHouseFamilyCategory(categoryKey);
   Object.entries(schemas).forEach(([featureId, schema]) => {
     // 装填楼层中缺失的信息
     const levels: BuildingSchema["levels"] = Object.fromEntries(
@@ -543,15 +572,12 @@ export function finishHouseBuildingSchema(
           Object.entries(level.sectors).map(([sectorKey, sector]) => {
             const rooms = resolveResidentialSectorRooms(sector.rooms);
 
-            if (shouldApplyHouseFinalizers) {
-              // 住宅主体才需要补齐卧室组、入口和垂直通道；独立车库/工具屋只保留自身功能房间。
-              // 目前住宅仅按同一 sector 内的卧室组做共享上限控制，其余房间默认 1 间。
-              applyHouseSharedRoomCounts(candidate, rooms);
+            // 住宅主体收尾负责补齐卧室组、入口和垂直通道；独立附属建筑由单独 finalizer 处理。
+            applyHouseSharedRoomCounts(candidate, rooms);
 
-              // 收尾阶段补齐进入建筑和楼层间移动所需的通道房间。
-              // 门厅只属于地面层；楼梯间需要在每个实际楼层都能被引用。
-              applyHouseAccessRooms(candidate, levelKey, rooms);
-            }
+            // 收尾阶段补齐进入建筑和楼层间移动所需的通道房间。
+            // 门厅只属于地面层；楼梯间需要在每个实际楼层都能被引用。
+            applyHouseAccessRooms(candidate, levelKey, rooms);
 
             return [sectorKey, {
               area: sector.area,
@@ -572,6 +598,44 @@ export function finishHouseBuildingSchema(
     result[featureId] = {
       featureId,
       category: categoryKey, // 输出到 Building Schema 后，因为不再用到 category 了，就直接组合为单一字符串了
+      centerPosition: candidate.centerPosition,
+      theme: schema.theme || RESIDENTIAL_FALLBACK_THEME,
+      levels,
+    };
+  })
+  return result
+}
+
+export function finishResidentialAccessoryBuildingSchema(
+  schemas: Record<FeatureId, SectorDistributionSchem>,
+  candidate: BuildingCandidate,
+): Record<FeatureId, BuildingSchema>  {
+  const result: Record<FeatureId, BuildingSchema> = {}
+  const categoryKey = candidate.categoryRecord?.join('&') || '出错';
+  Object.entries(schemas).forEach(([featureId, schema]) => {
+    const levels: BuildingSchema["levels"] = Object.fromEntries(
+      Object.entries(schema.levels).map(([levelKey, level]) => {
+        const sectors = Object.fromEntries(
+          Object.entries(level.sectors).map(([sectorKey, sector]) => {
+            return [sectorKey, {
+              area: sector.area,
+              centerPosition: sector.centerPosition,
+              rooms: resolveResidentialSectorRooms(sector.rooms),
+            }];
+          }),
+        );
+
+        return [levelKey, {
+          theme: level.theme,
+          span: level.span,
+          sectors,
+        }];
+      }),
+    );
+
+    result[featureId] = {
+      featureId,
+      category: categoryKey,
       centerPosition: candidate.centerPosition,
       theme: schema.theme || RESIDENTIAL_FALLBACK_THEME,
       levels,
@@ -664,7 +728,7 @@ function applyHouseAccessRooms(
 ): void {
   const buildingLevels = normalizeBuildingLevels(candidate.buildingLevels);
   const isSmallSingleLevel = (candidate.areaSqm === null || candidate.areaSqm <= SMALL_HOUSE_AREA_MAX_SQM) && buildingLevels <= 1;
-  const isGroundLevel = levelKey === "ground_level";
+  const isGroundLevel = levelKey === "ground_floor";
 
   if (isGroundLevel && isSmallSingleLevel && rooms.living_room) {
     rooms.living_room.access = "entrance";

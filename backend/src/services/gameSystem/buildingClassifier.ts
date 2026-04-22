@@ -2,7 +2,7 @@ import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { DbBuildingFeatureDetailRow, FeatureDetail, FeatureId, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
 import { Position } from "./gameSessionStore.js";
-import { ambiguousResidentialCategory, buildHouseCategorySchemaFromDistribution, finishHouseBuildingSchema, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
+import { ambiguousResidentialCategory, buildHouseCategorySchemaFromDistribution, buildResidentialAccessoryCategorySchemaFromDistribution, finishHouseBuildingSchema, finishResidentialAccessoryBuildingSchema, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
 import { trimTagValue } from "../utils.js";
 
 // Data Base 类型
@@ -441,7 +441,15 @@ function buildCategorySchemaFromDistribution(
   appliedBaseSchema: PatternDistribution,
   candidate: BuildingCandidate,
 ): Record<FeatureId, CategorySchema> {
-  return buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate)
+  // 当前 schema builder 只支持住宅类；按主 Category 分支，避免独立附属建筑复用住宅楼层语义。
+  const mainCategory = candidate.categoryRecord?.[0];
+  if (mainCategory === "house") {
+    return buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate)
+  }
+  if (mainCategory === "garage" || mainCategory === "tool_shed") {
+    return buildResidentialAccessoryCategorySchemaFromDistribution(appliedBaseSchema, candidate)
+  }
+  return {}
 }
 
 /**
@@ -491,7 +499,15 @@ function finishBuildingSchema(
   schemas: Record<FeatureId, SectorDistributionSchem>,
   candidate: BuildingCandidate,
 ): Record<FeatureId, BuildingSchema> {
-  return finishHouseBuildingSchema(schemas, candidate)
+  // 收尾同样按主 Category 分支；住宅主体需要入口/楼梯等补全，独立附属建筑不需要。
+  const mainCategory = candidate.categoryRecord?.[0];
+  if (mainCategory === "house") {
+    return finishHouseBuildingSchema(schemas, candidate)
+  }
+  if (mainCategory === "garage" || mainCategory === "tool_shed") {
+    return finishResidentialAccessoryBuildingSchema(schemas, candidate)
+  }
+  return {}
 }
 
 //#region 共用逻辑函数

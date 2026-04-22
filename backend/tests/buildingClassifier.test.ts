@@ -20,7 +20,9 @@ import {
 } from "../src/services/gameSystem/buildingClassifier";
 import {
   buildHouseCategorySchemaFromDistribution,
+  buildResidentialAccessoryCategorySchemaFromDistribution,
   finishHouseBuildingSchema,
+  finishResidentialAccessoryBuildingSchema,
 } from "../src/services/gameSystem/buildingResidential";
 import type { DbBuildingFeatureDetailRow } from "../src/services/featureDetail";
 
@@ -43,7 +45,7 @@ describe("building residential schema generation", () => {
     const appliedBaseSchema = applyCategoryBaseSchemasToDistribution(candidate, distribution);
     const schemas = buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate);
     const schema = schemas[candidate.details[0].featureId];
-    const rooms = schema.levels.ground_level.rooms;
+    const rooms = schema.levels.ground_floor.rooms;
 
     expect(schema.theme).toBe("普通的住宅");
     expect(rooms.bedroom).toEqual({ descrption: "卧室" });
@@ -71,7 +73,7 @@ describe("building residential schema generation", () => {
     const distribution = decidePatternDistribution(candidate);
     const appliedBaseSchema = applyCategoryBaseSchemasToDistribution(candidate, distribution);
     const schemas = buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate);
-    const rooms = schemas[candidate.details[0].featureId].levels.ground_level.rooms;
+    const rooms = schemas[candidate.details[0].featureId].levels.ground_floor.rooms;
 
     expect(rooms.living_room).toEqual({ descrption: "客厅" });
     expect(rooms.kitchen).toEqual({ descrption: "带餐厅的厨房" });
@@ -89,16 +91,17 @@ describe("building residential schema generation", () => {
 
     const categorySchemas = buildAccessoryCategorySchemas(candidate);
     const sectorSchema = buildSectorDistributionSchema(candidate, categorySchemas[candidate.details[0].featureId]);
-    const schemas = finishHouseBuildingSchema(sectorSchema, candidate);
+    const schemas = finishResidentialAccessoryBuildingSchema(sectorSchema, candidate);
     const schema = schemas[candidate.details[0].featureId];
-    const groundRooms = schema.levels.ground_level.sectors.main.rooms;
-    const topRooms = schema.levels.top_level.sectors.main.rooms;
+    const defaultRooms = schema.levels.default_floor.sectors.main.rooms;
 
     expect(schema.category).toBe("garage");
-    expect(groundRooms.garage).toEqual({ descrption: "车库", count: 1 });
-    expect(groundRooms.hall).toBeUndefined();
-    expect(groundRooms.stairwell).toBeUndefined();
-    expect(topRooms.stairwell).toBeUndefined();
+    expect(Object.keys(schema.levels)).toEqual(["default_floor"]);
+    expect(defaultRooms.garage).toEqual({ descrption: "车库", count: 1 });
+    expect(defaultRooms.hall).toBeUndefined();
+    expect(defaultRooms.stairwell).toBeUndefined();
+    expect(schema.levels.ground_floor).toBeUndefined();
+    expect(schema.levels.top_floor).toBeUndefined();
   });
 
   it("finishes a standalone tool shed without house access rooms", () => {
@@ -111,16 +114,17 @@ describe("building residential schema generation", () => {
 
     const categorySchemas = buildAccessoryCategorySchemas(candidate);
     const sectorSchema = buildSectorDistributionSchema(candidate, categorySchemas[candidate.details[0].featureId]);
-    const schemas = finishHouseBuildingSchema(sectorSchema, candidate);
+    const schemas = finishResidentialAccessoryBuildingSchema(sectorSchema, candidate);
     const schema = schemas[candidate.details[0].featureId];
-    const groundRooms = schema.levels.ground_level.sectors.main.rooms;
-    const topRooms = schema.levels.top_level.sectors.main.rooms;
+    const defaultRooms = schema.levels.default_floor.sectors.main.rooms;
 
     expect(schema.category).toBe("tool_shed");
-    expect(groundRooms.tool_shed).toEqual({ descrption: "工具屋", count: 1 });
-    expect(groundRooms.hall).toBeUndefined();
-    expect(groundRooms.stairwell).toBeUndefined();
-    expect(topRooms.stairwell).toBeUndefined();
+    expect(Object.keys(schema.levels)).toEqual(["default_floor"]);
+    expect(defaultRooms.tool_shed).toEqual({ descrption: "工具屋", count: 1 });
+    expect(defaultRooms.hall).toBeUndefined();
+    expect(defaultRooms.stairwell).toBeUndefined();
+    expect(schema.levels.ground_floor).toBeUndefined();
+    expect(schema.levels.top_floor).toBeUndefined();
   });
 
   it("places rooms by preferred level and random fallback", () => {
@@ -141,12 +145,12 @@ describe("building residential schema generation", () => {
     const schemas = buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate);
     const schema = schemas[candidate.details[0].featureId];
 
-    expect(schema.levels.top_level.rooms.top_room).toEqual({ descrption: "顶层房间" });
-    expect(schema.levels.ground_level.rooms.ground_room).toEqual({ descrption: "底层房间" });
-    expect(schema.levels.ground_level.rooms.whole_room).toEqual({ descrption: "全楼层房间" });
-    expect(schema.levels.top_level.rooms.whole_room).toEqual({ descrption: "全楼层房间" });
-    expect(schema.levels.top_level.rooms.fallback_room).toEqual({ descrption: "随机房间" });
-    expect(schema.levels.ground_level.rooms.fallback_room).toBeUndefined();
+    expect(schema.levels.top_floor.rooms.top_room).toEqual({ descrption: "顶层房间" });
+    expect(schema.levels.ground_floor.rooms.ground_room).toEqual({ descrption: "底层房间" });
+    expect(schema.levels.ground_floor.rooms.whole_room).toEqual({ descrption: "全楼层房间" });
+    expect(schema.levels.top_floor.rooms.whole_room).toEqual({ descrption: "全楼层房间" });
+    expect(schema.levels.top_floor.rooms.fallback_room).toEqual({ descrption: "随机房间" });
+    expect(schema.levels.ground_floor.rooms.fallback_room).toBeUndefined();
   });
 
   it("finishes a studio house into a complete building schema record", () => {
@@ -159,7 +163,7 @@ describe("building residential schema generation", () => {
     const sectorSchema = buildSectorDistributionSchema(candidate, {
       theme: "普通的住宅",
       levels: {
-        ground_level: {
+        ground_floor: {
           theme: "普通的住宅",
           span: [1],
           rooms: {
@@ -173,7 +177,7 @@ describe("building residential schema generation", () => {
 
     const schemas = finishHouseBuildingSchema(sectorSchema, candidate);
     const schema = schemas[candidate.details[0].featureId];
-    const rooms = schema.levels.ground_level.sectors.main.rooms;
+    const rooms = schema.levels.ground_floor.sectors.main.rooms;
 
     expect(schema.featureId).toBe(candidate.details[0].featureId);
     expect(schema.category).toBe("house");
@@ -197,7 +201,23 @@ describe("building residential schema generation", () => {
     expect(schemas).toBeDefined();
     expect(Object.keys(schemas || {})).toEqual(["way/123"]);
     expect(schemas?.["way/123"].category).toBe("house");
-    expect(schemas?.["way/123"].levels.ground_level).toBeDefined();
+    expect(schemas?.["way/123"].levels.ground_floor).toBeDefined();
+  });
+
+  it("generateBuildingSchema routes standalone garage through accessory schema finalization", async () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
+    mockedQuery.mockResolvedValueOnce({
+      rows: [buildDbBuildingRow({ tags: { building: "garage", "building:levels": "2" } })],
+    } as never);
+
+    const schemas = await generateBuildingSchema("way/123", [], true);
+    const schema = schemas?.["way/123"];
+
+    expect(schema?.category).toBe("garage");
+    expect(Object.keys(schema?.levels || {})).toEqual(["default_floor"]);
+    expect(schema?.levels.default_floor.sectors.main.rooms.garage).toEqual({ descrption: "车库", count: 1 });
+    expect(schema?.levels.default_floor.sectors.main.rooms.hall).toBeUndefined();
+    expect(schema?.levels.default_floor.sectors.main.rooms.stairwell).toBeUndefined();
   });
 
   it("builds colocated debug existing schemas from the target feature center", async () => {
@@ -272,7 +292,7 @@ function buildSectorDistributionSchema(
 function buildAccessoryCategorySchemas(candidate: BuildingCandidate) {
   const distribution = decidePatternDistribution(candidate);
   const appliedBaseSchema = applyCategoryBaseSchemasToDistribution(candidate, distribution);
-  return buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate);
+  return buildResidentialAccessoryCategorySchemaFromDistribution(appliedBaseSchema, candidate);
 }
 
 function buildDbBuildingRow(overrides: Partial<DbBuildingFeatureDetailRow & {
