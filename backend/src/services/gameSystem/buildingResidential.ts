@@ -21,6 +21,7 @@ interface DbNearbyParkingSignalRow {
 type ApartmentSuiteRoomDefinition = {
   desc: string;
   chance?: number;
+  count?: number;
 };
 type ApartmentSuiteTemplate = Record<string, ApartmentSuiteRoomDefinition>;
 
@@ -221,29 +222,25 @@ const RESIDENTIAL_SUITE_TEMPLATES: Record<string, Record<string, ApartmentSuiteT
       bath_room: { desc: "带厕所浴室" },
     },
     seperate_bedroom: {
-      bedroom: { desc: "卧室" },
+      bedroom_wild: { desc: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 1 },
       living_room: { desc: "与厨房相连的客厅" },
       bath_room: { desc: "带厕所浴室" },
     },
   },
   standard_suite: {
     standard: {
-      bedroom: { desc: "卧室" },
+      bedroom_wild: { desc: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 2 },
       living_room: { desc: "客厅" },
       kitchen: { desc: "厨房" },
       bath_room: { desc: "带厕所浴室" },
-      kids_bedroom: { desc: "儿童卧室", chance: 0.5 },
-      office: { desc: "办公室", chance: 0.3 },
       closet: { desc: "储物间", chance: 0.6 },
     },
     seperate_restroom: {
-      bedroom: { desc: "卧室" },
+      bedroom_wild: { desc: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 2 },
       living_room: { desc: "客厅" },
       kitchen: { desc: "带餐厅的厨房" },
       bath_room: { desc: "浴室" },
       rest_room: { desc: "厕所" },
-      kids_bedroom: { desc: "儿童卧室", chance: 0.5 },
-      office: { desc: "办公室", chance: 0.3 },
       closet: { desc: "储物间", chance: 0.6 },
     },
   },
@@ -1024,11 +1021,8 @@ function resolveApartmentSectorRooms(
       const suiteCount = determineApartmentSuiteCount(candidate, levelKey);
       result[roomKey] = {
         theme: suite.theme,
-        // SuiteSchema 自身没有 count 字段，因此把“本层有几套同模板套房”折算到子房间数量上。
-        subRooms: suite.subRooms.map((subRoom) => ({
-          ...subRoom,
-          count: subRoom.count * suiteCount,
-        })),
+        count: suiteCount,
+        subRooms: suite.subRooms,
       };
       return
     }
@@ -1049,20 +1043,17 @@ function resolveApartmentSectorRooms(
  * @param fallbackTheme 没有触发 suite 随机事件时继承的楼层 theme
  * @returns 可写入 BuildingSchema 的 SuiteSchema
  */
-function buildApartmentSuiteSchema(suiteKey: string, fallbackTheme: string): SuiteSchema {
-  const templates = RESIDENTIAL_SUITE_TEMPLATES[suiteKey] ?? `出错：模板中不存在${suiteKey}`;
+function buildApartmentSuiteSchema(
+  suiteKey: string,
+  fallbackTheme: string,
+): SuiteSchema {
+  const templates = RESIDENTIAL_SUITE_TEMPLATES[suiteKey] ?? RESIDENTIAL_SUITE_TEMPLATES[RESIDENTIAL_SUITE_KEYS[0]];
   const templateKey = pickRandom(Object.keys(templates));
   const template = templates[templateKey];
   const theme = pickResidentialSuiteEventTheme(suiteKey, templateKey) ?? fallbackTheme;
-  const subRooms = Object.entries(template).flatMap(([roomKey, definition]) => {
-    if (definition.chance && 1 - definition.chance > Math.random()) return []
-    return [{
-      descrption: definition.desc ?? roomKey,
-      count: 1,
-    }];
-  });
+  const subRooms = buildApartmentSuiteSubRooms(template);
 
-  return { theme, subRooms };
+  return { theme, count: 1, subRooms };
 }
 
 function pickResidentialSuiteEventTheme(
@@ -1070,6 +1061,21 @@ function pickResidentialSuiteEventTheme(
   templateKey: string,
 ): string | null {
   return pickResidentialEventTheme(RESIDENTIAL_SUITE_EVENT_THEMES[suiteKey]?.[templateKey]);
+}
+
+function buildApartmentSuiteSubRooms(
+  template: ApartmentSuiteTemplate,
+): SuiteSchema["subRooms"] {
+  const subRooms: SuiteSchema["subRooms"] = {};
+  Object.entries(template).forEach(([roomKey, definition]) => {
+    if (definition.chance && 1 - definition.chance > Math.random()) return;
+    subRooms[roomKey] = {
+      descrption: definition.desc ?? roomKey,
+      count: definition.count ?? 1,
+    };
+  });
+
+  return subRooms;
 }
 
 /**
@@ -1084,7 +1090,7 @@ function determineApartmentSuiteCount(
 ): number {
   if (levelKey !== APARTMENT_FLOORS[1]) return 1;
 
-  const floorArea = (candidate.areaSqm ?? APARTMENT_SUITE_AREA_SQM);
+  const floorArea = (candidate.areaSqm ?? APARTMENT_SUITE_AREA_SQM*4) * (1 - Math.random() * 0.4); // 添加浮动的面积，在 100% ~ 60% 浮动
   return Math.max(1, Math.floor(floorArea / APARTMENT_SUITE_AREA_SQM));
 }
 

@@ -160,6 +160,7 @@ describe("building residential schema generation", () => {
       areaSqm: 320,
       buildingLevels: 2,
       categoryRecord: ["apartment"],
+      patternRecord: { apartment: "studio_apt" },
     });
     const sectorSchema = buildSectorDistributionSchema(candidate, {
       theme: "普通的公寓楼",
@@ -194,10 +195,13 @@ describe("building residential schema generation", () => {
     expect("subRooms" in suite).toBe(true);
     if ("subRooms" in suite) {
       expect(suite.theme).toBe("普通的公寓楼");
-      expect(suite.subRooms).toEqual([
-        { descrption: "卧室、客厅、厨房一体空间", count: 2 },
-        { descrption: "带厕所浴室", count: 2 },
-      ]);
+      expect(suite.count).toBe(4);
+      expect(suite.subRooms).toEqual({
+        living_room: { descrption: "卧室、客厅、厨房一体空间", count: 1 },
+        bath_room: { descrption: "带厕所浴室", count: 1 },
+      });
+      expect(suite.subRooms.bedroom).toBeUndefined();
+      expect(suite.subRooms.bedroom_wild).toBeUndefined();
     }
   });
 
@@ -225,6 +229,7 @@ describe("building residential schema generation", () => {
       areaSqm: 320,
       buildingLevels: 2,
       categoryRecord: ["apartment"],
+      patternRecord: { apartment: "standard_apt" },
     });
     const sectorSchema = buildSectorDistributionSchema(candidate, {
       theme: "普通的公寓楼",
@@ -248,25 +253,29 @@ describe("building residential schema generation", () => {
     expect("subRooms" in standardSuite).toBe(true);
     if ("subRooms" in standardSuite) {
       expect(standardSuite.theme).toBe("普通的公寓楼");
-      expect(standardSuite.subRooms).toEqual([
-        { descrption: "卧室", count: 2 },
-        { descrption: "客厅", count: 2 },
-        { descrption: "带餐厅的厨房", count: 2 },
-        { descrption: "浴室", count: 2 },
-        { descrption: "厕所", count: 2 },
-        { descrption: "儿童卧室", count: 2 },
-        { descrption: "办公室", count: 2 },
-        { descrption: "储物间", count: 2 },
-      ]);
+      expect(standardSuite.count).toBe(4);
+      expect(standardSuite.subRooms).toEqual({
+        bedroom_wild: { descrption: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 2 },
+        living_room: { descrption: "客厅", count: 1 },
+        kitchen: { descrption: "带餐厅的厨房", count: 1 },
+        bath_room: { descrption: "浴室", count: 1 },
+        rest_room: { descrption: "厕所", count: 1 },
+        closet: { descrption: "储物间", count: 1 },
+      });
+      expect(standardSuite.subRooms.bedroom).toBeUndefined();
+      expect(standardSuite.subRooms.kids_bedroom).toBeUndefined();
+      expect(standardSuite.subRooms.office).toBeUndefined();
     }
     expect("subRooms" in studioSuite).toBe(true);
     if ("subRooms" in studioSuite) {
       expect(studioSuite.theme).toBe("普通的公寓楼");
-      expect(studioSuite.subRooms).toEqual([
-        { descrption: "卧室", count: 2 },
-        { descrption: "与厨房相连的客厅", count: 2 },
-        { descrption: "带厕所浴室", count: 2 },
-      ]);
+      expect(studioSuite.count).toBe(4);
+      expect(studioSuite.subRooms).toEqual({
+        bedroom_wild: { descrption: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 1 },
+        living_room: { descrption: "与厨房相连的客厅", count: 1 },
+        bath_room: { descrption: "带厕所浴室", count: 1 },
+      });
+      expect(studioSuite.subRooms.bedroom).toBeUndefined();
     }
   });
 

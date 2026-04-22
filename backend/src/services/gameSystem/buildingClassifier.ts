@@ -57,7 +57,8 @@ export interface RoomSchema {
  */
 export interface SuiteSchema {
   theme: string;
-  subRooms: SubRoomSchema[];
+  count: number;
+  subRooms: Record<string, SubRoomSchema>;
 }
 
 /**
