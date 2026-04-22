@@ -1086,15 +1086,19 @@ function buildApartmentSuiteSubRooms(
 }
 
 /**
- * 用单层面积与楼层粗略估算套房数量。
+ * 用单层面积与楼层粗略估算当前 level/sector 可容纳的“套房总数”。
  *
  * 一楼需要先按普通房间数量预留公共/设备/通道空间；如果剩余面积不足一套，
  * 收尾阶段会移除 Category Schema 中提前放入的一楼套房候选。
- * @param candidate
- * @param levelKey
- * @param sectorArea
- * @param rooms
- * @returns
+ *
+ * 注意：返回值不是每一种套房各自的数量，而是该楼层该 sector 的总套房容量。
+ * 多种套房之间的数量分配由 applyApartmentSuiteCapacity 继续处理。
+ *
+ * @param candidate 建筑候选，用于在 sector 面积缺失时回退到建筑面积
+ * @param levelKey 当前楼层语义 key
+ * @param sectorArea 当前 sector 的面积
+ * @param rooms 当前 sector 已转换出的房间/套房候选
+ * @returns 当前 level/sector 可分配给所有套房类型的总套数
  */
 function determineApartmentSuiteCount(
   candidate: BuildingCandidate,
@@ -1104,15 +1108,29 @@ function determineApartmentSuiteCount(
 ): number {
   if (levelKey === APARTMENT_FLOORS[0]) {
     const ordinaryRoomCount = countApartmentOrdinaryRooms(rooms);
+    // 一楼通常有公共和设备空间，因此先给面积加随机浮动，再扣掉普通房间预算。
     const floorArea = (sectorArea || candidate.areaSqm || 0) * (1 - Math.random() * 0.4); // 添加浮动的面积，在 100% ~ 60% 浮动
     const suiteArea = floorArea - ordinaryRoomCount * APARTMENT_GROUND_ORDINARY_ROOM_AREA_SQM;
     return Math.max(0, Math.floor(suiteArea / APARTMENT_SUITE_AREA_SQM));
   }
 
+  // 居住层缺少面积信息时使用 4 套公寓的面积作为保守回退，并至少保留 1 套。
   const floorArea = (sectorArea || candidate.areaSqm || APARTMENT_SUITE_AREA_SQM*4) * (1 - Math.random() * 0.4); // 添加浮动的面积，在 100% ~ 60% 浮动
   return Math.max(1, Math.floor(floorArea / APARTMENT_SUITE_AREA_SQM));
 }
 
+/**
+ * 将套房候选按当前 level/sector 的容量落成最终数量。
+ *
+ * Category Schema 阶段只表达“这个楼层可能有这些套房类型”；
+ * 收尾阶段才按面积计算总容量，并在多种套房类型之间随机拆分。
+ * 分到 0 的套房类型会被删除，避免输出 count 为 0 的 SuiteSchema。
+ *
+ * @param candidate 建筑候选，用于面积回退
+ * @param levelKey 当前楼层语义 key
+ * @param sectorArea 当前 sector 面积
+ * @param rooms 当前 sector 的最终房间表，会被原地更新
+ */
 function applyApartmentSuiteCapacity(
   candidate: BuildingCandidate,
   levelKey: string,
@@ -1122,17 +1140,69 @@ function applyApartmentSuiteCapacity(
   const suiteKeys = Object.keys(rooms).filter(isApartmentSuiteRoomKey);
   if (suiteKeys.length === 0) return;
 
-  // Category Schema 会先把一楼套房作为候选放入；这里才按可用面积决定保留数量或删除。
+  // suiteCount 是当前楼层/sector 的总容量，不是每个 suite key 的独立容量。
   const suiteCount = determineApartmentSuiteCount(candidate, levelKey, sectorArea, rooms);
+  const suiteCounts = distributeApartmentSuiteCounts(suiteCount, suiteKeys);
   suiteKeys.forEach((suiteKey) => {
-    if (suiteCount <= 0) {
+    const count = suiteCounts[suiteKey] ?? 0;
+    if (count <= 0) {
+      // 允许随机分配后某一类套房完全不出现；删除比保留 count: 0 更干净。
       delete rooms[suiteKey];
       return;
     }
-    rooms[suiteKey].count = suiteCount;
+    rooms[suiteKey].count = count;
   });
 }
 
+/**
+ * 将套房总容量随机拆分到多个套房类型上。
+ *
+ * 算法分两步：
+ * 1. 为每个套房类型生成随机权重，按比例取 floor 得到基础分配；
+ * 2. 把 floor 后遗漏的余数按随机顺序补回，保证最终总和严格等于 totalCount。
+ *
+ * 这里刻意不设置每类最小值，因此某些套房类型可以被分到 0。
+ *
+ * @param totalCount 当前 level/sector 的套房总容量
+ * @param suiteKeys 当前 level/sector 中存在的套房类型 key
+ * @returns 每个套房类型对应的最终套数
+ */
+function distributeApartmentSuiteCounts(
+  totalCount: number,
+  suiteKeys: string[],
+): Record<string, number> {
+  if (totalCount <= 0 || suiteKeys.length === 0) return {};
+  if (suiteKeys.length === 1) return { [suiteKeys[0]]: totalCount };
+
+  // Math.random() 理论上可能为 0；用极小值避免 totalWeight 被 0 除。
+  const weights = suiteKeys.map((suiteKey) => ({
+    suiteKey,
+    weight: Math.random() || Number.EPSILON,
+  }));
+  const totalWeight = weights.reduce((sum, item) => sum + item.weight, 0);
+  // 先按权重比例分配整数部分，此时总和可能小于 totalCount。
+  const result = Object.fromEntries(
+    weights.map(({ suiteKey, weight }) => [suiteKey, Math.floor(totalCount * weight / totalWeight)]),
+  );
+  let assignedCount = Object.values(result).reduce((sum, count) => sum + count, 0);
+  // floor 剩下的余数按随机顺序补，避免固定偏向第一个 suite key。
+  const remainderOrder = [...suiteKeys].sort(() => Math.random() - 0.5);
+
+  for (let i = 0; assignedCount < totalCount; i += 1) {
+    const suiteKey = remainderOrder[i % remainderOrder.length];
+    result[suiteKey] += 1;
+    assignedCount += 1;
+  }
+
+  return result;
+}
+
+/**
+ * 统计公寓公共/设备/通道等普通房间数量，用于估算一楼非套房空间占用。
+ *
+ * @param rooms 当前 sector 的房间表
+ * @returns 非套房房间的 count 总和
+ */
 function countApartmentOrdinaryRooms(
   rooms: Record<string, RoomSchema | SuiteSchema>,
 ): number {
@@ -1142,6 +1212,11 @@ function countApartmentOrdinaryRooms(
   }, 0);
 }
 
+/**
+ * 判断某个 room key 是否是公寓套房类型。
+ * @param roomKey 房间或套房 key
+ * @returns 是否属于 RESIDENTIAL_SUITE_TEMPLATES 中登记的套房类型
+ */
 function isApartmentSuiteRoomKey(roomKey: string): boolean {
   return RESIDENTIAL_SUITE_KEYS.includes(roomKey);
 }

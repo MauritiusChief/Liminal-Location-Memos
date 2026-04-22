@@ -306,7 +306,7 @@ describe("building residential schema generation", () => {
     expect("subRooms" in standardSuite).toBe(true);
     if ("subRooms" in standardSuite) {
       expect(standardSuite.theme).toBe("普通的公寓楼");
-      expect(standardSuite.count).toBe(2);
+      expect(standardSuite.count).toBe(1);
       expect(standardSuite.subRooms).toEqual({
         bedroom_wild: { descrption: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 2 },
         living_room: { descrption: "客厅", count: 1 },
@@ -322,13 +322,49 @@ describe("building residential schema generation", () => {
     expect("subRooms" in studioSuite).toBe(true);
     if ("subRooms" in studioSuite) {
       expect(studioSuite.theme).toBe("普通的公寓楼");
-      expect(studioSuite.count).toBe(2);
+      expect(studioSuite.count).toBe(1);
       expect(studioSuite.subRooms).toEqual({
         bedroom_wild: { descrption: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 1 },
         living_room: { descrption: "与厨房相连的客厅", count: 1 },
         bath_room: { descrption: "带厕所浴室", count: 1 },
       });
       expect(studioSuite.subRooms.bedroom).toBeUndefined();
+    }
+    if ("subRooms" in standardSuite && "subRooms" in studioSuite) {
+      expect(standardSuite.count + studioSuite.count).toBe(2);
+    }
+  });
+
+  it("can remove one apartment suite type when random split assigns zero capacity", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0);
+    const candidate = buildCandidate({
+      areaSqm: 80,
+      buildingLevels: 2,
+      categoryRecord: ["apartment"],
+      patternRecord: { apartment: "standard_apt" },
+    });
+    const sectorSchema = buildSectorDistributionSchema(candidate, {
+      theme: "普通的公寓楼",
+      levels: {
+        residential_floor: {
+          theme: "普通的公寓楼",
+          span: [2],
+          rooms: {
+            standard_suite: { descrption: "标准公寓套房" },
+            studio_suite: { descrption: "单间公寓套房" },
+          },
+        },
+      },
+    });
+
+    const schemas = finishApartmentBuildingSchema(sectorSchema, candidate);
+    const rooms = schemas[candidate.details[0].featureId].levels.residential_floor.sectors.main.rooms;
+    const suites = [rooms.standard_suite, rooms.studio_suite].filter((room) => room !== undefined);
+
+    expect(suites).toHaveLength(1);
+    expect("subRooms" in suites[0]).toBe(true);
+    if ("subRooms" in suites[0]) {
+      expect(suites[0].count).toBe(1);
     }
   });
 
