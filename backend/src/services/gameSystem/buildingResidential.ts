@@ -453,6 +453,13 @@ export function buildHouseCategorySchemaFromDistribution(
   return result
 }
 
+/**
+ * 独立附属建筑(Accessory)的 C-Schema 逻辑
+ * 默认楼层数限制为1，且只有1个房间
+ * @param appliedBaseSchema
+ * @param candidate
+ * @returns
+ */
 export function buildResidentialAccessoryCategorySchemaFromDistribution(
   appliedBaseSchema: PatternDistribution,
   candidate: BuildingCandidate,
@@ -558,6 +565,12 @@ function resolveHouseCategorySchemaLevelKeys(
 //#region 收尾逻辑
 //################
 
+/**
+ * 住宅(House)的收尾逻辑
+ * @param schemas
+ * @param candidate
+ * @returns
+ */
 export function finishHouseBuildingSchema(
   schemas: Record<FeatureId, SectorDistributionSchem>,
   candidate: BuildingCandidate,
@@ -606,6 +619,12 @@ export function finishHouseBuildingSchema(
   return result
 }
 
+/**
+ * 独立附属建筑 (Accessory) 的收尾逻辑
+ * @param schemas
+ * @param candidate
+ * @returns
+ */
 export function finishResidentialAccessoryBuildingSchema(
   schemas: Record<FeatureId, SectorDistributionSchem>,
   candidate: BuildingCandidate,
@@ -617,10 +636,14 @@ export function finishResidentialAccessoryBuildingSchema(
       Object.entries(schema.levels).map(([levelKey, level]) => {
         const sectors = Object.fromEntries(
           Object.entries(level.sectors).map(([sectorKey, sector]) => {
+            const roomsEntries = Object.entries(resolveResidentialSectorRooms(sector.rooms));
+            // 独立附属建筑肯定只有1个房间，所以全部加上 access entrance
+            // 出问题了再说吧
+            const rooms: Record<string, RoomSchema> = Object.fromEntries(roomsEntries.map(([k, v]) => [k, {...v, access: "entrance"}]))
             return [sectorKey, {
               area: sector.area,
               centerPosition: sector.centerPosition,
-              rooms: resolveResidentialSectorRooms(sector.rooms),
+              rooms,
             }];
           }),
         );
