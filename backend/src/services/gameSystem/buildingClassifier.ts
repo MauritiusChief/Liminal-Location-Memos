@@ -304,8 +304,8 @@ function resolveExplicitCategory(candidate: BuildingCandidate): string[] {
   const tagsList = candidate.details.map( d => d.tags )
   // 以下顺序按照重要程度从大到小排列，保证最主体的分类可以排为复合分类的主分类
   if (isExplicitBuilding(EXPLICIT_HOUSE_BUILDING_VALUES, tagsList)) return ["house"];
-  if (isExplicitBuilding(EXPLICIT_TOOL_SHED_BUILDING_VALUES, tagsList)) return ["tool_shed"];
   if (isExplicitBuilding(EXPLICIT_GARAGE_BUILDING_VALUES, tagsList) || hasContainedPoiTag(candidate, "amenity", ["parking"])) return ["garage"];
+  if (isExplicitBuilding(EXPLICIT_TOOL_SHED_BUILDING_VALUES, tagsList)) return ["tool_shed"];
 
   return category
 }
