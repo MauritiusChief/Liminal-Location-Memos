@@ -48,6 +48,7 @@ function App() {
           <NavLink to="/debug/scene-prompt-preview">DEBUG Scene Prompt Preview</NavLink>
           <NavLink to="/debug/overpass">DEBUG Overpass</NavLink>
           <NavLink to="/debug/llm-environment">DEBUG LLM Environment</NavLink>
+          <NavLink to="/debug/building-schema">DEBUG Building Schema</NavLink>
         </nav>
       </header>
       <Outlet />

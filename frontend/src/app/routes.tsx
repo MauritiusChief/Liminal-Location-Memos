@@ -1,5 +1,6 @@
 import { createBrowserRouter } from 'react-router-dom';
 import App from '../App';
+import { BuildingSchemaDebugPage } from '../pages/BuildingSchemaDebugPage';
 import { HomeChatPage } from '../pages/HomeChatPage';
 import { LlmEnvironmentDebugPage } from '../pages/LlmEnvironmentDebugPage';
 import { NormalizationDebugPage } from '../pages/NormalizationDebugPage';
@@ -30,6 +31,10 @@ export const router = createBrowserRouter([
       {
         path: 'debug/llm-environment',
         element: <LlmEnvironmentDebugPage />,
+      },
+      {
+        path: 'debug/building-schema',
+        element: <BuildingSchemaDebugPage />,
       },
     ],
   },

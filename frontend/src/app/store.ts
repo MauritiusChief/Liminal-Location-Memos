@@ -1,5 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit';
 import chatReducer from '../features/chat/chatSlice';
+import buildingSchemaDebugReducer from '../features/buildingSchemaDebug/buildingSchemaDebugSlice';
 import llmDebugReducer from '../features/llmDebug/llmDebugSlice';
 import normalizationDebugReducer from '../features/normalizationDebug/normalizationDebugSlice';
 import rawOverpassDebugReducer from '../features/rawOverpassDebug/rawOverpassDebugSlice';
@@ -11,6 +12,7 @@ import summaryPreviewReducer from '../features/summaryPreview/summaryPreviewSlic
 export const store = configureStore({
   reducer: {
     chat: chatReducer,
+    buildingSchemaDebug: buildingSchemaDebugReducer,
     normalizationDebug: normalizationDebugReducer,
     rawOverpassDebug: rawOverpassDebugReducer,
     llmDebug: llmDebugReducer,

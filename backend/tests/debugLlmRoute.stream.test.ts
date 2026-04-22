@@ -73,11 +73,22 @@ jest.mock("../src/services/gameSystem/llm", () => ({
   streamReplySingleMessage: jest.fn(),
 }));
 
+jest.mock("../src/services/gameSystem/buildingClassifier", () => ({
+  buildColocatedDebugBuildingSchemas: jest.fn(),
+  generateBuildingSchema: jest.fn(),
+}));
+
 import { createApp } from "../src/app";
+import {
+  buildColocatedDebugBuildingSchemas,
+  generateBuildingSchema,
+} from "../src/services/gameSystem/buildingClassifier";
 import { streamReplySingleMessage } from "../src/services/gameSystem/llm";
 
 describe("/api/debug/llm stream route", () => {
   const mockedStreamReplySingleMessage = jest.mocked(streamReplySingleMessage);
+  const mockedBuildColocatedDebugBuildingSchemas = jest.mocked(buildColocatedDebugBuildingSchemas);
+  const mockedGenerateBuildingSchema = jest.mocked(generateBuildingSchema);
   let server: Server;
   let baseUrl: string;
 
@@ -169,5 +180,66 @@ describe("/api/debug/llm stream route", () => {
       { type: "reply_delta", text: "partial" },
       { type: "error", message: "stream exploded" },
     ]);
+  });
+
+  it("returns building schema debug records with colocated mock categories", async () => {
+    const existingSchemas = [
+      {
+        featureId: "debug-existing/1",
+        category: "house",
+        centerPosition: { lat: 40, lon: -83 },
+        theme: "debug mock schema",
+        levels: {},
+      },
+    ];
+    const schemas = {
+      "way/123": {
+        featureId: "way/123",
+        category: "house",
+        centerPosition: { lat: 40, lon: -83 },
+        theme: "普通的住宅",
+        levels: {},
+      },
+    };
+
+    mockedBuildColocatedDebugBuildingSchemas.mockResolvedValue(existingSchemas);
+    mockedGenerateBuildingSchema.mockResolvedValue(schemas);
+
+    const response = await fetch(`${baseUrl}/api/debug/building-schema`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        featureId: "way/123",
+        existingSchemaCategories: [" house ", ""],
+        skipComplex: true,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockedBuildColocatedDebugBuildingSchemas).toHaveBeenCalledWith("way/123", ["house"]);
+    expect(mockedGenerateBuildingSchema).toHaveBeenCalledWith("way/123", existingSchemas, true);
+    expect(await response.json()).toEqual({
+      featureId: "way/123",
+      skipComplex: true,
+      existingSchemaCategories: ["house"],
+      schemas,
+    });
+  });
+
+  it("returns 400 for invalid building schema category input", async () => {
+    const response = await fetch(`${baseUrl}/api/debug/building-schema`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        featureId: "way/123",
+        existingSchemaCategories: ["house", 1],
+        skipComplex: true,
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "existingSchemaCategories must be an array of strings.",
+    });
   });
 });

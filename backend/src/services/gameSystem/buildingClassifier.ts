@@ -168,18 +168,17 @@ export type PatternDistribution = Record<FeatureId, Record<string, PatternRoomDe
 //#region 出口函数
 
 /**
- * 输入 featureId, 自行从数据库获取相关数据后进行分类等操作，返回现成的 Building Schema
- * TODO: 添加最终 Building Schema 的组装逻辑。目前只做到 category/pattern 选择。
+ * 输入 featureId, 自行从数据库获取相关数据后进行分类等操作，返回现成的 Building Schema 记录。
  * @param featureId 支持传入单体 building 或 relation/part
  * @param existingSchemas 作为参考的来自 Game State 的 Building Schema
- * @param skipComplex 是否跳过太复杂需要 LLM 参与的步骤
- * @returns 现成的 Building Schema，或者表示被跳过的 undefined
+ * @param skipComplex 如果后续遇到必须依赖 LLM 才能判断的复杂分配，是否放弃此次生成
+ * @returns 现成的 Building Schema 记录，或者表示无法生成的 undefined
  */
 export async function generateBuildingSchema(
   featureId: string,
   existingSchemas: BuildingSchema[],
   skipComplex: boolean = true
-): Promise<BuildingSchema | undefined> {
+): Promise<Record<FeatureId, BuildingSchema> | undefined> {
   // 先找到候选建筑
   const candidate = await fetchBuildingCandidate(featureId);
   if (!candidate) {
@@ -202,30 +201,56 @@ export async function generateBuildingSchema(
   category.forEach(key => {// 键为各个 Category Key，值为对应 Pattern Key
     patternKeys[key] = selectPatternKey(candidate, key)
   })
-  console.log(patternKeys);
+  // console.log(patternKeys);
 
   // Pattern 信息存入 candidate
   candidate.patternRecord = patternKeys
 
-  // 产出 Pattern Distribution 方案
-  const patternDistribution = decidePatternDistribution(candidate)
+  // 产出 Pattern Distribution 方案。
+  // skipComplex 当前只作为未来 LLM 复杂分支的保留参数；已有逻辑都是确定性规则，不会因为它改变行为。
+  const patternDistribution = decidePatternDistribution(candidate, skipComplex)
   // 对 Base Schema 应用 Pattern Distribution 方案
   const patternAppliedBaseSchema = applyCategoryBaseSchemasToDistribution(candidate, patternDistribution)
 
   // 根据 candidate 创建仅有楼层数的空 Category Schema
   const categorySchemas = buildCategorySchemaFromDistribution(patternAppliedBaseSchema, candidate)
 
-  // 产出 Sector Distribution 方案
-  const sectorDistributionSchems = decideSectorDistribution(categorySchemas, candidate)
+  // 产出 Sector Distribution 方案。
+  // 同 Pattern Distribution，目前实现尚未接入 LLM，因此这里只负责把参数继续穿透下去。
+  const sectorDistributionSchems = decideSectorDistribution(categorySchemas, candidate, skipComplex)
   // 填充 Category Schema 没有的细节，生成完整 Building Schema
   const buildingSchemas = finishBuildingSchema(sectorDistributionSchems, candidate)
 
-  if (skipComplex) {
+  return buildingSchemas;
+}
+
+/**
+ * 为 building schema debug route 构造最小 existingSchemas。
+ *
+ * 住宅模糊分类目前只读取已有 schema 的 category 和 centerPosition；
+ * 因此 debug mock 不需要填充楼层/房间细节，但位置必须与待测 feature 完全一致，
+ * 才能稳定命中“附近已有建筑类型”的判断逻辑。
+ *
+ * @param featureId 待测 building feature id
+ * @param categories 用户在 debug 页输入的已有 BuildingSchema category 列表
+ * @returns mock existingSchemas；若 feature 不存在则返回 undefined
+ */
+export async function buildColocatedDebugBuildingSchemas(
+  featureId: string,
+  categories: string[],
+): Promise<BuildingSchema[] | undefined> {
+  const candidate = await fetchBuildingCandidate(featureId);
+  if (!candidate) {
     return undefined;
   }
 
-  console.log('TODO: LLM 分支');
-  return undefined; // TODO 进入 LLM 分支
+  return categories.map((category, index) => ({
+    featureId: `debug-existing/${index + 1}`,
+    category,
+    centerPosition: candidate.centerPosition,
+    theme: "debug mock schema",
+    levels: {},
+  }));
 }
 
 //#region 主逻辑函数
@@ -337,11 +362,16 @@ function selectPatternKey(
 }
 
 /**
- * TODO 当前是占位符，只返回单一的 PatternDistribution
+ * TODO 当前是占位符，只返回单一的 PatternDistribution。
+ *
+ * skipComplex 表示未来遇到必须靠 LLM 才能抉择的复杂分配时可以直接放弃生成；
+ * 当前实现仍全部是 deterministic fallback，因此接收该参数但暂不改变行为。
  * @param candidate 提供单体建筑或多体建筑
+ * @param skipComplex 是否跳过未来的 LLM-only 复杂分支
  * @returns
  */
-export function decidePatternDistribution(candidate: BuildingCandidate): PatternDistribution {
+export function decidePatternDistribution(candidate: BuildingCandidate, skipComplex: boolean = true): PatternDistribution {
+  void skipComplex;
   const featureIds = candidate.details.map(d => d.featureId)
   const categoryRecord = candidate.categoryRecord || []
   const patternRecord = candidate.patternRecord || {}
@@ -361,8 +391,8 @@ export function decidePatternDistribution(candidate: BuildingCandidate): Pattern
   }
 
   const result: PatternDistribution = {}
-
-  // TODO 多体建筑应用特殊逻辑（LLM或其他）
+  // TODO 多体建筑未来需要应用特殊逻辑（LLM 或其他）。
+  // 目前还没有非确定性分支，因此即使 skipComplex 为 true 也继续使用第一个 feature 的保守分配。
   return {[featureIds[0]]: patternRooms}
 }
 
@@ -404,14 +434,20 @@ function buildCategorySchemaFromDistribution(
 }
 
 /**
- * TODO 当前是占位符，只返回单一的 SectorDistribution
+ * TODO 当前是占位符，只返回单一的 SectorDistribution。
+ *
+ * skipComplex 表示未来遇到必须靠 LLM 才能抉择的复杂分区时可以直接放弃生成；
+ * 当前 sector 分配只创建 main sector，因此接收该参数但暂不改变行为。
  * @param categorySchema
  * @param candidate
+ * @param skipComplex 是否跳过未来的 LLM-only 复杂分支
  */
 function decideSectorDistribution(
   categorySchemas: Record<FeatureId, CategorySchema>,
   candidate: BuildingCandidate,
+  skipComplex: boolean = true,
 ): Record<FeatureId, SectorDistributionSchem> {
+  void skipComplex;
   const result: Record<FeatureId, SectorDistributionSchem> = {}
   Object.entries(categorySchemas).forEach(([featureId, schema]) => {
     const levelsEntries = Object.entries(schema.levels)
