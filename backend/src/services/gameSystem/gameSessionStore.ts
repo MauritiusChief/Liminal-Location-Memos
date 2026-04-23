@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { BuildingSchema } from './buildingClassifier.js';
+import { BuildingRecord } from './toolIndoorPosition.js';
 
 export interface Position {
   lat: number;
@@ -251,6 +252,7 @@ function createGameSave(sessionId: string): GameSave {
       activeExteriorVisualDescriptions: [],
       exteriorVisualDescriptions: {},
       buildingSchemas: {},
+      buildingRecords: {},
       levelVisualDescriptions: {},
     },
   };
