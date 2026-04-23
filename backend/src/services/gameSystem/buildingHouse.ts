@@ -185,7 +185,7 @@ export function buildHouseCategorySchemaFromDistribution(
       for (const levelKey of levelKeys) {
         if (definition.chance && 1 - definition.chance > Math.random()) continue // 有概率直接跳过，不写入 levels
         levels[levelKey].rooms[roomKey] = {
-          descrption: definition.desc ?? roomKey,
+          description: definition.desc ?? roomKey,
         };
       }
     });
@@ -314,7 +314,7 @@ function resolveResidentialSectorRooms(
 ): Record<string, RoomSchema> {
   return Object.fromEntries(
     Object.entries(rooms).map(([roomKey, room]) => [roomKey, {
-      descrption: room.descrption,
+      description: room.description,
       count: 1,
       ...(room.access ? { access: room.access } : {}),
     }]),
@@ -401,7 +401,7 @@ function applyHouseAccessRooms(
     rooms.living_room.access = "entrance";
   } else if (isGroundLevel) {
     rooms.hall = {
-      descrption: "门厅",
+      description: "门厅",
       count: 1,
       access: "entrance",
     };
@@ -414,7 +414,7 @@ function applyHouseAccessRooms(
 
   if (buildingLevels > 1) {
     rooms.stairwell = {
-      descrption: "带楼梯的走廊",
+      description: "带楼梯的走廊",
       count: 1,
       access: "vertical",
     };

@@ -94,7 +94,7 @@ export function buildResidentialAccessoryCategorySchemaFromDistribution(
     Object.entries(roomDefs).forEach(([roomKey, definition]) => {
       if (definition.chance && 1 - definition.chance > Math.random()) return
       level.rooms[roomKey] = {
-        descrption: definition.desc ?? roomKey,
+        description: definition.desc ?? roomKey,
       };
     });
 
@@ -173,7 +173,7 @@ function resolveResidentialSectorRooms(
 ): Record<string, RoomSchema> {
   return Object.fromEntries(
     Object.entries(rooms).map(([roomKey, room]) => [roomKey, {
-      descrption: room.descrption,
+      description: room.description,
       count: 1,
       ...(room.access ? { access: room.access } : {}),
     }]),

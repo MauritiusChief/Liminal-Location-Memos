@@ -49,7 +49,7 @@ interface SectorSchema {
 }
 
 export interface RoomSchema {
-  descrption: string;
+  description: string;
   count: number;
   access?: "entrance" | "vertical" | "internal";
 }
@@ -66,7 +66,7 @@ export interface SuiteSchema {
  * 特意无 access
  */
 export interface SubRoomSchema {
-  descrption: string;
+  description: string;
   count: number;
 }
 
@@ -86,7 +86,7 @@ export interface CategoryLevelSchema {
  * 刻意不包含数量信息；Suite 此时也由此类型表示
  */
 export interface CategoryRoomSchema {
-  descrption: string;
+  description: string;
   access?: "entrance" | "vertical" | "internal";
 }
 

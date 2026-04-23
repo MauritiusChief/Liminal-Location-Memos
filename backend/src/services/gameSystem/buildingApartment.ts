@@ -164,7 +164,7 @@ export function buildApartmentCategorySchemaFromDistribution(
       const levelKeys = resolveApartmentCategorySchemaLevelKeys(roomKey, definition.prefered);
       levelKeys.forEach((levelKey) => {
         levels[levelKey].rooms[roomKey] = {
-          descrption: definition.desc ?? roomKey,
+          description: definition.desc ?? roomKey,
         };
       });
     });
@@ -273,7 +273,7 @@ function resolveApartmentSectorRooms(
 
     if (roomKey === "storage_unit") {
       result[roomKey] = {
-        descrption: room.descrption,
+        description: room.description,
         count: Math.ceil(4 + Math.random() * 8), // 迷你自存仓一般有多个
         ...(room.access ? { access: room.access } : {}),
       };
@@ -281,7 +281,7 @@ function resolveApartmentSectorRooms(
     }
 
     result[roomKey] = {
-      descrption: room.descrption,
+      description: room.description,
       count: 1,
       ...(room.access ? { access: room.access } : {}),
     };
@@ -313,7 +313,7 @@ function buildApartmentSuiteSubRooms(
   Object.entries(template).forEach(([roomKey, definition]) => {
     if (definition.chance && 1 - definition.chance > Math.random()) return;
     subRooms[roomKey] = {
-      descrption: definition.desc ?? roomKey,
+      description: definition.desc ?? roomKey,
       count: definition.count ?? 1,
     };
   });
@@ -461,7 +461,7 @@ function applyApartmentAccessRooms(
   void candidate;
   if (levelKey === APARTMENT_FLOORS[0]) {
     rooms.lobby = {
-      descrption: "公寓大厅",
+      description: "公寓大厅",
       count: 1,
       access: "entrance",
     };
@@ -469,18 +469,18 @@ function applyApartmentAccessRooms(
 
   if (levelKey === APARTMENT_FLOORS[1]) {
     rooms.hall = {
-      descrption: "走廊",
+      description: "走廊",
       count: 1,
     };
   }
 
   rooms.stairwell = {
-    descrption: "楼梯间",
+    description: "楼梯间",
     count: 1,
     access: "vertical",
   };
   rooms.elevator = {
-    descrption: "电梯",
+    description: "电梯",
     count: 1,
     access: "vertical",
   };

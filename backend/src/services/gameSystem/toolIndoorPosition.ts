@@ -23,7 +23,7 @@ interface BuildingSector {
 
 interface BuildingRoom {
   roomId: string;
-  descrption: string;
+  description: string;
   access?: "entrance" | "vertical" | "internal";
 }
 
@@ -40,7 +40,7 @@ interface BuildingSuite {
  */
 interface BuildingSubRoom {
   roomId: string;
-  descrption: string;
+  description: string;
 }
 
 /**
