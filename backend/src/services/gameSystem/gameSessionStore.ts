@@ -41,11 +41,13 @@ export interface ExteriorVisualDescriptionRecord {
 }
 
 /**
- * 文本形式记录某一建筑的某一楼层的事实性细节
+ * 文本形式记录某一建筑的某一楼层某一 Sector 的事实性细节
  */
-export interface LevelVisualDescriptionRecord {
-  buildingId: string; // 综合绑定特定建筑的特定楼层
-  level: number; // 综合绑定特定建筑的特定楼层
+export interface SectorVisualDescriptionRecord {
+  buildingId: string;
+  level: number;
+  sectorName: string
+  // ↑综合绑定特定建筑的特定 Sector
   content: string; // 纯文本形式的列表
   createdAt: string;
   updatedAt: string;
@@ -71,8 +73,10 @@ export interface GameState {
   activeExteriorVisualDescriptions: string[];
   exteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
   buildingSchemas: Record<string, BuildingSchema>;
-  buildingRecords: Record<string, BuildingRecord>;
-  levelVisualDescriptions: Record<string, LevelVisualDescriptionRecord>;
+  buildingRecords: Record<string, BuildingRecord>; // 建筑的长期信息存储（包括未来可能会有的物品信息）
+  activeIndoorLocations: PlayerIndoorLocation[];
+  sectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
+  activeSectorVisualDescriptions: string[];
 }
 
 /**
@@ -253,7 +257,9 @@ function createGameSave(sessionId: string): GameSave {
       exteriorVisualDescriptions: {},
       buildingSchemas: {},
       buildingRecords: {},
-      levelVisualDescriptions: {},
+      activeIndoorLocations: [],
+      sectorVisualDescriptions: {},
+      activeSectorVisualDescriptions: [],
     },
   };
 }

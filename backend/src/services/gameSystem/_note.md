@@ -24,10 +24,17 @@ Game State 术语：
   - **Exterior Visual Description**
     - 与 Field Visual Description 类似，内容为列表形式半径300米范围内 LLM 对话中与建筑相关的细节，此时 index 为建筑的id。
     - 生成途径：LLM 在概览 Book Message 时，如果某些细节与建筑有关，就会以该细节所对应的建筑id为基准进行记录（需要 LLM 辨认属于哪个建筑）
-  - **Level Visual Description**
+  - **Sector Visual Description**
     - 内容与 Field Visual Description 类似，但记录的 index 是某建筑某楼层某 Sector，且一次性涵盖整个 Sector
-    - **Sector**：是指按边长100m（也就是外接圆半径100m）的六边形网格进行遮罩后，切分出来之后吸收细微区域形成的小区域。如果建筑不大，一个 Level 就只会有 Sector
-      - 网格仅仅以该建筑所在面，不是全球统一网格。如果建筑面积达到阈值，优先以网格线经过建筑中心点的方式设置网格
+    - 只有所在 Sector 的 Visual Description 才会激活
+- **Sector**：是指按边长100m（也就是外接圆半径100m）的六边形网格进行遮罩后，切分出来之后吸收细微区域形成的小区域。如果建筑不大，一个 Level 就只会有一个 Sector
+  - 网格仅仅以该建筑所在面，不是全球统一网格。如果建筑面积达到阈值，优先以网格线经过建筑中心点的方式设置网格
+- **Indoor Location**：本意是指一组特定的 建筑id-楼层号-房间id，但在 Game State 的 activeIndoorLocations 中也用来记载当前玩家可看到的范围。
+  - activeIndoorLocations 决定关系如下：默认情况下只能看到所在 Sector 的普通房间与套房表层。特殊情况下：
+    - 处在楼梯口等，可以看见相邻楼层的垂直连接处，比如楼梯间或者阁楼
+    - 破坏了视觉遮挡的情况下，可以看到套房内部的子房间
+    - 破坏了视觉遮挡的情况下，可以看到 internal access 相连的另一栋建筑的 internal access 另一端房间
+  - activeIndoorLocations 不决定可互动关系，玩家总是只能和所在的 Indoor Location 互动
 
 （TODO）游戏建筑术语：
 - **Theme**：程序随机选择的，为该建筑或建筑某一部分添加效果的描述。比如某个民宅正在办派对，后续生成时就可能添加派对描述，甚至在建筑里生成更多派对用品与食物
@@ -85,6 +92,12 @@ Game State 术语：
 > 1. 程序内判断：building=house, Scene Object 没有查找到停车场，随机分类为了“住宅 - 内含 车库”（Category: house & garage）
 > 2. 程序随机选择一个 Pattern，因为 way/123 面积较小，随机到了“单卧室”
 > 3. 程序内判断：way/123 不是 relation 建筑，不存在 Pattern Distribution 问题，Pattern 内部所有功能房间全部给到 way/123
-> 4. 程序根据 Category “住宅 - 内含 车库”，在其 Category Base Schema 基础上（实际上是空的）应用 Pattern “单卧室”，生成了 Category Schema。
+> 4. 程序根据 Category “住宅 - 内含 车库”，在其 Category Base Schema 基础上应用 Pattern “单卧室”，生成了 Category Schema。
 > 5. 程序内判断：way/123 没有多楼层，Category Schema 内所有房间种类全部给到 1 楼，“每个楼层必有”的东西也只用设置 1 次
 > 6. 程序内判断：way/123 面积较小，1 楼的房间不用再按 Sector Distribution 细分
+
+生成完 Building Schema 之后便用此生成建筑，过程还有
+- （TODO）为建筑、楼层、房间随机分配特殊事件主题
+- 有些套房或者楼层的 *_wild 房间在此时还需要随机生成一下
+
+
