@@ -33,8 +33,8 @@ Game State 术语：
 - **Theme**：程序随机选择的，为该建筑或建筑某一部分添加效果的描述。比如某个民宅正在办派对，后续生成时就可能添加派对描述，甚至在建筑里生成更多派对用品与食物
   - 大多数情况下都会是默认，因此 Theme 可以理解为用来生产特殊事件
 - **Schema**：只存在于 Game State 内部，直接用于 LLM 生成建筑结构的数据。
-  - **Building Schema**：建筑的 Schema，包含建筑的 Theme 与各个楼层的 Schema
-  - **Level Schema**：楼层的 Schema，包含楼层的 Theme 与该楼层的 Sector Schema
+  - **Building Schema**：建筑的 Schema，包含各个楼层的 Schema
+  - **Level Schema**：楼层的 Schema，包含该楼层的 Sector Schema
   - **Sector Schema**：区域的 Schema，包含 Room Schema 与 Suite Schema
   - **Room Schema**
   - **Suite Schema**

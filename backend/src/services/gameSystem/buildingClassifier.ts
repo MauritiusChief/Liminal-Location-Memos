@@ -30,12 +30,10 @@ export interface BuildingSchema {
   featureId: string;
   category: string;
   centerPosition: Position;
-  theme: string;
   levels: Record<string, LevelSchema>; // key 为楼层种类名
 }
 
 interface LevelSchema {
-  theme: string;
   span: number[]; // 使用该 Schema 的楼层
   sectors: Record<string, SectorSchema>; // key 为该 Sector 的名字
 }
@@ -56,7 +54,6 @@ export interface RoomSchema {
  * 特意无 access
  */
 export interface SuiteSchema {
-  theme: string;
   count: number;
   subRooms: Record<string, SubRoomSchema>;
 }
@@ -70,7 +67,6 @@ export interface SubRoomSchema {
 }
 
 export interface CategorySchema {
-  theme: string;
   levels: Record<string, CategoryLevelSchema>; // key 为楼层种类名
 }
 
@@ -78,7 +74,6 @@ export interface CategorySchema {
  * 刻意由 Level 直接连接 Room
  */
 export interface CategoryLevelSchema {
-  theme: string;
   span: number[]; // 使用该 C-Schema 的楼层
   rooms: Record<string, CategoryRoomSchema>; // key 为该房间的种类名
 }
@@ -95,9 +90,7 @@ export interface CategoryRoomSchema {
  * 特指经过了 Sector Distributtion，但还没到收尾阶段的 Schema
  */
 export interface SectorDistributionSchem {
-  theme: string;
   levels: Record<string, { // key 为楼层种类名
-    theme: string;
     span: number[]; // 使用该 C-Schema 的楼层
     sectors: Record<string, { // key 为该 Sector 的名字
       area: number;
@@ -249,7 +242,6 @@ export async function buildColocatedDebugBuildingSchemas(
     featureId: `debug-existing/${index + 1}`,
     category,
     centerPosition: candidate.centerPosition,
-    theme: "debug mock schema",
     levels: {},
   }));
 }
@@ -478,7 +470,6 @@ function decideSectorDistribution(
     const levelsEntries = Object.entries(schema.levels)
     const levelsSectorEntries = levelsEntries.map( ([key, level]) => {
       return [key, {
-        theme: level.theme,
         span: level.span,
         sectors: {main: {
           area: candidate.areaSqm ?? 0,
@@ -488,7 +479,6 @@ function decideSectorDistribution(
       }]
     })
     result[featureId] = {
-      theme: schema.theme,
       levels: Object.fromEntries(levelsSectorEntries)
     }
   })

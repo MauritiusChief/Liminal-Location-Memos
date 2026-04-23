@@ -49,7 +49,6 @@ describe("building residential schema generation", () => {
     const schema = schemas[candidate.details[0].featureId];
     const rooms = schema.levels.ground_floor.rooms;
 
-    expect(schema.theme).toBe("普通的住宅");
     expect(rooms.bedroom).toEqual({ descrption: "卧室" });
     expect(rooms.living_room).toEqual({ descrption: "与餐厅、厨房相连的客厅" });
     expect(rooms.bath_room).toEqual({ descrption: "带厕所的浴室" });
@@ -150,7 +149,7 @@ describe("building residential schema generation", () => {
     expect(schema.levels.residential_floor.rooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
     expect(schema.levels.ground_floor.rooms.standard_suite).toEqual({ descrption: "标准公寓套房" });
     expect(schema.levels.ground_floor.rooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
-    expect(schema.levels.ground_floor.rooms.cleaning_room).toEqual({ descrption: "清洁间" });
+    expect(schema.levels.ground_floor.rooms.janitor_room).toEqual({ descrption: "清洁间" });
     expect(schema.levels.ground_floor.rooms.mail_room).toEqual({ descrption: "收发室" });
     expect(schema.levels.ground_floor.rooms.laundry_room).toEqual({ descrption: "公共洗衣房" });
     expect(schema.levels.ground_floor.rooms.gym).toEqual({ descrption: "健身房" });
@@ -165,10 +164,8 @@ describe("building residential schema generation", () => {
       patternRecord: { apartment: "studio_apt" },
     });
     const sectorSchema = buildSectorDistributionSchema(candidate, {
-      theme: "普通的公寓楼",
       levels: {
         ground_floor: {
-          theme: "普通的公寓楼",
           span: [1],
           rooms: {
             cleaning_room: { descrption: "清洁间" },
@@ -176,7 +173,6 @@ describe("building residential schema generation", () => {
           },
         },
         residential_floor: {
-          theme: "普通的公寓楼",
           span: [2],
           rooms: {
             studio_suite: { descrption: "单间公寓套房" },
@@ -202,7 +198,6 @@ describe("building residential schema generation", () => {
     }
     expect("subRooms" in suite).toBe(true);
     if ("subRooms" in suite) {
-      expect(suite.theme).toBe("普通的公寓楼");
       expect(suite.count).toBe(4);
       expect(suite.subRooms).toEqual({
         living_room: { descrption: "卧室、客厅、厨房一体空间", count: 1 },
@@ -222,10 +217,8 @@ describe("building residential schema generation", () => {
       patternRecord: { apartment: "studio_apt" },
     });
     const sectorSchema = buildSectorDistributionSchema(candidate, {
-      theme: "普通的公寓楼",
       levels: {
         ground_floor: {
-          theme: "普通的公寓楼",
           span: [1],
           rooms: {
             cleaning_room: { descrption: "清洁间" },
@@ -235,7 +228,6 @@ describe("building residential schema generation", () => {
           },
         },
         residential_floor: {
-          theme: "普通的公寓楼",
           span: [2],
           rooms: {
             studio_suite: { descrption: "单间公寓套房" },
@@ -285,10 +277,8 @@ describe("building residential schema generation", () => {
       patternRecord: { apartment: "standard_apt" },
     });
     const sectorSchema = buildSectorDistributionSchema(candidate, {
-      theme: "普通的公寓楼",
       levels: {
         residential_floor: {
-          theme: "普通的公寓楼",
           span: [2],
           rooms: {
             standard_suite: { descrption: "标准公寓套房" },
@@ -305,7 +295,6 @@ describe("building residential schema generation", () => {
 
     expect("subRooms" in standardSuite).toBe(true);
     if ("subRooms" in standardSuite) {
-      expect(standardSuite.theme).toBe("普通的公寓楼");
       expect(standardSuite.count).toBe(1);
       expect(standardSuite.subRooms).toEqual({
         bedroom_wild: { descrption: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 2 },
@@ -321,7 +310,6 @@ describe("building residential schema generation", () => {
     }
     expect("subRooms" in studioSuite).toBe(true);
     if ("subRooms" in studioSuite) {
-      expect(studioSuite.theme).toBe("普通的公寓楼");
       expect(studioSuite.count).toBe(1);
       expect(studioSuite.subRooms).toEqual({
         bedroom_wild: { descrption: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 1 },
@@ -344,10 +332,8 @@ describe("building residential schema generation", () => {
       patternRecord: { apartment: "standard_apt" },
     });
     const sectorSchema = buildSectorDistributionSchema(candidate, {
-      theme: "普通的公寓楼",
       levels: {
         residential_floor: {
-          theme: "普通的公寓楼",
           span: [2],
           rooms: {
             standard_suite: { descrption: "标准公寓套房" },
@@ -402,10 +388,8 @@ describe("building residential schema generation", () => {
       categoryRecord: ["house"],
     });
     const sectorSchema = buildSectorDistributionSchema(candidate, {
-      theme: "普通的住宅",
       levels: {
         ground_floor: {
-          theme: "普通的住宅",
           span: [1],
           rooms: {
             bedroom: { descrption: "卧室" },
@@ -583,9 +567,7 @@ function buildCandidate(overrides: Partial<BuildingCandidate> = {}): BuildingCan
 function buildSectorDistributionSchema(
   candidate: BuildingCandidate,
   input: {
-    theme: string;
     levels: Record<string, {
-      theme: string;
       span: number[];
       rooms: SectorDistributionSchem["levels"][string]["sectors"][string]["rooms"];
     }>;
@@ -593,10 +575,8 @@ function buildSectorDistributionSchema(
 ): Record<string, SectorDistributionSchem> {
   return {
     [candidate.details[0].featureId]: {
-      theme: input.theme,
       levels: Object.fromEntries(
         Object.entries(input.levels).map(([levelKey, level]) => [levelKey, {
-          theme: level.theme,
           span: level.span,
           sectors: {
             main: {

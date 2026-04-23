@@ -188,7 +188,6 @@ describe("/api/debug/llm stream route", () => {
         featureId: "debug-existing/1",
         category: "house",
         centerPosition: { lat: 40, lon: -83 },
-        theme: "debug mock schema",
         levels: {},
       },
     ];
@@ -197,7 +196,6 @@ describe("/api/debug/llm stream route", () => {
         featureId: "way/123",
         category: "house",
         centerPosition: { lat: 40, lon: -83 },
-        theme: "普通的住宅",
         levels: {},
       },
     };
