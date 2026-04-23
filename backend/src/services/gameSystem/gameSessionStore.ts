@@ -61,6 +61,16 @@ export interface PlayerIndoorLocation {
 }
 
 /**
+ * 仅仅用在 activeVisibleLocation 的类型，表示玩家能看见哪些地方
+ */
+export interface PlayerVisibleLocation {
+  buildingId: FeatureId;
+  level: number;
+  suiteId?: string;
+  roomId?: string;
+}
+
+/**
  * 纯长期游戏状态。
  * 不包含流式请求、后台任务、排队消息等运行时字段。
  */
@@ -75,7 +85,7 @@ export interface GameState {
   exteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
   buildingSchemas: Record<string, BuildingSchema>;
   buildingRecords: Record<string, BuildingRecord>; // 建筑的长期信息存储（包括未来可能会有的物品信息）
-  activeIndoorLocations: PlayerIndoorLocation[];
+  activeVisibleLocations: PlayerVisibleLocation[];
   sectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
   activeSectorVisualDescriptions: string[];
 }
@@ -258,7 +268,7 @@ function createGameSave(sessionId: string): GameSave {
       exteriorVisualDescriptions: {},
       buildingSchemas: {},
       buildingRecords: {},
-      activeIndoorLocations: [],
+      activeVisibleLocations: [],
       sectorVisualDescriptions: {},
       activeSectorVisualDescriptions: [],
     },

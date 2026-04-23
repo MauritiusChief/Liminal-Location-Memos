@@ -7,7 +7,8 @@ import { buildSceneFromRequest, SceneObject } from '../scene/sceneObject.js';
 import { buildScenePrompt } from '../scene/scenePrompt.js';
 import {
   BUILD_GAME_STATE_MANAGER_SYSTEM,
-  INITIAL_BOOK_MESSAGE_SYSTEM,
+  INDOOR_INITIAL_BOOK_MESSAGE_SYSTEM,
+  OUTDOOR_INITIAL_BOOK_MESSAGE_SYSTEM,
   REGULAR_BOOK_MESSAGE_SYSTEM,
   VISUAL_DESCRIPTION_SYSTEM,
 } from './systemPrompts.js';
@@ -30,8 +31,15 @@ import {
   updateRuntimeSession,
 } from './gameSessionStore.js';
 import { applyMovePlayerTool } from './toolMovePlayer.js';
-import { generateBuildingSchema } from './buildingClassifier.js';
 import { formatRelativeDirection } from '../scene/polarViewPrompt.js';
+import {
+  chooseInitialIndoorLocation,
+  ensureBuildingSchema,
+  fillBasicActiveIndoorLocations,
+  findContainingBuildingFeatureId,
+  findIndoorRoomContext,
+  generateBuildingRecord,
+} from './toolIndoorPosition.js';
 
 interface GameStateToolCall {
   name: string;
@@ -105,7 +113,7 @@ const SET_PLAYER_INDOOR_LOCATION_TOOL: GameStateToolDef = {
 }
 /**
  * 注意：只负责单个 indoor location 更新。
- * 玩家进入建筑、跨越楼层时，基板 active indoor locations 会由程序生成（只可见当前 Sector、Suite 外部）。
+ * 玩家进入建筑、跨越楼层时，基板 active indoor locations 会由程序生成（只可见当前 Sector 内的普通房间与 suite 外部，不可见 subRoom）。
  */
 const SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL: GameStateToolDef = {
   name: 'sync_active_indoor_locations',
@@ -137,6 +145,8 @@ export async function streamGameStart(emit: EmitGameEvent): Promise<GameSession>
 
   const session = await createRuntimeSession();
   const workingState = cloneGameState(session.gameState);
+  await initializeOpeningIndoorState(workingState);
+  fillBasicActiveIndoorLocations(workingState);
 
   const openingMessage = await streamInitialBookMessage(workingState, emit);
 
@@ -241,7 +251,6 @@ async function executeTurnStream(
 
   try {
     const workingState = cloneGameState(session.gameState);
-    workingState.playerIndoorLocation = null;
     workingState.messageHistory.push({
       role: 'player',
       content: playerMessage,
@@ -251,6 +260,7 @@ async function executeTurnStream(
     const toolCalls = await gameStateManager(workingState);
     applyGameStateToolCalls(workingState, toolCalls);
     // 以防玩家位置更新了，需要更新一下位置会影响激活效果的 VD 的 id
+    fillBasicActiveIndoorLocations(workingState);
     syncActiveFieldVisualDescriptions(workingState);
     syncActiveExteriorVisualDescriptions(workingState);
     syncActiveSectorVisualDescriptions(workingState);
@@ -349,21 +359,21 @@ async function streamInitialBookMessage(
 ): Promise<string> {
   console.log(`[${new Date().toISOString()}] initialBookMessage() 触发`);
 
-  const { lat, lon } = state.playerPosition;
-  /**
-   * TODO 添加根据 state 中的 playerIndoorLocation 的 feature id 生成 Building Schema，然后生成 Building Record，
-   * 随机选择 roomId 和 level 替换 playerIndoorLocation 的独特占位符，
-   * 再然后机械生成基板 active indoor locations（只可见所在 sector 且 suite 内部不可见）填充入 state，
-   * 最后供 World State Prompt 生成器使用。
-   * 如果是室内的话，就用不着生成 sceneObject 了。
-   * INITIAL_BOOK_MESSAGE_SYSTEM 也需要重命名为室外用，然后准备一套室内用的提示词。
-   */
-  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: INITIAL_SCENE_RADIUS_METERS }, state.playerOrientation);
+  const isIndoorOpening = Boolean(state.playerIndoorLocation);
+  const sceneObject = isIndoorOpening
+    ? undefined
+    : await buildSceneFromRequest(
+        { lat: state.playerPosition.lat, lon: state.playerPosition.lon, radius: INITIAL_SCENE_RADIUS_METERS },
+        state.playerOrientation,
+      );
   const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
+  const systemPrompt = isIndoorOpening
+    ? INDOOR_INITIAL_BOOK_MESSAGE_SYSTEM
+    : OUTDOOR_INITIAL_BOOK_MESSAGE_SYSTEM;
   await writeGameDebugRequest({
     mode: 'user-message',
     functionName: 'streamInitialBookMessage',
-    systemPrompt: INITIAL_BOOK_MESSAGE_SYSTEM,
+    systemPrompt,
     userMessage: worldStatePrompt,
   });
 
@@ -372,7 +382,7 @@ async function streamInitialBookMessage(
 
   try {
     for await (const event of streamReplySingleMessage(
-      INITIAL_BOOK_MESSAGE_SYSTEM,
+      systemPrompt,
       worldStatePrompt,
     )) {
       if (event.replyDelta) {
@@ -478,10 +488,6 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
   const systemPrompt = BUILD_GAME_STATE_MANAGER_SYSTEM(toolDefs);
   const messageHistory = state.messageHistory;
   const latestPlayerMessage = messageHistory[messageHistory.length - 1];
-  // 组装 world state 提示词
-  /**
-   * TODO 与另一处 toWorldStatePrompt 类似，如果是室内的话，就用不着生成 sceneObject 了。
-   */
   const { lat, lon } = state.playerPosition;
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: WORLD_STATE_RADIUS_METERS}, state.playerOrientation);
   const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
@@ -546,11 +552,11 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
  * - Book 消息生成者
  * - Game State Manager
  * @param state
- * @param scene 已按照合理半径获取的 Scene Object
- * @returns TODO 目前仅包含 scenePrompt 和 VisualDescription 的提示词
+ * @param scene 已按照合理半径获取的 Scene Object；室内开局时可留空
+ * @returns 同时兼容室内与室外上下文的提示词
  */
-async function toWorldStatePrompt(state: GameState, scene: SceneObject): Promise<string> {
-  const scenePrompt = buildScenePrompt(scene, state.playerOrientation);
+async function toWorldStatePrompt(state: GameState, scene?: SceneObject): Promise<string> {
+  const scenePrompt = scene ? buildScenePrompt(scene, state.playerOrientation) : null;
 
   const fieldVisualDescriptions = Object.entries(state.fieldVisualDescriptions)
     .filter(([id]) => state.activeFieldVisualDescriptions.includes(id))
@@ -561,17 +567,36 @@ async function toWorldStatePrompt(state: GameState, scene: SceneObject): Promise
     .filter((record): record is NonNullable<typeof record> => Boolean(record))
     .map((record) => [`buildingId=${record.buildingId}`, record.content].join('\n'))
     .join('\n');
+  const indoorPrompt = formatIndoorWorldStatePrompt(state);
+  const sectorVisualDescriptions = state.activeSectorVisualDescriptions
+    .map((id) => state.sectorVisualDescriptions[id])
+    .filter((record): record is NonNullable<typeof record> => Boolean(record))
+    .map((record) => [
+      `buildingId=${record.buildingId}`,
+      `level=${record.level}`,
+      `sector=${record.sectorName}`,
+      record.content,
+    ].join('\n'))
+    .join('\n\n');
 
-  return [
+  const sections = [
     '玩家周遭环境数据：',
-    scenePrompt,
+    scenePrompt || '（当前开局未提供室外场景摘要）',
     '---',
     '玩家周遭环境场地细节记录：',
     fieldVisualDescriptions || '（暂无）',
     '---',
     '玩家周遭建筑外观细节记录：',
     exteriorVisualDescriptions || '（暂无）',
-  ].join('\n');
+    '---',
+    '玩家当前室内上下文：',
+    indoorPrompt,
+    '---',
+    '玩家当前激活的室内 Sector 细节记录：',
+    sectorVisualDescriptions || '（暂无）',
+  ];
+
+  return sections.join('\n');
 }
 
 /**
@@ -774,11 +799,33 @@ function syncActiveExteriorVisualDescriptions(state: GameState): void {
 }
 
 /**
- * TODO 逻辑很简单，处在某 sector 就激活这个 sector，其他的取消激活
+ * 只激活玩家当前所处 building + level + sector 对应的 Sector VD。
  * @param state
  */
 function syncActiveSectorVisualDescriptions(state: GameState): void {
+  const location = state.playerIndoorLocation;
+  if (!location) {
+    state.activeSectorVisualDescriptions = [];
+    return;
+  }
 
+  const record = state.buildingRecords[location.buildingId];
+  if (!record) {
+    throw new Error(`Missing building record for ${location.buildingId}.`);
+  }
+
+  const roomContext = findIndoorRoomContext(record, location);
+  if (!roomContext) {
+    throw new Error(`Room ${location.roomId} is not present in building ${location.buildingId}.`);
+  }
+
+  state.activeSectorVisualDescriptions = Object.entries(state.sectorVisualDescriptions)
+    .filter(([, sectorRecord]) => (
+      sectorRecord.buildingId === location.buildingId
+      && sectorRecord.level === location.level
+      && sectorRecord.sectorName === roomContext.sectorName
+    ))
+    .map(([id]) => id);
 }
 
 /**
@@ -849,6 +896,69 @@ function formatFieldVisualDescriptionForPrompt(state: GameState, record: FieldVi
   return [
     `* 距离${Math.round(distanceMeters)}m / ${formatRelativeDirection(bearingDegrees, state.playerOrientation)}`,
     record.content,
+  ].join('\n');
+}
+
+async function initializeOpeningIndoorState(state: GameState): Promise<void> {
+  const buildingId = await findContainingBuildingFeatureId(state.playerPosition);
+  if (!buildingId) {
+    state.playerIndoorLocation = null;
+    state.activeVisibleLocations = [];
+    return;
+  }
+
+  // 开局命中建筑后必须把整条室内链路跑通，避免后续 prompt 看到半成品状态。
+  const schema = await ensureBuildingSchema(buildingId, state);
+  const record = generateBuildingRecord(schema);
+  state.buildingRecords[record.featureId] = record;
+  state.playerIndoorLocation = chooseInitialIndoorLocation(record);
+}
+
+function formatIndoorWorldStatePrompt(state: GameState): string {
+  const location = state.playerIndoorLocation;
+  if (!location) {
+    return '（当前不在建筑内）';
+  }
+
+  const record = state.buildingRecords[location.buildingId];
+  if (!record) {
+    throw new Error(`Missing building record for ${location.buildingId}.`);
+  }
+
+  const roomContext = findIndoorRoomContext(record, location);
+  if (!roomContext) {
+    throw new Error(`Room ${location.roomId} is not present in building ${location.buildingId}.`);
+  }
+
+  const visibleLocations = state.activeVisibleLocations
+    .map((entry) => {
+      const visibleContext = findIndoorRoomContext(record, entry);
+      if (!visibleContext) {
+        return null;
+      }
+
+      return [
+        `* level=${visibleContext.level}`,
+        `sector=${visibleContext.sectorName}`,
+        visibleContext.suiteId
+          ? `suite=${visibleContext.suiteId} / roomId=${visibleContext.roomId} / ${visibleContext.roomDescription}`
+          : `roomId=${visibleContext.roomId} / ${visibleContext.roomDescription}`,
+      ].join(' / ');
+    })
+    .filter((entry): entry is string => Boolean(entry))
+    .join('\n');
+
+  return [
+    `buildingId=${record.featureId}`,
+    `buildingCategory=${record.category}`,
+    `buildingCenter=(${record.centerPosition.lat}, ${record.centerPosition.lon})`,
+    `currentLevel=${location.level}`,
+    `currentSector=${roomContext.sectorName}`,
+    roomContext.suiteId
+      ? `currentRoom=suite ${roomContext.suiteId} / subRoom ${roomContext.roomId} / ${roomContext.roomDescription}`
+      : `currentRoom=room ${roomContext.roomId} / ${roomContext.roomDescription}`,
+    '当前可见的室内位置：',
+    visibleLocations || '（暂无）',
   ].join('\n');
 }
 
