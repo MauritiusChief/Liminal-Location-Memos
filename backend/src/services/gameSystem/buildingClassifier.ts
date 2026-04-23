@@ -38,6 +38,7 @@ export interface BuildingSchema {
 }
 
 interface LevelSchema {
+  description: string;
   span: number[]; // 使用该 Schema 的楼层
   sectors: Record<string, SectorSchema>; // key 为该 Sector 的名字
 }
@@ -58,6 +59,7 @@ export interface RoomSchema {
  * 特意无 access
  */
 export interface SuiteSchema {
+  description: string;
   count: number;
   subRooms: Record<string, SubRoomSchema>;
 }
@@ -78,6 +80,7 @@ export interface CategorySchema {
  * 刻意由 Level 直接连接 Room
  */
 export interface CategoryLevelSchema {
+  description: string;
   span: number[]; // 使用该 C-Schema 的楼层
   rooms: Record<string, CategoryRoomSchema>; // key 为该房间的种类名
 }
@@ -95,6 +98,7 @@ export interface CategoryRoomSchema {
  */
 export interface SectorDistributionSchem {
   levels: Record<string, { // key 为楼层种类名
+    description: string;
     span: number[]; // 使用该 C-Schema 的楼层
     sectors: Record<string, { // key 为该 Sector 的名字
       area: number;
@@ -507,6 +511,7 @@ function decideSectorDistribution(
     const levelsEntries = Object.entries(schema.levels)
     const levelsSectorEntries = levelsEntries.map( ([key, level]) => {
       return [key, {
+        description: level.description,
         span: level.span,
         sectors: {main: {
           area: candidate.areaSqm ?? 0,

@@ -23,6 +23,9 @@ export const TOOL_SHED_CATEGORY: CategoryDefinition = {
 };
 
 const ACCESSORY_DEFAULT_FLOOR = "default_floor";
+const ACCESSORY_FLOOR_DESCRIPTIONS: Record<string, string> = {
+  [ACCESSORY_DEFAULT_FLOOR]: "单层空间",
+};
 
 //#region Category 逻辑
 
@@ -86,6 +89,7 @@ export function buildResidentialAccessoryCategorySchemaFromDistribution(
   const result: Record<FeatureId, CategorySchema> = {}
   Object.entries(appliedBaseSchema).forEach(([featureId, roomDefs]) => {
     const level: CategoryLevelSchema = {
+      description: ACCESSORY_FLOOR_DESCRIPTIONS[ACCESSORY_DEFAULT_FLOOR],
       span: [1],
       rooms: {},
     };
@@ -142,6 +146,7 @@ export function finishResidentialAccessoryBuildingSchema(
         );
 
         return [levelKey, {
+          description: level.description,
           span: level.span,
           sectors,
         }];

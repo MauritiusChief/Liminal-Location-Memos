@@ -53,9 +53,10 @@ describe("building residential schema generation", () => {
     const schema = schemas[candidate.details[0].featureId];
     const rooms = schema.levels.ground_floor.rooms;
 
-    expect(rooms.bedroom).toEqual({ descrption: "卧室" });
-    expect(rooms.living_room).toEqual({ descrption: "与餐厅、厨房相连的客厅" });
-    expect(rooms.bath_room).toEqual({ descrption: "带厕所的浴室" });
+    expect(schema.levels.ground_floor.description).toBe("地面层");
+    expect(rooms.bedroom).toEqual({ description: "卧室" });
+    expect(rooms.living_room).toEqual({ description: "与餐厅、厨房相连的客厅" });
+    expect(rooms.bath_room).toEqual({ description: "带厕所的浴室" });
   });
 
   it("passes skipComplex through pattern distribution without changing deterministic output", () => {
@@ -80,9 +81,9 @@ describe("building residential schema generation", () => {
     const schemas = buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate);
     const rooms = schemas[candidate.details[0].featureId].levels.ground_floor.rooms;
 
-    expect(rooms.living_room).toEqual({ descrption: "客厅" });
-    expect(rooms.kitchen).toEqual({ descrption: "带餐厅的厨房" });
-    expect(rooms.garage).toEqual({ descrption: "车库" });
+    expect(rooms.living_room).toEqual({ description: "客厅" });
+    expect(rooms.kitchen).toEqual({ description: "带餐厅的厨房" });
+    expect(rooms.garage).toEqual({ description: "车库" });
     expect(rooms.self).toBeUndefined();
   });
 
@@ -102,7 +103,8 @@ describe("building residential schema generation", () => {
 
     expect(schema.category).toBe("garage");
     expect(Object.keys(schema.levels)).toEqual(["default_floor"]);
-    expect(defaultRooms.garage).toEqual({ descrption: "车库", count: 1, access: "entrance" });
+    expect(schema.levels.default_floor.description).toBe("单层空间");
+    expect(defaultRooms.garage).toEqual({ description: "车库", count: 1, access: "entrance" });
     expect(defaultRooms.hall).toBeUndefined();
     expect(defaultRooms.stairwell).toBeUndefined();
     expect(schema.levels.ground_floor).toBeUndefined();
@@ -125,7 +127,8 @@ describe("building residential schema generation", () => {
 
     expect(schema.category).toBe("tool_shed");
     expect(Object.keys(schema.levels)).toEqual(["default_floor"]);
-    expect(defaultRooms.tool_shed).toEqual({ descrption: "工具屋", count: 1, access: "entrance" });
+    expect(schema.levels.default_floor.description).toBe("单层空间");
+    expect(defaultRooms.tool_shed).toEqual({ description: "工具屋", count: 1, access: "entrance" });
     expect(defaultRooms.hall).toBeUndefined();
     expect(defaultRooms.stairwell).toBeUndefined();
     expect(schema.levels.ground_floor).toBeUndefined();
@@ -147,16 +150,18 @@ describe("building residential schema generation", () => {
     const schema = schemas[candidate.details[0].featureId];
 
     expect(Object.keys(schema.levels)).toEqual(["ground_floor", "residential_floor"]);
+    expect(schema.levels.ground_floor.description).toBe("地面层");
+    expect(schema.levels.residential_floor.description).toBe("住宅层");
     expect(schema.levels.ground_floor.span).toEqual([1]);
     expect(schema.levels.residential_floor.span).toEqual([2, 3, 4]);
-    expect(schema.levels.residential_floor.rooms.standard_suite).toEqual({ descrption: "标准公寓套房" });
-    expect(schema.levels.residential_floor.rooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
-    expect(schema.levels.ground_floor.rooms.standard_suite).toEqual({ descrption: "标准公寓套房" });
-    expect(schema.levels.ground_floor.rooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
-    expect(schema.levels.ground_floor.rooms.janitor_room).toEqual({ descrption: "清洁间" });
-    expect(schema.levels.ground_floor.rooms.mail_room).toEqual({ descrption: "收发室" });
-    expect(schema.levels.ground_floor.rooms.laundry_room).toEqual({ descrption: "公共洗衣房" });
-    expect(schema.levels.ground_floor.rooms.gym).toEqual({ descrption: "健身房" });
+    expect(schema.levels.residential_floor.rooms.standard_suite).toEqual({ description: "标准公寓套房" });
+    expect(schema.levels.residential_floor.rooms.studio_suite).toEqual({ description: "单间公寓套房" });
+    expect(schema.levels.ground_floor.rooms.standard_suite).toEqual({ description: "标准公寓套房" });
+    expect(schema.levels.ground_floor.rooms.studio_suite).toEqual({ description: "单间公寓套房" });
+    expect(schema.levels.ground_floor.rooms.janitor_room).toEqual({ description: "清洁间" });
+    expect(schema.levels.ground_floor.rooms.mail_room).toEqual({ description: "收发室" });
+    expect(schema.levels.ground_floor.rooms.laundry_room).toEqual({ description: "公共洗衣房" });
+    expect(schema.levels.ground_floor.rooms.gym).toEqual({ description: "健身房" });
   });
 
   it("finishes apartment suites and access rooms", () => {
@@ -170,16 +175,18 @@ describe("building residential schema generation", () => {
     const sectorSchema = buildSectorDistributionSchema(candidate, {
       levels: {
         ground_floor: {
+          description: "地面层",
           span: [1],
           rooms: {
-            cleaning_room: { descrption: "清洁间" },
-            studio_suite: { descrption: "单间公寓套房" },
+            cleaning_room: { description: "清洁间" },
+            studio_suite: { description: "单间公寓套房" },
           },
         },
         residential_floor: {
+          description: "住宅层",
           span: [2],
           rooms: {
-            studio_suite: { descrption: "单间公寓套房" },
+            studio_suite: { description: "单间公寓套房" },
           },
         },
       },
@@ -193,19 +200,23 @@ describe("building residential schema generation", () => {
     const suite = residentialRooms.studio_suite;
 
     expect(schema.category).toBe("apartment");
-    expect(groundRooms.lobby).toEqual({ descrption: "公寓大厅", count: 1, access: "entrance" });
-    expect(groundRooms.stairwell).toEqual({ descrption: "楼梯间", count: 1, access: "vertical" });
-    expect(residentialRooms.stairwell).toEqual({ descrption: "楼梯间", count: 1, access: "vertical" });
+    expect(schema.levels.ground_floor.description).toBe("地面层");
+    expect(schema.levels.residential_floor.description).toBe("住宅层");
+    expect(groundRooms.lobby).toEqual({ description: "公寓大厅", count: 1, access: "entrance" });
+    expect(groundRooms.stairwell).toEqual({ description: "楼梯间", count: 1, access: "vertical" });
+    expect(residentialRooms.stairwell).toEqual({ description: "楼梯间", count: 1, access: "vertical" });
     expect("subRooms" in groundSuite).toBe(true);
     if ("subRooms" in groundSuite) {
+      expect(groundSuite.description).toBe("单间公寓套房");
       expect(groundSuite.count).toBe(2);
     }
     expect("subRooms" in suite).toBe(true);
     if ("subRooms" in suite) {
+      expect(suite.description).toBe("单间公寓套房");
       expect(suite.count).toBe(4);
       expect(suite.subRooms).toEqual({
-        living_room: { descrption: "卧室、客厅、厨房一体空间", count: 1 },
-        bath_room: { descrption: "带厕所浴室", count: 1 },
+        living_room: { description: "卧室、客厅、厨房一体空间", count: 1 },
+        bath_room: { description: "带厕所浴室", count: 1 },
       });
       expect(suite.subRooms.bedroom).toBeUndefined();
       expect(suite.subRooms.bedroom_wild).toBeUndefined();
@@ -223,18 +234,20 @@ describe("building residential schema generation", () => {
     const sectorSchema = buildSectorDistributionSchema(candidate, {
       levels: {
         ground_floor: {
+          description: "地面层",
           span: [1],
           rooms: {
-            cleaning_room: { descrption: "清洁间" },
-            trash_room: { descrption: "垃圾站" },
-            electrical_room: { descrption: "配电间" },
-            studio_suite: { descrption: "单间公寓套房" },
+            cleaning_room: { description: "清洁间" },
+            trash_room: { description: "垃圾站" },
+            electrical_room: { description: "配电间" },
+            studio_suite: { description: "单间公寓套房" },
           },
         },
         residential_floor: {
+          description: "住宅层",
           span: [2],
           rooms: {
-            studio_suite: { descrption: "单间公寓套房" },
+            studio_suite: { description: "单间公寓套房" },
           },
         },
       },
@@ -246,8 +259,8 @@ describe("building residential schema generation", () => {
     const residentialRooms = schema.levels.residential_floor.sectors.main.rooms;
 
     expect(groundRooms.studio_suite).toBeUndefined();
-    expect(groundRooms.lobby).toEqual({ descrption: "公寓大厅", count: 1, access: "entrance" });
-    expect(groundRooms.stairwell).toEqual({ descrption: "楼梯间", count: 1, access: "vertical" });
+    expect(groundRooms.lobby).toEqual({ description: "公寓大厅", count: 1, access: "entrance" });
+    expect(groundRooms.stairwell).toEqual({ description: "楼梯间", count: 1, access: "vertical" });
     expect(residentialRooms.studio_suite).toBeDefined();
   });
 
@@ -266,9 +279,9 @@ describe("building residential schema generation", () => {
     const groundRooms = schemas[candidate.details[0].featureId].levels.ground_floor.rooms;
     const residentialRooms = schemas[candidate.details[0].featureId].levels.residential_floor.rooms;
 
-    expect(groundRooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
+    expect(groundRooms.studio_suite).toEqual({ description: "单间公寓套房" });
     expect(groundRooms.standard_suite).toBeUndefined();
-    expect(residentialRooms.studio_suite).toEqual({ descrption: "单间公寓套房" });
+    expect(residentialRooms.studio_suite).toEqual({ description: "单间公寓套房" });
     expect(residentialRooms.standard_suite).toBeUndefined();
   });
 
@@ -283,10 +296,11 @@ describe("building residential schema generation", () => {
     const sectorSchema = buildSectorDistributionSchema(candidate, {
       levels: {
         residential_floor: {
+          description: "住宅层",
           span: [2],
           rooms: {
-            standard_suite: { descrption: "标准公寓套房" },
-            studio_suite: { descrption: "单间公寓套房" },
+            standard_suite: { description: "标准公寓套房" },
+            studio_suite: { description: "单间公寓套房" },
           },
         },
       },
@@ -299,14 +313,15 @@ describe("building residential schema generation", () => {
 
     expect("subRooms" in standardSuite).toBe(true);
     if ("subRooms" in standardSuite) {
+      expect(standardSuite.description).toBe("标准公寓套房");
       expect(standardSuite.count).toBe(1);
       expect(standardSuite.subRooms).toEqual({
-        bedroom_wild: { descrption: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 2 },
-        living_room: { descrption: "客厅", count: 1 },
-        kitchen: { descrption: "带餐厅的厨房", count: 1 },
-        bath_room: { descrption: "浴室", count: 1 },
-        rest_room: { descrption: "厕所", count: 1 },
-        closet: { descrption: "储物间", count: 1 },
+        bedroom_wild: { description: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 2 },
+        living_room: { description: "客厅", count: 1 },
+        kitchen: { description: "带餐厅的厨房", count: 1 },
+        bath_room: { description: "浴室", count: 1 },
+        rest_room: { description: "厕所", count: 1 },
+        closet: { description: "储物间", count: 1 },
       });
       expect(standardSuite.subRooms.bedroom).toBeUndefined();
       expect(standardSuite.subRooms.kids_bedroom).toBeUndefined();
@@ -314,11 +329,12 @@ describe("building residential schema generation", () => {
     }
     expect("subRooms" in studioSuite).toBe(true);
     if ("subRooms" in studioSuite) {
+      expect(studioSuite.description).toBe("单间公寓套房");
       expect(studioSuite.count).toBe(1);
       expect(studioSuite.subRooms).toEqual({
-        bedroom_wild: { descrption: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 1 },
-        living_room: { descrption: "与厨房相连的客厅", count: 1 },
-        bath_room: { descrption: "带厕所浴室", count: 1 },
+        bedroom_wild: { description: "卧室类房间（可为卧室/儿童卧室/办公室）", count: 1 },
+        living_room: { description: "与厨房相连的客厅", count: 1 },
+        bath_room: { description: "带厕所浴室", count: 1 },
       });
       expect(studioSuite.subRooms.bedroom).toBeUndefined();
     }
@@ -338,10 +354,11 @@ describe("building residential schema generation", () => {
     const sectorSchema = buildSectorDistributionSchema(candidate, {
       levels: {
         residential_floor: {
+          description: "住宅层",
           span: [2],
           rooms: {
-            standard_suite: { descrption: "标准公寓套房" },
-            studio_suite: { descrption: "单间公寓套房" },
+            standard_suite: { description: "标准公寓套房" },
+            studio_suite: { description: "单间公寓套房" },
           },
         },
       },
@@ -376,11 +393,14 @@ describe("building residential schema generation", () => {
     const schemas = buildHouseCategorySchemaFromDistribution(appliedBaseSchema, candidate);
     const schema = schemas[candidate.details[0].featureId];
 
-    expect(schema.levels.top_floor.rooms.top_room).toEqual({ descrption: "顶层房间" });
-    expect(schema.levels.ground_floor.rooms.ground_room).toEqual({ descrption: "底层房间" });
-    expect(schema.levels.ground_floor.rooms.whole_room).toEqual({ descrption: "全楼层房间" });
-    expect(schema.levels.top_floor.rooms.whole_room).toEqual({ descrption: "全楼层房间" });
-    expect(schema.levels.top_floor.rooms.fallback_room).toEqual({ descrption: "随机房间" });
+    expect(schema.levels.ground_floor.description).toBe("地面层");
+    expect(schema.levels.top_floor.description).toBe("顶层");
+    expect(schema.levels.attic.description).toBe("阁楼");
+    expect(schema.levels.top_floor.rooms.top_room).toEqual({ description: "顶层房间" });
+    expect(schema.levels.ground_floor.rooms.ground_room).toEqual({ description: "底层房间" });
+    expect(schema.levels.ground_floor.rooms.whole_room).toEqual({ description: "全楼层房间" });
+    expect(schema.levels.top_floor.rooms.whole_room).toEqual({ description: "全楼层房间" });
+    expect(schema.levels.top_floor.rooms.fallback_room).toEqual({ description: "随机房间" });
     expect(schema.levels.ground_floor.rooms.fallback_room).toBeUndefined();
   });
 
@@ -394,11 +414,12 @@ describe("building residential schema generation", () => {
     const sectorSchema = buildSectorDistributionSchema(candidate, {
       levels: {
         ground_floor: {
+          description: "地面层",
           span: [1],
           rooms: {
-            bedroom: { descrption: "卧室" },
-            living_room: { descrption: "与餐厅、厨房相连的客厅" },
-            bath_room: { descrption: "带厕所的浴室" },
+            bedroom: { description: "卧室" },
+            living_room: { description: "与餐厅、厨房相连的客厅" },
+            bath_room: { description: "带厕所的浴室" },
           },
         },
       },
@@ -411,9 +432,10 @@ describe("building residential schema generation", () => {
     expect(schema.featureId).toBe(candidate.details[0].featureId);
     expect(schema.category).toBe("house");
     expect(schema.centerPosition).toEqual(candidate.centerPosition);
-    expect(rooms.bedroom).toEqual({ descrption: "卧室", count: 1, access: "vertical" });
+    expect(schema.levels.ground_floor.description).toBe("地面层");
+    expect(rooms.bedroom).toEqual({ description: "卧室", count: 1, access: "vertical" });
     expect(rooms.living_room).toEqual({
-      descrption: "与餐厅、厨房相连的客厅",
+      description: "与餐厅、厨房相连的客厅",
       count: 1,
       access: "entrance",
     });
@@ -444,7 +466,8 @@ describe("building residential schema generation", () => {
 
     expect(schema?.category).toBe("garage");
     expect(Object.keys(schema?.levels || {})).toEqual(["default_floor"]);
-    expect(schema?.levels.default_floor.sectors.main.rooms.garage).toEqual({ descrption: "车库", count: 1, access: "entrance" });
+    expect(schema?.levels.default_floor.description).toBe("单层空间");
+    expect(schema?.levels.default_floor.sectors.main.rooms.garage).toEqual({ description: "车库", count: 1, access: "entrance" });
     expect(schema?.levels.default_floor.sectors.main.rooms.hall).toBeUndefined();
     expect(schema?.levels.default_floor.sectors.main.rooms.stairwell).toBeUndefined();
   });
@@ -463,6 +486,8 @@ describe("building residential schema generation", () => {
 
     expect(schema?.category).toBe("apartment");
     expect(Object.keys(schema?.levels || {})).toEqual(["ground_floor", "residential_floor"]);
+    expect(schema?.levels.ground_floor.description).toBe("地面层");
+    expect(schema?.levels.residential_floor.description).toBe("住宅层");
     expect(schema?.levels.residential_floor.sectors.main.rooms.standard_suite).toBeDefined();
   });
 
@@ -492,9 +517,10 @@ describe("building residential schema generation", () => {
     const groundRooms = schema?.levels.ground_floor.sectors.main.rooms;
 
     expect(schema?.category).toBe("apartment&apartment_utility");
-    expect(groundRooms?.mail_room).toEqual({ descrption: "收发室", count: 1 });
-    expect(groundRooms?.laundry_room).toEqual({ descrption: "公共洗衣房", count: 1 });
-    expect(groundRooms?.gym).toEqual({ descrption: "健身房", count: 1 });
+    expect(schema?.levels.ground_floor.description).toBe("地面层");
+    expect(groundRooms?.mail_room).toEqual({ description: "收发室", count: 1 });
+    expect(groundRooms?.laundry_room).toEqual({ description: "公共洗衣房", count: 1 });
+    expect(groundRooms?.gym).toEqual({ description: "健身房", count: 1 });
   });
 
   it("generateBuildingSchema fixes tiny ambiguous residential buildings as tool sheds", async () => {
@@ -524,7 +550,7 @@ describe("building residential schema generation", () => {
     expect(schema?.category).toBe("tool_shed");
     expect(Object.keys(schema?.levels || {})).toEqual(["default_floor"]);
     expect(schema?.levels.default_floor.sectors.main.rooms.tool_shed).toEqual({
-      descrption: "工具屋",
+      description: "工具屋",
       count: 1,
       access: "entrance",
     });
@@ -572,6 +598,7 @@ function buildSectorDistributionSchema(
   candidate: BuildingCandidate,
   input: {
     levels: Record<string, {
+      description?: string;
       span: number[];
       rooms: SectorDistributionSchem["levels"][string]["sectors"][string]["rooms"];
     }>;
@@ -581,6 +608,7 @@ function buildSectorDistributionSchema(
     [candidate.details[0].featureId]: {
       levels: Object.fromEntries(
         Object.entries(input.levels).map(([levelKey, level]) => [levelKey, {
+          description: level.description ?? getTestFloorDescription(levelKey),
           span: level.span,
           sectors: {
             main: {
@@ -593,6 +621,20 @@ function buildSectorDistributionSchema(
       ),
     },
   };
+}
+
+function getTestFloorDescription(levelKey: string): string {
+  const floorDescriptions: Record<string, string> = {
+    ground_floor: "地面层",
+    middle_floor: "中间层",
+    top_floor: "顶层",
+    attic: "阁楼",
+    basement: "地下室",
+    default_floor: "单层空间",
+    residential_floor: "住宅层",
+  };
+
+  return floorDescriptions[levelKey] ?? levelKey;
 }
 
 function buildAccessoryCategorySchemas(candidate: BuildingCandidate) {

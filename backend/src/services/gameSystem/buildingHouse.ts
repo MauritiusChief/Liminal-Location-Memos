@@ -64,9 +64,18 @@ export const HOUSE_CATEGORY: CategoryDefinition = {
     }}
   }
 };
-const HOUSE_FLOORS = ["ground_floor", "middle_floor", "top_floor"]
-const ATTIC_FLOOR = "attic"
+
+const ATTIC_FLOOR = "attic";
+const ATTIC_FLOOR_DESCRIPTION = "阁楼";
 const BASE_FLOOR = "basement";
+const BASE_FLOOR_DESCRIPTION = "地下室";
+const HOUSE_FLOOR_DESCRIPTIONS: Record<string, string> = {
+  ground_floor: "地面层",
+  middle_floor: "中间层",
+  top_floor: "顶层",
+};
+
+const HOUSE_FLOORS = Object.keys(HOUSE_FLOOR_DESCRIPTIONS)
 
 //#region Category 逻辑
 
@@ -165,14 +174,18 @@ export function buildHouseCategorySchemaFromDistribution(
 
     // 组装空的楼层
     const levels: Record<string, CategoryLevelSchema> = {}
+    const concreteLevelKeys: string[] = []
     for (let i = 1; i <= buildingLevels; i++) {
       const levelKey = resolveHouseConcreteLevelKey(i, buildingLevels)
+      concreteLevelKeys.push(levelKey)
       levels[levelKey] = {
+        description: HOUSE_FLOOR_DESCRIPTIONS[levelKey] ?? levelKey,
         span: [i], // span 固定只有1层的范围
         rooms: {}, // 等待后续装填
       }
     }
     levels[ATTIC_FLOOR] = { // 添加阁楼
+      description: ATTIC_FLOOR_DESCRIPTION,
       span: [buildingLevels+1],
       rooms: {},
     }
@@ -181,7 +194,7 @@ export function buildHouseCategorySchemaFromDistribution(
     // 每个建筑所对应的功能房间都要决定一次装填到哪个楼层
     Object.entries(roomDefs).forEach(([roomKey, definition]) => {
       // 决定去哪个/哪些楼层，返回这些楼层的 key
-      const levelKeys = resolveHouseCategorySchemaLevelKeys(definition.prefered, levels, HOUSE_FLOORS);
+      const levelKeys = resolveHouseCategorySchemaLevelKeys(definition.prefered, levels, concreteLevelKeys);
       for (const levelKey of levelKeys) {
         if (definition.chance && 1 - definition.chance > Math.random()) continue // 有概率直接跳过，不写入 levels
         levels[levelKey].rooms[roomKey] = {
@@ -283,6 +296,7 @@ export function finishHouseBuildingSchema(
         );
 
         return [levelKey, {
+          description: level.description,
           span: level.span,
           sectors,
         }];

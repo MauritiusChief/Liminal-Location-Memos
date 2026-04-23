@@ -76,7 +76,11 @@ export const APARTMENT_SUITE_TEMPLATES: Record<string, Record<string, ApartmentS
 };
 const APARTMENT_SUITE_KEYS = Object.keys(APARTMENT_SUITE_TEMPLATES)
 
-const APARTMENT_FLOORS = ["ground_floor", "residential_floor"];
+const APARTMENT_FLOOR_DESCRIPTIONS: Record<string, string> = {
+  ground_floor: "地面层",
+  residential_floor: "住宅层",
+};
+const APARTMENT_FLOORS = Object.keys(APARTMENT_FLOOR_DESCRIPTIONS)
 
 //#region Category 逻辑
 
@@ -150,10 +154,12 @@ export function buildApartmentCategorySchemaFromDistribution(
   Object.entries(appliedBaseSchema).forEach(([featureId, roomDefs]) => {
     const levels: Record<string, CategoryLevelSchema> = {
       [APARTMENT_FLOORS[0]]: {
+        description: APARTMENT_FLOOR_DESCRIPTIONS[APARTMENT_FLOORS[0]],
         span: [1],
         rooms: {},
       },
       [APARTMENT_FLOORS[1]]: {
+        description: APARTMENT_FLOOR_DESCRIPTIONS[APARTMENT_FLOORS[1]],
         span: rangeNumbers(2, buildingLevels),
         rooms: {},
       },
@@ -232,6 +238,7 @@ export function finishApartmentBuildingSchema(
         );
 
         return [levelKey, {
+          description: level.description,
           span: level.span,
           sectors,
         }];
@@ -263,8 +270,9 @@ function resolveApartmentSectorRooms(
 
   Object.entries(rooms).forEach(([roomKey, room]) => {
     if (APARTMENT_SUITE_KEYS.includes(roomKey)) {
-      const suite = buildApartmentSuiteSchema(roomKey);
+      const suite = buildApartmentSuiteSchema(roomKey, room.description);
       result[roomKey] = {
+        description: room.description,
         count: suite.count,
         subRooms: suite.subRooms,
       };
@@ -297,13 +305,14 @@ function resolveApartmentSectorRooms(
  */
 function buildApartmentSuiteSchema(
   suiteKey: string,
+  description: string,
 ): SuiteSchema {
   const templates = APARTMENT_SUITE_TEMPLATES[suiteKey] ?? APARTMENT_SUITE_TEMPLATES[APARTMENT_SUITE_KEYS[0]];
   const templateKey = pickRandom(Object.keys(templates));
   const template = templates[templateKey];
   const subRooms = buildApartmentSuiteSubRooms(template);
 
-  return { count: 1, subRooms };
+  return { description, count: 1, subRooms };
 }
 
 function buildApartmentSuiteSubRooms(
