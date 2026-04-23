@@ -88,6 +88,9 @@ const MOVE_PLAYER_TOOL: GameStateToolDef = {
     reason: { type: 'string', optional: true, description: '简短说明为何这样移动。' },
   },
 };
+/**
+ * 需要在 World State Prompt 中提示所在建筑的结构，如果在建筑当中的话
+ */
 const SET_PLAYER_INDOOR_LOCATION_TOOL: GameStateToolDef = {
   name: 'set_player_indoor_location',
   description: [
@@ -98,6 +101,22 @@ const SET_PLAYER_INDOOR_LOCATION_TOOL: GameStateToolDef = {
     buildingId: { type: 'string', optional: true, description: '玩家移动的目标建筑物体，为该建筑物的 featureId，仅在 `leave` 行动类型下为非必须参数。'},
     level: { type: 'number', optional: true, description: '玩家移动的目标楼层，为该楼层的层号数，仅在 `move` 行动类型下为必须参数。'},
     roomId: { type: 'string', optional: true, description: '玩家移动的目标房间的 id，仅在同一楼层间移动时为必须参数。'},
+  }
+}
+/**
+ * 注意：只负责单个 indoor location 更新。
+ * 玩家进入建筑、跨越楼层时，基板 active indoor locations 会由程序生成（只可见当前 Sector、Suite 外部）。
+ */
+const SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL: GameStateToolDef = {
+  name: 'sync_active_indoor_locations',
+  description: [
+    '结合玩家所在建筑的信息、玩家当前的可视建筑位置以及玩家的行动，判断是否需要更新现有的可视建筑位置列表。',
+    '如果需要更新，则使用此工具将需要添加或者删除的可视建筑位置写入游戏状态机。'
+  ],
+  arguments: {
+    edit: { type: 'string', optional: false, description: '更新的类型，必须为`reveal`(揭露可视位置), `hide`(隐藏可视位置)二者之一。'},
+    level: { type: 'number', optional: false, description: '被揭露或者隐藏的建筑位置的楼层层号数。'},
+    roomId: { type: 'string', optional: false, description: '被揭露或者隐藏的建筑位置的房间 id。'},
   }
 }
 
@@ -231,8 +250,10 @@ async function executeTurnStream(
     // 先让专门的 agent 决定“这句玩家输入会触发哪些状态操作”。
     const toolCalls = await gameStateManager(workingState);
     applyGameStateToolCalls(workingState, toolCalls);
-    // 玩家位置可能改变，因此需要重新计算当前哪些 Field Visual Description 生效。
+    // 以防玩家位置更新了，需要更新一下位置会影响激活效果的 VD 的 id
     syncActiveFieldVisualDescriptions(workingState);
+    syncActiveExteriorVisualDescriptions(workingState);
+    syncActiveSectorVisualDescriptions(workingState);
 
     const bookMessage = await streamRegularBookMessage(workingState, emit);
     workingState.messageHistory.push({
@@ -329,6 +350,14 @@ async function streamInitialBookMessage(
   console.log(`[${new Date().toISOString()}] initialBookMessage() 触发`);
 
   const { lat, lon } = state.playerPosition;
+  /**
+   * TODO 添加根据 state 中的 playerIndoorLocation 的 feature id 生成 Building Schema，然后生成 Building Record，
+   * 随机选择 roomId 和 level 替换 playerIndoorLocation 的独特占位符，
+   * 再然后机械生成基板 active indoor locations（只可见所在 sector 且 suite 内部不可见）填充入 state，
+   * 最后供 World State Prompt 生成器使用。
+   * 如果是室内的话，就用不着生成 sceneObject 了。
+   * INITIAL_BOOK_MESSAGE_SYSTEM 也需要重命名为室外用，然后准备一套室内用的提示词。
+   */
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: INITIAL_SCENE_RADIUS_METERS }, state.playerOrientation);
   const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
   await writeGameDebugRequest({
@@ -445,11 +474,14 @@ async function streamRegularBookMessage(
 async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> {
   console.log(`[${new Date().toISOString()}] gameStateManager() 触发`);
 
-  const toolDefs = [MOVE_PLAYER_TOOL, SET_PLAYER_INDOOR_LOCATION_TOOL].map((def) => toToolPrompt(def));
+  const toolDefs = [MOVE_PLAYER_TOOL, SET_PLAYER_INDOOR_LOCATION_TOOL, SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL].map((def) => toToolPrompt(def));
   const systemPrompt = BUILD_GAME_STATE_MANAGER_SYSTEM(toolDefs);
   const messageHistory = state.messageHistory;
   const latestPlayerMessage = messageHistory[messageHistory.length - 1];
   // 组装 world state 提示词
+  /**
+   * TODO 与另一处 toWorldStatePrompt 类似，如果是室内的话，就用不着生成 sceneObject 了。
+   */
   const { lat, lon } = state.playerPosition;
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: WORLD_STATE_RADIUS_METERS}, state.playerOrientation);
   const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
@@ -505,20 +537,20 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
 }
 
 /**
+ * TODO：
+ * - 添加把 state 中的 active indoor positions 转化为提示词（玩家可视的建筑位置数据）
+ * - 根据玩家是否在室内切换是否启用 scenePrompt、field VD、 exterior VD（室外时才启用）、sector VD（玩家周遭室内场景细节记录）（室内时才启用）
+ *
  * 把当前 GameState 转成可消费的 world-state 提示词。
  * world-state 提示词消费者：
  * - Book 消息生成者
  * - Game State Manager
- *
- * TODO 添加更多信息，比如 Building Schema 乃至天气、物品、玩家状态等信息
  * @param state
  * @param scene 已按照合理半径获取的 Scene Object
  * @returns TODO 目前仅包含 scenePrompt 和 VisualDescription 的提示词
  */
 async function toWorldStatePrompt(state: GameState, scene: SceneObject): Promise<string> {
   const scenePrompt = buildScenePrompt(scene, state.playerOrientation);
-  syncActiveFieldVisualDescriptions(state);
-  syncActiveExteriorVisualDescriptions(state, collectSceneBuildingIds(scene));
 
   const fieldVisualDescriptions = Object.entries(state.fieldVisualDescriptions)
     .filter(([id]) => state.activeFieldVisualDescriptions.includes(id))
@@ -577,7 +609,10 @@ interface ExtractedVisualDescriptions {
 }
 
 /**
- * 为当前位置补写或更新 Field Visual Description 与 Exterior Visual Description。
+ * TODO 添加 Sector Visual Description 更新逻辑
+ *
+ * BOOK MESSAGE 已发送出去之后，根据此 BOOK MESSAGE 为最新的玩家位置
+ * 补写或更新 Field Visual Description 与 Exterior Visual Description。
  *
  * Field VD 的规则是：
  * - 若 300m 范围内已有最近的一条记录，则更新它；
@@ -592,7 +627,6 @@ async function upsertVisualDescriptions(state: GameState, bookMessage: string): 
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: VISUAL_DESCRIPTION_RADIUS_METERS }, state.playerOrientation);
   const visibleBuildingIds = collectSceneBuildingIds(sceneObject);
   const matchedFieldRecord = findNearestFieldVisualDescription(state, state.playerPosition);
-  syncActiveExteriorVisualDescriptions(state, visibleBuildingIds);
 
   const extracted = await extractVisualDescriptions(
     bookMessage,
@@ -603,9 +637,10 @@ async function upsertVisualDescriptions(state: GameState, bookMessage: string): 
   );
   const now = new Date().toISOString();
 
+  // 更新 Field Visual Description 的文案
   if (matchedFieldRecord) {
     matchedFieldRecord.content = extracted.field;
-    matchedFieldRecord.center = { ...state.playerPosition };
+    // matchedFieldRecord.center = { ...state.playerPosition };
     matchedFieldRecord.updatedAt = now;
   } else {
     const newRecord: FieldVisualDescriptionRecord = {
@@ -618,6 +653,7 @@ async function upsertVisualDescriptions(state: GameState, bookMessage: string): 
     state.fieldVisualDescriptions[newRecord.id] = newRecord;
   }
 
+  // 更新 Exterior Visual Description 的文案
   for (const exterior of extracted.exteriors) {
     if (!visibleBuildingIds.includes(exterior.buildingId) || !exterior.content.trim()) {
       continue;
@@ -632,11 +668,11 @@ async function upsertVisualDescriptions(state: GameState, bookMessage: string): 
     };
   }
 
-  syncActiveFieldVisualDescriptions(state);
-  syncActiveExteriorVisualDescriptions(state, visibleBuildingIds);
 }
 
 /**
+ * TODO 重命名为 extractFieldExteriorVisualDescriptions
+ *
  * 从某个 Book Message 里提取事实性细节供记录，以维持事实一致性。
  *
  * 这里的目标是把 Book 里已经说出的、之后应该继续视为事实的细节抽出来，
@@ -705,6 +741,15 @@ async function extractVisualDescriptions(
 }
 
 /**
+ * TODO 完成提取 Sector VD 的逻辑
+ * - 比对的固定式细节是 Building Record (以及未来可能的存储的物品细节等)，而非 Field/Exterior VD 使用的 OSM 数据
+ * @param bookMessage
+ */
+async function extractSectorVisualDescriptions(bookMessage: string) {
+
+}
+
+/**
  * 根据当前玩家位置，重新计算哪些 Field Visual Description 处于激活状态。
  *
  * 当前最小规则很直白：只要中心点在玩家 300m 范围内，就算 active。
@@ -721,12 +766,19 @@ function syncActiveFieldVisualDescriptions(state: GameState): void {
 }
 
 /**
- * 根据当前 Scene Object 中出现的建筑 id，重新计算哪些 Exterior Visual Description 处于激活状态。
+ * TODO 添加建筑的范围过滤逻辑，避免整个 Scene Object 中的建筑全都可以看清外观细节
+ * 可利用 Building Record 中的 centerPosition 信息
  */
-function syncActiveExteriorVisualDescriptions(state: GameState, visibleBuildingIds: string[]): void {
-  state.activeExteriorVisualDescriptions = visibleBuildingIds.filter((buildingId) =>
-    Boolean(state.exteriorVisualDescriptions[buildingId]),
-  );
+function syncActiveExteriorVisualDescriptions(state: GameState): void {
+  state.activeExteriorVisualDescriptions = Object.keys(state.exteriorVisualDescriptions)
+}
+
+/**
+ * TODO 逻辑很简单，处在某 sector 就激活这个 sector，其他的取消激活
+ * @param state
+ */
+function syncActiveSectorVisualDescriptions(state: GameState): void {
+
 }
 
 /**
@@ -770,7 +822,11 @@ function parseExtractedVisualDescriptions(reply: string): ExtractedVisualDescrip
       : [],
   };
 }
-
+/**
+ * TODO 也许可以用来一次性给所有建筑都生成 Building Schema
+ * @param scene
+ * @returns
+ */
 function collectSceneBuildingIds(scene: SceneObject): string[] {
   const microGridBuildingIds = scene.microGrid.cells
     .flatMap((row) => row)

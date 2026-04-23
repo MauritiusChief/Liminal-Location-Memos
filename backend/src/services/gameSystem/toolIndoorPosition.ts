@@ -51,3 +51,7 @@ interface BuildingSubRoom {
 export function ensureBuildingSchema(featureId: FeatureId, state: GameState): BuildingSchema {
 
 }
+
+export function generateBuildingRecord(schema: BuildingSchema): BuildingRecord {
+
+}

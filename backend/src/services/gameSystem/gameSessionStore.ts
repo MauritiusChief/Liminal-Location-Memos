@@ -3,6 +3,7 @@ import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { BuildingSchema } from './buildingClassifier.js';
 import { BuildingRecord } from './toolIndoorPosition.js';
+import { FeatureId } from '../featureDetail.js';
 
 export interface Position {
   lat: number;
@@ -54,7 +55,7 @@ export interface SectorVisualDescriptionRecord {
 }
 
 export interface PlayerIndoorLocation {
-  buildingId: string;
+  buildingId: FeatureId;
   level: number;
   roomId: string;
 }
@@ -249,7 +250,7 @@ function createGameSave(sessionId: string): GameSave {
     gameState: {
       playerPosition: { ...DEFAULT_START_POSITION },
       playerOrientation: Math.floor(Math.random() * 360),
-      playerIndoorLocation: null,
+      playerIndoorLocation: null, // 根据 DEFAULT_STARTING_POSITION 获取所在建筑的 feature id，而 level 和 roomId 填充独特的占位符
       messageHistory: [],
       activeFieldVisualDescriptions: [],
       fieldVisualDescriptions: {},
