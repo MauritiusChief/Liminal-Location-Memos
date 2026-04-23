@@ -37,7 +37,8 @@ import {
   ensureBuildingSchema,
   fillBasicActiveIndoorLocations,
   findContainingBuildingFeatureId,
-  findIndoorRoomContext,
+  findIndoorLocationContext,
+  findVisibleLocationContext,
   generateBuildingRecord,
 } from './toolIndoorPosition.js';
 
@@ -108,12 +109,14 @@ const SET_PLAYER_INDOOR_LOCATION_TOOL: GameStateToolDef = {
     move: { type: 'string', optional: false, description: '玩家行动的类型，必须为`enter`(进入建筑), `leave`(离开建筑), `move`(在建筑中移动)这三者之一。'},
     buildingId: { type: 'string', optional: true, description: '玩家移动的目标建筑物体，为该建筑物的 featureId，仅在 `leave` 行动类型下为非必须参数。'},
     level: { type: 'number', optional: true, description: '玩家移动的目标楼层，为该楼层的层号数，仅在 `move` 行动类型下为必须参数。'},
+    suiteId: { type: 'string', optional: true, description: '若目标位置位于某套房内部，则填写该套房的 id。'},
     roomId: { type: 'string', optional: true, description: '玩家移动的目标房间的 id，仅在同一楼层间移动时为必须参数。'},
   }
 }
 /**
  * 注意：只负责单个 indoor location 更新。
- * 玩家进入建筑、跨越楼层时，基板 active indoor locations 会由程序生成（只可见当前 Sector 内的普通房间与 suite 外部，不可见 subRoom）。
+ * 玩家进入建筑、跨越楼层时，基板 active visible locations 会由程序生成。
+ * 默认只暴露当前 Sector 内的普通房间与 suite 表层，不自动暴露 suite 内 subRoom。
  */
 const SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL: GameStateToolDef = {
   name: 'sync_active_indoor_locations',
@@ -124,7 +127,8 @@ const SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL: GameStateToolDef = {
   arguments: {
     edit: { type: 'string', optional: false, description: '更新的类型，必须为`reveal`(揭露可视位置), `hide`(隐藏可视位置)二者之一。'},
     level: { type: 'number', optional: false, description: '被揭露或者隐藏的建筑位置的楼层层号数。'},
-    roomId: { type: 'string', optional: false, description: '被揭露或者隐藏的建筑位置的房间 id。'},
+    suiteId: { type: 'string', optional: true, description: '若操作的目标是某个套房表层或套房内部子房间，则填写该套房 id。'},
+    roomId: { type: 'string', optional: true, description: '被揭露或者隐藏的具体房间 id；若只操作 suite 表层则留空。'},
   }
 }
 
@@ -544,7 +548,7 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
 
 /**
  * TODO：
- * - 添加把 state 中的 active indoor positions 转化为提示词（玩家可视的建筑位置数据）
+ * - 添加把 state 中的 active visible locations 转化为提示词（玩家可视的建筑位置数据）
  * - 根据玩家是否在室内切换是否启用 scenePrompt、field VD、 exterior VD（室外时才启用）、sector VD（玩家周遭室内场景细节记录）（室内时才启用）
  *
  * 把当前 GameState 转成可消费的 world-state 提示词。
@@ -814,7 +818,7 @@ function syncActiveSectorVisualDescriptions(state: GameState): void {
     throw new Error(`Missing building record for ${location.buildingId}.`);
   }
 
-  const roomContext = findIndoorRoomContext(record, location);
+  const roomContext = findIndoorLocationContext(record, location);
   if (!roomContext) {
     throw new Error(`Room ${location.roomId} is not present in building ${location.buildingId}.`);
   }
@@ -925,16 +929,24 @@ function formatIndoorWorldStatePrompt(state: GameState): string {
     throw new Error(`Missing building record for ${location.buildingId}.`);
   }
 
-  const roomContext = findIndoorRoomContext(record, location);
+  const roomContext = findIndoorLocationContext(record, location);
   if (!roomContext) {
     throw new Error(`Room ${location.roomId} is not present in building ${location.buildingId}.`);
   }
 
   const visibleLocations = state.activeVisibleLocations
     .map((entry) => {
-      const visibleContext = findIndoorRoomContext(record, entry);
+      const visibleContext = findVisibleLocationContext(record, entry);
       if (!visibleContext) {
         return null;
+      }
+
+      if (visibleContext.locationType === 'suite') {
+        return [
+          `* level=${visibleContext.level}`,
+          `sector=${visibleContext.sectorName}`,
+          `suite=${visibleContext.suiteId} / （仅表层可见） / ${visibleContext.suiteDescription}`,
+        ].join(' / ');
       }
 
       return [

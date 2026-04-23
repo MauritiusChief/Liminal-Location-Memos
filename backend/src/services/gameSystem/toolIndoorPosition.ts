@@ -1,7 +1,7 @@
 import { query } from "@/db/client.js";
 import { FeatureId } from "../featureDetail.js";
 import { BuildingSchema, RoomSchema, SuiteSchema, generateBuildingSchema, pickRandom } from "./buildingClassifier.js";
-import { GameState, PlayerIndoorLocation, Position } from "./gameSessionStore.js";
+import { GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position } from "./gameSessionStore.js";
 
 export interface BuildingRecord {
   featureId: string;
@@ -51,11 +51,11 @@ export interface BuildingSubRoom {
 export interface IndoorRoomContext {
   level: number;
   sectorName: string;
-  roomId: string;
-  roomType: "room" | "subRoom";
-  roomDescription: string;
+  locationType: "room" | "suite" | "subRoom";
   suiteId?: string;
   suiteDescription?: string;
+  roomId?: string;
+  roomDescription?: string;
 }
 
 interface DbContainingBuildingRow {
@@ -152,7 +152,7 @@ export function chooseInitialIndoorLocation(record: BuildingRecord): PlayerIndoo
   }
 
   const sector = pickRandom(sectors);
-  const roomContexts = listSectorRoomContexts(level.level, sector);
+  const roomContexts = listSectorInteractiveContexts(level.level, sector);
   if (roomContexts.length === 0) {
     throw new Error(`Building record ${record.featureId} level ${level.level} sector ${sector.name} has no occupiable rooms.`);
   }
@@ -161,18 +161,19 @@ export function chooseInitialIndoorLocation(record: BuildingRecord): PlayerIndoo
   return {
     buildingId: record.featureId,
     level: chosen.level,
-    roomId: chosen.roomId,
+    ...(chosen.suiteId ? { suiteId: chosen.suiteId } : {}),
+    roomId: chosen.roomId!,
   };
 }
 
 /**
- * 反查 roomId 当前归属的楼层、sector 和 suite 上下文。
+ * 反查玩家当前所处位置的楼层、sector 和 suite 上下文。
  * 这样 world state、可见范围和 sector VD 激活都能共用同一套定位结果。
  * @param record
  * @param location
  * @returns
  */
-export function findIndoorRoomContext(
+export function findIndoorLocationContext(
   record: BuildingRecord,
   location: PlayerIndoorLocation,
 ): IndoorRoomContext | null {
@@ -182,8 +183,11 @@ export function findIndoorRoomContext(
   }
 
   for (const sector of Object.values(level.sectors)) {
-    const roomContext = listSectorRoomContexts(location.level, sector)
-      .find((entry) => entry.roomId === location.roomId);
+    const roomContext = listSectorInteractiveContexts(location.level, sector)
+      .find((entry) => (
+        entry.roomId === location.roomId
+        && entry.suiteId === location.suiteId
+      ));
     if (roomContext) {
       return roomContext;
     }
@@ -193,7 +197,37 @@ export function findIndoorRoomContext(
 }
 
 /**
- * 根据当前玩家室内位置生成基板 active indoor locations。
+ * 反查某个可见位置实际对应的上下文。
+ * 可见位置既可能是普通房间，也可能是 suite 容器，或者 suite 内某个 subRoom。
+ * @param record
+ * @param location
+ * @returns
+ */
+export function findVisibleLocationContext(
+  record: BuildingRecord,
+  location: PlayerVisibleLocation,
+): IndoorRoomContext | null {
+  const level = record.levels[location.level];
+  if (!level) {
+    return null;
+  }
+
+  for (const sector of Object.values(level.sectors)) {
+    const visibleContext = listSectorVisibleContexts(location.level, sector)
+      .find((entry) => (
+        entry.suiteId === location.suiteId
+        && entry.roomId === location.roomId
+      ));
+    if (visibleContext) {
+      return visibleContext;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 根据当前玩家室内位置生成基板 active visible locations。
  * 当前最小规则只暴露所在 sector 内的普通房间与 suite 外部。
  * @param state
  * @returns
@@ -206,29 +240,21 @@ export function fillBasicActiveIndoorLocations(state: GameState): void {
   }
 
   const record = state.buildingRecords[location.buildingId];
+  if (!record) {
+    throw new Error(`Missing building record for ${location.buildingId}.`);
+  }
 
-  const roomContext = findIndoorRoomContext(record, location);
+  const roomContext = findIndoorLocationContext(record, location);
   if (!roomContext) {
     throw new Error(`Room ${location.roomId} is not present in building ${location.buildingId}.`);
   }
 
   const sector = record.levels[roomContext.level]?.sectors[roomContext.sectorName];
+  if (!sector) {
+    throw new Error(`Sector ${roomContext.sectorName} is not present in building ${location.buildingId} level ${roomContext.level}.`);
+  }
 
-  state.activeVisibleLocations = Object.entries(sector.rooms).map(([roomKey, room]) => {
-    return {
-      level,
-      sectorName: sector.name,
-      roomId: room.roomId,
-      roomType: "room",
-      roomDescription: room.description,
-    });
-  });
-
-  listSectorRoomContexts(roomContext.level, sector).map((entry) => ({
-    buildingId: location.buildingId,
-    level: entry.level,
-    roomId: entry.roomId,
-  }));
+  state.activeVisibleLocations = listSectorVisibleLocations(location.buildingId, roomContext.level, sector);
 }
 
 //#region 帮助函数
@@ -272,6 +298,7 @@ function expandSectorRooms(
       rangeCount(suiteCount).forEach((index) => {
         const suiteId = toIndexedRoomId(roomKey, index, suiteCount);
         expandedEntries.push([suiteId, {
+          suiteId,
           description: room.description,
           subRooms: expandSuiteSubRooms(suiteId, room.subRooms),
         }]);
@@ -323,7 +350,7 @@ function expandSuiteSubRooms(
  * @param sector
  * @returns
  */
-function listSectorRoomContexts(level: number, sector: BuildingSector): IndoorRoomContext[] {
+function listSectorInteractiveContexts(level: number, sector: BuildingSector): IndoorRoomContext[] {
   const contexts: IndoorRoomContext[] = [];
   Object.entries(sector.rooms).forEach(([roomKey, room]) => {
     if ("subRooms" in room) {
@@ -331,8 +358,8 @@ function listSectorRoomContexts(level: number, sector: BuildingSector): IndoorRo
         contexts.push({
           level,
           sectorName: sector.name,
+          locationType: "subRoom",
           roomId: subRoom.roomId,
-          roomType: "subRoom",
           roomDescription: subRoom.description,
           suiteId: roomKey,
           suiteDescription: room.description,
@@ -344,13 +371,61 @@ function listSectorRoomContexts(level: number, sector: BuildingSector): IndoorRo
     contexts.push({
       level,
       sectorName: sector.name,
+      locationType: "room",
       roomId: room.roomId,
-      roomType: "room",
       roomDescription: room.description,
     });
   });
 
   return contexts;
+}
+
+function listSectorVisibleContexts(level: number, sector: BuildingSector): IndoorRoomContext[] {
+  const contexts: IndoorRoomContext[] = [];
+  Object.values(sector.rooms).forEach((room) => {
+    if ("subRooms" in room) {
+      contexts.push({
+        level,
+        sectorName: sector.name,
+        locationType: "suite",
+        suiteId: room.suiteId,
+        suiteDescription: room.description,
+      });
+      return;
+    }
+
+    contexts.push({
+      level,
+      sectorName: sector.name,
+      locationType: "room",
+      roomId: room.roomId,
+      roomDescription: room.description,
+    });
+  });
+
+  return contexts;
+}
+
+/**
+ * 生成当前 sector 的基板可见范围：
+ * - 普通房间直接公开 roomId；
+ * - suite 只公开 suiteId，默认不自动公开内部 subRoom。
+ * @param buildingId
+ * @param level
+ * @param sector
+ * @returns
+ */
+export function listSectorVisibleLocations(
+  buildingId: FeatureId,
+  level: number,
+  sector: BuildingSector,
+): PlayerVisibleLocation[] {
+  return listSectorVisibleContexts(level, sector).map((context) => ({
+    buildingId,
+    level: context.level,
+    ...(context.suiteId ? { suiteId: context.suiteId } : {}),
+    ...(context.locationType === "room" && context.roomId ? { roomId: context.roomId } : {}),
+  }));
 }
 
 function normalizeCount(count: number | undefined): number {
