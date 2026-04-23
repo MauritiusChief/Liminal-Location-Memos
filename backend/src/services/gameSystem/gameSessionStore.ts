@@ -53,7 +53,7 @@ export interface LevelVisualDescriptionRecord {
 export interface PlayerIndoorLocation {
   buildingId: string;
   level: number;
-  roomKey: string;
+  roomId: string;
 }
 
 /**
@@ -70,6 +70,7 @@ export interface GameState {
   activeExteriorVisualDescriptions: string[];
   exteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
   buildingSchemas: Record<string, BuildingSchema>;
+  buildingRecords: Record<string, BuildingRecord>;
   levelVisualDescriptions: Record<string, LevelVisualDescriptionRecord>;
 }
 

@@ -88,6 +88,18 @@ const MOVE_PLAYER_TOOL: GameStateToolDef = {
     reason: { type: 'string', optional: true, description: '简短说明为何这样移动。' },
   },
 };
+const SET_PLAYER_INDOOR_LOCATION_TOOL: GameStateToolDef = {
+  name: 'set_player_indoor_location',
+  description: [
+    '当用户明确或隐含地要求玩家进入或离开建筑，或者在建筑的房间之间移动时，使用此工具改变游戏角色在建筑中的位置。'
+  ],
+  arguments: {
+    move: { type: 'string', optional: false, description: '玩家行动的类型，必须为`enter`(进入建筑), `leave`(离开建筑), `move`(在建筑中移动)这三者之一。'},
+    buildingId: { type: 'string', optional: true, description: '玩家移动的目标建筑物体，为该建筑物的 featureId，仅在 `leave` 行动类型下为非必须参数。'},
+    level: { type: 'number', optional: true, description: '玩家移动的目标楼层，为该楼层的层号数，仅在 `move` 行动类型下为必须参数。'},
+    roomId: { type: 'string', optional: true, description: '玩家移动的目标房间的 id，仅在同一楼层间移动时为必须参数。'},
+  }
+}
 
 //#region 出口函数
 
@@ -319,13 +331,6 @@ async function streamInitialBookMessage(
   const { lat, lon } = state.playerPosition;
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: INITIAL_SCENE_RADIUS_METERS }, state.playerOrientation);
   const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
-  // TODO 自动生成可生成的 Building Schema（当前仅完成 Category 和 Pattern 打印）
-  // const {microGrid, polarView} = sceneObject
-  // const featureIds = [
-  //   ...microGrid.cells.flatMap(cell => cell).flatMap(cell => cell.sourceFeatureIds),
-  //   ...(polarView?.levels.flatMap( l => l.clusters.flatMap( c => c.features.flatMap( f => f.featureId))) ?? [])
-  // ]
-  // featureIds.forEach( async id => await generateBuildingSchema(id, Object.values(state.buildingSchemas))) // TODO 当前仅打印
   await writeGameDebugRequest({
     mode: 'user-message',
     functionName: 'streamInitialBookMessage',
@@ -384,13 +389,6 @@ async function streamRegularBookMessage(
   const { lat, lon } = state.playerPosition;
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: WORLD_STATE_RADIUS_METERS}, state.playerOrientation);
   const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
-  // TODO 自动生成可生成的 Building Schema（当前仅完成 Category 和 Pattern 打印）
-  // const {microGrid, polarView} = sceneObject
-  // const featureIds = [
-  //   ...microGrid.cells.flatMap(cell => cell).flatMap(cell => cell.sourceFeatureIds),
-  //   ...(polarView?.levels.flatMap( l => l.clusters.flatMap( c => c.features.flatMap( f => f.featureId))) ?? [])
-  // ]
-  // featureIds.forEach( async id => await generateBuildingSchema(id, state.buildingSchemas)) // TODO 当前仅打印
   // 组装消息历史
   const messageHistory = state.messageHistory.slice(Math.max(0, state.messageHistory.length - 12));
   await writeGameDebugRequest({
@@ -447,7 +445,7 @@ async function streamRegularBookMessage(
 async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> {
   console.log(`[${new Date().toISOString()}] gameStateManager() 触发`);
 
-  const toolDefs = [MOVE_PLAYER_TOOL].map((def) => toToolPrompt(def));
+  const toolDefs = [MOVE_PLAYER_TOOL, SET_PLAYER_INDOOR_LOCATION_TOOL].map((def) => toToolPrompt(def));
   const systemPrompt = BUILD_GAME_STATE_MANAGER_SYSTEM(toolDefs);
   const messageHistory = state.messageHistory;
   const latestPlayerMessage = messageHistory[messageHistory.length - 1];
@@ -508,8 +506,7 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
 
 /**
  * 把当前 GameState 转成可消费的 world-state 提示词。
- * 过程中会从数据库请求信息以组建 Scene Object
- * 消费者：
+ * world-state 提示词消费者：
  * - Book 消息生成者
  * - Game State Manager
  *
