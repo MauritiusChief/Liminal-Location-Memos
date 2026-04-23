@@ -2,8 +2,12 @@ import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { DbBuildingFeatureDetailRow, FeatureDetail, FeatureId, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
 import { Position } from "./gameSessionStore.js";
-import { ambiguousResidentialCategory, buildApartmentCategorySchemaFromDistribution, buildHouseCategorySchemaFromDistribution, buildResidentialAccessoryCategorySchemaFromDistribution, finishApartmentBuildingSchema, finishHouseBuildingSchema, finishResidentialAccessoryBuildingSchema, RESIDENTIAL_CATEGORIES, RESIDENTIAL_CATEGORY_KEYS, RESIDENTIAL_PATTERN_KEYS, selectResidentialPatternKey } from "./buildingResidential.js";
 import { trimTagValue } from "../utils.js";
+import { APARTMENT_CATEGORY, buildApartmentCategorySchemaFromDistribution, finishApartmentBuildingSchema, isAmbiguousApartmentCategory, selectApartmentPatternKey } from "./buildingApartment.js";
+import { APARTMENT_UTILITY_CATEGORY } from "./buildingApartmentUtility.js";
+import { buildHouseCategorySchemaFromDistribution, finishHouseBuildingSchema, HOUSE_CATEGORY, isAmbiguousHouseCategory, selectHousePatternKey } from "./buildingHouse.js";
+import { buildResidentialAccessoryCategorySchemaFromDistribution, finishResidentialAccessoryBuildingSchema, GARAGE_CATEGORY, isAmbiguousHouseAccessoryCategory, TOOL_SHED_CATEGORY } from "./buildingHouseAccessory.js";
+import { fetchHouseDetermingFactor, fetchNearbyParkingSignal, getNearbyResidentialSchemas, getResidentialCategoryDefinition, isResidential, registerResidentialCategoryDefinitions, RESIDENTIAL_PATTERN_KEYS } from "./buildingUtils.js";
 
 // Data Base 类型
 
@@ -254,9 +258,14 @@ const EXPLICIT_APARTMENT_BUILDING_VALUES = new Set(["apartment", "apartments"]);
 const EXPLICIT_GARAGE_BUILDING_VALUES = new Set(["garage", "garages", "carport"]);
 const EXPLICIT_TOOL_SHED_BUILDING_VALUES = new Set(["shed"]);
 
-const ALL_CATEGORIES = {...RESIDENTIAL_CATEGORIES}
-const ALL_CATEGORY_KEYS = [...RESIDENTIAL_CATEGORY_KEYS]
-const ALL_PATTERN_KEYS = [...RESIDENTIAL_PATTERN_KEYS]
+const ALL_CATEGORIES: Record<string, CategoryDefinition> = {
+  house: HOUSE_CATEGORY,
+  garage: GARAGE_CATEGORY,
+  tool_shed: TOOL_SHED_CATEGORY,
+  apartment: APARTMENT_CATEGORY,
+  apartment_utility: APARTMENT_UTILITY_CATEGORY,
+}
+registerResidentialCategoryDefinitions(ALL_CATEGORIES);
 
 /**
  * 把任意传入的 building feature id 填充为后续分类所用的“有效候选”。
@@ -340,7 +349,19 @@ async function resolveAmbiguousCategory(
   candidate: BuildingCandidate,
   existingSchemas: BuildingSchema[]
 ): Promise<string[]> {
-  return ambiguousResidentialCategory(candidate, existingSchemas);
+  if (!await isResidential(candidate, existingSchemas)) return [];
+
+  const [factor, hasNearbyParking] = await Promise.all([
+    // 住宅细分需要同时读取数据库面积/邻居信息和 candidate 上已经解析出的楼层数。
+    fetchHouseDetermingFactor(candidate),
+    fetchNearbyParkingSignal(candidate.details[0].featureId),
+  ]);
+  const nearbySchemas = getNearbyResidentialSchemas(candidate, existingSchemas);
+
+  return isAmbiguousApartmentCategory(candidate, factor)
+    ?? isAmbiguousHouseCategory(candidate, factor, hasNearbyParking, nearbySchemas)
+    ?? isAmbiguousHouseAccessoryCategory(candidate, factor, hasNearbyParking, nearbySchemas)
+    ?? [];
 }
 
 /**
@@ -353,7 +374,22 @@ function selectPatternKey(
   candidate: BuildingCandidate,
   categoryKey: string, // TODO 当前只支持住宅
 ): string {
-  return selectResidentialPatternKey(candidate, categoryKey)
+  if (categoryKey === "apartment") {
+    return selectApartmentPatternKey(candidate);
+  }
+
+  // 简单建筑直接返回 Category Key 作为 Pattern Key
+  if (RESIDENTIAL_PATTERN_KEYS.includes(categoryKey)) return categoryKey
+
+  const categoryDefinition = getResidentialCategoryDefinition(categoryKey);
+  const categoryPatterns = categoryDefinition?.patterns;
+  if (categoryPatterns) {
+    return pickRandom(Object.keys(categoryPatterns));
+  }
+  if (categoryDefinition) return categoryKey;
+
+  // 当前复合住宅类别仍复用住宅 pattern 池。
+  return selectHousePatternKey(candidate)
 }
 
 /**
@@ -372,7 +408,7 @@ export function decidePatternDistribution(candidate: BuildingCandidate, skipComp
   const patternRecord = candidate.patternRecord || {}
   // 把所有 rooms 全部提取到单一 Object
   const patternRoomsEntries = categoryRecord.flatMap( cat => {
-    const patterns = ALL_CATEGORIES[cat].patterns
+    const patterns = getResidentialCategoryDefinition(cat)?.patterns
     if (!patterns) return []
     const patternKey = patternRecord[cat]
     const rooms = patterns[patternKey].rooms
@@ -402,7 +438,8 @@ export function applyCategoryBaseSchemasToDistribution(
   const patternDistributionEntries = Object.entries(patternDistribution)
   // 提取所有 base schema 到单一 Object
   const baseSchemaEntries = categoryRecord.flatMap( cat => {
-    const baseSchema = ALL_CATEGORIES[cat].base_schema
+    const categoryDefinition = getResidentialCategoryDefinition(cat)
+    const baseSchema = categoryDefinition?.base_schema
     if (!baseSchema) return []
     return Object.entries(baseSchema.rooms).flatMap(([roomKey, room]) => {
       if (room === true) return []
@@ -411,7 +448,7 @@ export function applyCategoryBaseSchemasToDistribution(
         // self 只表示“该 Category 本体就是一个房间功能”，最终 Schema 仍使用 Category Key 与 Category 描述。
         return [[cat, {
           ...room,
-          desc: ALL_CATEGORIES[cat].desc,
+          desc: categoryDefinition?.desc ?? cat,
         }]]
       }
 

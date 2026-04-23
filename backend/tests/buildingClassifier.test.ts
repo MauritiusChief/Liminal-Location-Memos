@@ -20,12 +20,16 @@ import {
 } from "../src/services/gameSystem/buildingClassifier";
 import {
   buildApartmentCategorySchemaFromDistribution,
-  buildHouseCategorySchemaFromDistribution,
-  buildResidentialAccessoryCategorySchemaFromDistribution,
   finishApartmentBuildingSchema,
+} from "../src/services/gameSystem/buildingApartment";
+import {
+  buildHouseCategorySchemaFromDistribution,
   finishHouseBuildingSchema,
+} from "../src/services/gameSystem/buildingHouse";
+import {
+  buildResidentialAccessoryCategorySchemaFromDistribution,
   finishResidentialAccessoryBuildingSchema,
-} from "../src/services/gameSystem/buildingResidential";
+} from "../src/services/gameSystem/buildingHouseAccessory";
 import type { DbBuildingFeatureDetailRow } from "../src/services/featureDetail";
 
 const mockedQuery = jest.mocked(query);
