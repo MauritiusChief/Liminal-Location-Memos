@@ -560,8 +560,8 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
  * @returns 同时兼容室内与室外上下文的提示词
  */
 async function toWorldStatePrompt(state: GameState, scene?: SceneObject): Promise<string> {
+  // 室外相关的信息
   const scenePrompt = scene ? buildScenePrompt(scene, state.playerOrientation) : null;
-
   const fieldVisualDescriptions = Object.entries(state.fieldVisualDescriptions)
     .filter(([id]) => state.activeFieldVisualDescriptions.includes(id))
     .map(([, record]) => formatFieldVisualDescriptionForPrompt(state, record))
@@ -571,6 +571,7 @@ async function toWorldStatePrompt(state: GameState, scene?: SceneObject): Promis
     .filter((record): record is NonNullable<typeof record> => Boolean(record))
     .map((record) => [`buildingId=${record.buildingId}`, record.content].join('\n'))
     .join('\n');
+  // 室内相关的信息
   const indoorPrompt = formatIndoorWorldStatePrompt(state);
   const sectorVisualDescriptions = state.activeSectorVisualDescriptions
     .map((id) => state.sectorVisualDescriptions[id])
@@ -585,7 +586,7 @@ async function toWorldStatePrompt(state: GameState, scene?: SceneObject): Promis
 
   const sections = [
     '玩家周遭环境数据：',
-    scenePrompt || '（当前开局未提供室外场景摘要）',
+    scenePrompt || '（当前未提供室外场景摘要）',
     '---',
     '玩家周遭环境场地细节记录：',
     fieldVisualDescriptions || '（暂无）',
@@ -593,8 +594,8 @@ async function toWorldStatePrompt(state: GameState, scene?: SceneObject): Promis
     '玩家周遭建筑外观细节记录：',
     exteriorVisualDescriptions || '（暂无）',
     '---',
-    '玩家当前室内上下文：',
-    indoorPrompt,
+    '玩家当前室内场景摘要：',
+    indoorPrompt || '（当前未提供室内场景摘要）',
     '---',
     '玩家当前激活的室内 Sector 细节记录：',
     sectorVisualDescriptions || '（暂无）',
@@ -918,10 +919,10 @@ async function initializeOpeningIndoorState(state: GameState): Promise<void> {
   state.playerIndoorLocation = chooseInitialIndoorLocation(record);
 }
 
-function formatIndoorWorldStatePrompt(state: GameState): string {
+function formatIndoorWorldStatePrompt(state: GameState): string | null {
   const location = state.playerIndoorLocation;
   if (!location) {
-    return '（当前不在建筑内）';
+    return null;
   }
 
   const record = state.buildingRecords[location.buildingId];
