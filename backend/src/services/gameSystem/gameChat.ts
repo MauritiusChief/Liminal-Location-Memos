@@ -37,8 +37,7 @@ import {
   ensureBuildingSchema,
   fillBasicActiveIndoorLocations,
   findContainingBuildingFeatureId,
-  findIndoorLocationContext,
-  findVisibleLocationContext,
+  findLocationContext,
   generateBuildingRecord,
 } from './toolIndoorPosition.js';
 
@@ -343,7 +342,7 @@ async function commitBookMessage(
 async function finalizeVisualDescription(session: GameSession, bookMessage: string): Promise<void> {
   try {
     const nextState = cloneGameState(session.gameState);
-    await upsertVisualDescriptions(nextState, bookMessage);
+    // await upsertVisualDescriptions(nextState, bookMessage);
     session.gameState = nextState;
     await updateRuntimeSession(session);
   } finally {
@@ -819,7 +818,7 @@ function syncActiveSectorVisualDescriptions(state: GameState): void {
     throw new Error(`Missing building record for ${location.buildingId}.`);
   }
 
-  const roomContext = findIndoorLocationContext(record, location);
+  const roomContext = findLocationContext(record, location);
   if (!roomContext) {
     throw new Error(`Room ${location.roomId} is not present in building ${location.buildingId}.`);
   }
@@ -905,20 +904,27 @@ function formatFieldVisualDescriptionForPrompt(state: GameState, record: FieldVi
 }
 
 async function initializeOpeningIndoorState(state: GameState): Promise<void> {
-  const buildingId = await findContainingBuildingFeatureId(state.playerPosition);
-  if (!buildingId) {
+  const containingBuilding = await findContainingBuildingFeatureId(state.playerPosition);
+  if (!containingBuilding) {
     state.playerIndoorLocation = null;
     state.activeVisibleLocations = [];
     return;
   }
 
   // 开局命中建筑后必须把整条室内链路跑通，避免后续 prompt 看到半成品状态。
-  const schema = await ensureBuildingSchema(buildingId, state);
+  const schema = await ensureBuildingSchema(containingBuilding.featureId, state);
   const record = generateBuildingRecord(schema);
+  // 建筑命中查询拿到的 tags 需要稳定保留在 record 中，供开局与后续回合复用。
+  record.tags = containingBuilding.tags;
   state.buildingRecords[record.featureId] = record;
   state.playerIndoorLocation = chooseInitialIndoorLocation(record);
 }
 
+/**
+ * 组装 `玩家当前室内场景摘要` 部分的提示词
+ * @param state
+ * @returns
+ */
 function formatIndoorWorldStatePrompt(state: GameState): string | null {
   const location = state.playerIndoorLocation;
   if (!location) {
@@ -926,30 +932,27 @@ function formatIndoorWorldStatePrompt(state: GameState): string | null {
   }
 
   const record = state.buildingRecords[location.buildingId];
-  if (!record) {
-    throw new Error(`Missing building record for ${location.buildingId}.`);
-  }
 
-  const roomContext = findIndoorLocationContext(record, location);
+  const roomContext = findLocationContext(record, location);
   if (!roomContext) {
     throw new Error(`Room ${location.roomId} is not present in building ${location.buildingId}.`);
   }
 
   const visibleLocations = state.activeVisibleLocations
     .map((entry) => {
-      const visibleContext = findVisibleLocationContext(record, entry);
+      const visibleContext = findLocationContext(record, entry);
       if (!visibleContext) {
         return null;
       }
-
+      // 套房
       if (visibleContext.locationType === 'suite') {
         return [
           `* level=${visibleContext.level}`,
           `sector=${visibleContext.sectorName}`,
-          `suite=${visibleContext.suiteId} / （仅表层可见） / ${visibleContext.suiteDescription}`,
+          `suite=${visibleContext.suiteId} / ${visibleContext.suiteDescription} （仅表层可见）`,
         ].join(' / ');
       }
-
+      // 兼容普通房间和套房子房间
       return [
         `* level=${visibleContext.level}`,
         `sector=${visibleContext.sectorName}`,
@@ -965,11 +968,12 @@ function formatIndoorWorldStatePrompt(state: GameState): string | null {
     `buildingId=${record.featureId}`,
     `buildingCategory=${record.category}`,
     `buildingCenter=(${record.centerPosition.lat}, ${record.centerPosition.lon})`,
-    `currentLevel=${location.level}`,
-    `currentSector=${roomContext.sectorName}`,
+    `buildingTags=${JSON.stringify(record.tags)}`,
+    `当前楼层：level ${location.level}`,
+    `当前 Sector：${roomContext.sectorName}`,
     roomContext.suiteId
-      ? `currentRoom=suite ${roomContext.suiteId} / subRoom ${roomContext.roomId} / ${roomContext.roomDescription}`
-      : `currentRoom=room ${roomContext.roomId} / ${roomContext.roomDescription}`,
+      ? `当前房间：套房 ${roomContext.suiteId} - 房间 ${roomContext.roomId} - ${roomContext.roomDescription}`
+      : `当前房间：房间 ${roomContext.roomId} - ${roomContext.roomDescription}`,
     '当前可见的室内位置：',
     visibleLocations || '（暂无）',
   ].join('\n');
