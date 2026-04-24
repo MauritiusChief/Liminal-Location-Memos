@@ -1,8 +1,11 @@
-import { distanceBetweenCoordinates } from "../geometry.js";
+import { bearingBetweenCoordinates, distanceBetweenCoordinates, distanceToPosition } from "../geometry.js";
+import { formatRelativeDirection } from "../scene/polarViewPrompt.js";
 import { SceneObject } from "../scene/sceneObject.js";
+import { buildScenePrompt } from "../scene/scenePrompt.js";
 import { BuildingRecord } from "./buildingRecord.js";
 import { EmitGameEvent } from "./gameChat.js";
 import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, SectorVisualDescriptionRecord } from "./gameSessionStore.js";
+import { findLocationContext } from "./toolIndoorPosition.js";
 
 /**
  * 每次在 Book Composer 使用之前通过 Game State 生成，随即转为 Player State Prompt
@@ -11,11 +14,11 @@ interface PlayerState {
   playerPosition: Position;
   playerOrientation: number;
   playerIndoorLocation: PlayerIndoorLocation | null;
+  playerVisionRange: number;
   recentMessageHistory: GameMessage[];
   // 下列内容经过筛选，只包含玩家可见部分
   activeFieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
-  activeBuildingRecords: Record<string, BuildingRecord>;
   activeVisibleLocations: PlayerVisibleLocation[];
   activeSectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
 }
@@ -149,21 +152,12 @@ const PLAYER_STATE_BUILDING_RECORD_RANGE = 300
 //#region 内部逻辑
 
 function pickPlayerState(state: GameState): PlayerState {
-  const {playerPosition, playerOrientation, playerIndoorLocation, activeVisibleLocations} = state
+  const {playerPosition, playerOrientation, playerIndoorLocation, playerVisionRange, activeVisibleLocations} = state
   const activeFieldVisualDescriptions = Object.fromEntries(Object.entries(state.fieldVisualDescriptions).filter(
     ([uuid, _]) => state.activeFieldVisualDescriptions.includes(uuid)
   ))
   const activeExteriorVisualDescriptions = Object.fromEntries(Object.entries(state.exteriorVisualDescriptions).filter(
     ([featureId, _]) => state.activeExteriorVisualDescriptions.includes(featureId)
-  ))
-  // TODO 也许需要动用数据库，判断建筑的最近点而非建筑的中心
-  const activeBuildingRecords = Object.fromEntries(Object.entries(state.buildingRecords).filter(
-    ([featureId, record]) => {
-      const {lon: recordLon, lat: recordLat} = record.centerPosition
-      const {lon: playerLon, lat: playerLat} = state.playerPosition
-      return distanceBetweenCoordinates([recordLon, recordLat], [playerLon, playerLat]) < PLAYER_STATE_BUILDING_RECORD_RANGE
-      // return featureId === state.playerIndoorLocation?.buildingId
-    }
   ))
   const activeSectorVisualDescriptions = Object.fromEntries(Object.entries(state.sectorVisualDescriptions).filter(
     ([uuid, _]) => state.activeSectorVisualDescriptions.includes(uuid)
@@ -172,15 +166,79 @@ function pickPlayerState(state: GameState): PlayerState {
     playerPosition,
     playerOrientation,
     playerIndoorLocation,
+    playerVisionRange,
     recentMessageHistory: state.messageHistory.slice(-12),
     activeFieldVisualDescriptions,
     activeExteriorVisualDescriptions,
-    activeBuildingRecords,
     activeVisibleLocations,
     activeSectorVisualDescriptions,
   }
 }
 
+/**
+ * 玩家可见、已知的信息
+ * @param state
+ * @param scene 已根据 playerVisionRange 生成的 SceneObject
+ * @returns
+ */
 function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): string {
-  return ''
+  const scenePrompt = scene ? buildScenePrompt(scene, state.playerOrientation) : null;
+  const fieldVisualDescriptionPrompt =  Object.values(state.activeFieldVisualDescriptions)
+    .map(record => formatFieldVisualDescriptionPrompt(state, record))
+    .join('\n\n')
+  const exteriorVisualDescriptionPrompt =  Object.values(state.activeExteriorVisualDescriptions)
+    .map((record) => [`buildingId=${record.buildingId}`, record.content].join('\n'))
+    .join('\n');
+  const visibleLocationPrompt = state.playerIndoorLocation
+    ? state.activeVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
+    : null;
+  // 组装提示词
+  const sections = [
+    '玩家周遭室外环境摘要：',
+    scenePrompt || '（当前未提供室外摘要）',
+    '---',
+    '玩家周遭地点细节记录：',
+    fieldVisualDescriptionPrompt || '（暂无）',
+    '---',
+    '玩家周遭建筑外观细节记录：',
+    exteriorVisualDescriptionPrompt || '（暂无）',
+    '---',
+    '玩家可见室内场景摘要：',
+    visibleLocationPrompt || '（当前未提供室内摘要）',
+  ];
+  return sections.join('\n');
+}
+
+//#region 辅助函数
+
+function formatFieldVisualDescriptionPrompt(state: PlayerState, record: FieldVisualDescriptionRecord): string {
+  const distanceMeters = distanceToPosition(state.playerPosition, record.center);
+  const bearingDegrees = bearingBetweenCoordinates(
+    [state.playerPosition.lon, state.playerPosition.lat],
+    [record.center.lon, record.center.lat],
+  );
+
+  return [
+    `* 距离${Math.round(distanceMeters)}m / ${formatRelativeDirection(bearingDegrees, state.playerOrientation)}`,
+    record.content,
+  ].join('\n');
+}
+
+function formatVisibleLocationPrompt(visibleLocation: PlayerVisibleLocation): string {
+  // 套房
+  if (visibleLocation.locationType === 'suite') {
+    return [
+      `* 楼层：level ${visibleLocation.level}`,
+      `区域：${visibleLocation.sectorName}`,
+      `套房：${visibleLocation.suiteId} - ${visibleLocation.suiteDescription} （仅表层可见）`,
+    ].join(' - ');
+  }
+  // 兼容普通房间和套房子房间
+  return [
+    `* 楼层：level ${visibleLocation.level}`,
+    `区域：${visibleLocation.sectorName}`,
+    visibleLocation.suiteId
+      ? `套房：${visibleLocation.suiteId} - 房间ID：${visibleLocation.roomId} - ${visibleLocation.roomDescription}`
+      : `房间ID：${visibleLocation.roomId} - ${visibleLocation.roomDescription}`,
+  ].join(' - ');
 }

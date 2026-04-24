@@ -17,6 +17,7 @@
   - 用在 Game State Manager (Agent)
 - **Player State**：玩家视角的状态描述，仅包括 World State 所有状态当中玩家知道的部分
   - 用在 Book Composer (Agent)
+  - （TODO）记忆功能，记忆玩家明明知道的建筑地点
 
 Game State 术语：
 - **Visual Description**：用来记录某地范围内，确定性数据（比如 OSM）未呈现而让 LLM 自由发挥的地方。

@@ -297,19 +297,6 @@ function findNearestFieldVisualDescription(
   return records[0]?.record || null;
 }
 
-function formatFieldVisualDescriptionForPrompt(state: GameState, record: FieldVisualDescriptionRecord): string {
-  const distanceMeters = distanceToPosition(state.playerPosition, record.center);
-  const bearingDegrees = bearingBetweenCoordinates(
-    [state.playerPosition.lon, state.playerPosition.lat],
-    [record.center.lon, record.center.lat],
-  );
-
-  return [
-    `* 距离${Math.round(distanceMeters)}m / ${formatRelativeDirection(bearingDegrees, state.playerOrientation)}`,
-    record.content,
-  ].join('\n');
-}
-
 //#region Exterior VD 函数
 
 /**
