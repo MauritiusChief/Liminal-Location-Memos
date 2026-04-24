@@ -152,63 +152,6 @@ export async function applySetPlayerIndoorLocationTool(
 }
 
 /**
- * 更新玩家可见范围的函数
- * @param state
- * @param args
- * @returns
- */
-export function applySyncActiveIndoorLocationsTool(state: GameState, args: any): void {
-  const location = state.playerIndoorLocation;
-  if (!location) {
-    return;
-  }
-
-  const edit = typeof args?.edit === "string" ? args.edit : "";
-  if (edit !== "reveal" && edit !== "hide") {
-    return;
-  }
-
-  const level = Number(args?.level);
-  const suiteId = typeof args?.suiteId === "string" && args.suiteId ? args.suiteId : undefined;
-  const roomId = typeof args?.roomId === "string" && args.roomId ? args.roomId : undefined;
-  if (!Number.isFinite(level)) {
-    return;
-  }
-
-  const record = state.buildingRecords[location.buildingId];
-  if (!record) {
-    return;
-  }
-
-  const targetLocation = resolveVisibleIndoorLocation(record, {
-    buildingId: location.buildingId,
-    level,
-    suiteId,
-    roomId,
-  });
-  if (!targetLocation) {
-    return;
-  }
-
-  if (edit === "reveal") {
-    state.activeVisibleLocations = dedupeVisibleLocations([
-      ...state.activeVisibleLocations,
-      targetLocation,
-    ]);
-    return;
-  }
-
-  const currentKey = toVisibleLocationKey(location);
-  const targetKey = toVisibleLocationKey(targetLocation);
-  if (currentKey === targetKey) {
-    return;
-  }
-
-  state.activeVisibleLocations = state.activeVisibleLocations
-    .filter((entry) => toVisibleLocationKey(entry) !== targetKey);
-}
-
-/**
  * 根据当前玩家室内位置生成基板 active visible locations。
  * 在普通房间时只可见所在 sector 内的普通房间与 suite 外部，在 suite 时则只有子房间可见。
  * @param state
@@ -516,7 +459,7 @@ function listSuiteSubRoomVisibleLocations(
 
 //#region 辅助函数
 
-function dedupeVisibleLocations(locations: PlayerVisibleLocation[]): PlayerVisibleLocation[] {
+export function dedupeVisibleLocations(locations: PlayerVisibleLocation[]): PlayerVisibleLocation[] {
   const seen = new Set<string>();
   return locations.filter((location) => {
     const key = [
@@ -594,13 +537,3 @@ function getRoomAccess(record: BuildingRecord, context: IndoorRoomContext): Buil
     .find((entry): entry is BuildingRoom => !("subRooms" in entry) && entry.roomId === context.roomId);
   return room?.access;
 }
-
-function toVisibleLocationKey(location: PlayerVisibleLocation): string {
-  return [
-    location.buildingId,
-    String(location.level),
-    location.suiteId ?? "",
-    location.roomId ?? "",
-  ].join("|");
-}
-

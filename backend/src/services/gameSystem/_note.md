@@ -57,17 +57,18 @@ Game State 术语：
 
 ### 开局回合
 
-0. 玩家点击开始游戏后，进入游戏初始化流程。从经纬度数据读取 OSM 然后生成 Scene Prompt，让 Book Composer (Agent) 生成开场 Book Message
-1. 生成初始 Book Message 时，会先以 stream 的形式把文本增量发给前端
-2. Book Message stream 完成后，先立即提交本轮 Game Save，再由 Visual Describer (Agent) 根据 Book Message 和已有的世界状态撰写/更新 Visual Description
+1. 玩家点击开始游戏后，进入游戏初始化流程。从经纬度数据读取 OSM 然后生成 Scene Prompt，让 Book Composer (Agent) 生成开场 Book Message
+2. 生成初始 Book Message 时，会先以 stream 的形式把文本增量发给前端
+3. Book Message stream 完成后，先立即提交本轮 Game Save，再由 Visual Describer (Agent) 根据 Book Message 和已有的世界状态撰写/更新 Visual Description
   - 为了更短的互动前静止时间，Visual Description 不再阻塞 Book Message 的送达
   - 在 Visual Description 工作完成之前，只允许暂存 1 条下一回合的 User Message；若队列已占满，则拒绝新的消息
   - 当 Visual Description 准备完毕后，排队中的下一条消息才会进入下一回合
 
 ### 常规回合
 
-1. 玩家发送信息，先由 Game State Manager (Agent) 专门处理 Game State，获取包括对话记录在内的全量游戏状态，产出多个顺序进行的 Game State Tool Call
-2. Game State 处理完毕后，处理结果以及玩家的周遭信息会以 syth tool return 的形式给到 Book Composer (Agent)，生成 Book Message 并 stream 给前端
+0. 玩家发送信息，先由 Game State Manager (Agent) 专门处理 Game State，获取包括对话记录在内的全量游戏状态，产出多个顺序进行的 Game State Tool Call
+1. Game State 处理完毕后，处理结果以及玩家的周遭信息会以 syth tool return 的形式给到 Book Composer (Agent)，生成 Book Message
+2. Book Message 被 stream 给前端
 3. 与开局回合相似的 Visual Describer (Agent) 流程
 
 ## 建筑生成逻辑
