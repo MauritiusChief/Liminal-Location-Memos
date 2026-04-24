@@ -74,6 +74,7 @@ type EmitGameEvent = (event: GameStreamEvent) => void | Promise<void>;
 const INITIAL_SCENE_RADIUS_METERS = 1000;
 const WORLD_STATE_RADIUS_METERS = 500;
 const VISUAL_DESCRIPTION_RADIUS_METERS = 300;
+const NO_VISUAL_DESCRIPTION_UPDATE = '__NO_UPDATE__';
 
 //#region 游戏状态工具
 
@@ -342,7 +343,7 @@ async function commitBookMessage(
 async function finalizeVisualDescription(session: GameSession, bookMessage: string): Promise<void> {
   try {
     const nextState = cloneGameState(session.gameState);
-    // await upsertVisualDescriptions(nextState, bookMessage);
+    await upsertVisualDescriptions(nextState, bookMessage);
     session.gameState = nextState;
     await updateRuntimeSession(session);
   } finally {
@@ -625,9 +626,7 @@ export function applyGameStateToolCalls(state: GameState, toolCalls: GameStateTo
   }
 }
 
-//#region VD 函数
-// Field Visual Description
-// Exterior Visual Description
+//#region 共用 VD 函数
 
 interface ExtractedVisualDescriptions {
   field: string;
@@ -635,6 +634,12 @@ interface ExtractedVisualDescriptions {
     buildingId: string;
     content: string;
   }>;
+  sector: {
+    buildingId: string;
+    level: number;
+    sectorName: string;
+    content: string;
+  } | null;
 }
 
 /**
@@ -656,8 +661,10 @@ async function upsertVisualDescriptions(state: GameState, bookMessage: string): 
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: VISUAL_DESCRIPTION_RADIUS_METERS }, state.playerOrientation);
   const visibleBuildingIds = collectSceneBuildingIds(sceneObject);
   const matchedFieldRecord = findNearestFieldVisualDescription(state, state.playerPosition);
+  const currentSectorContext = getCurrentSectorVisualDescriptionContext(state);
 
   const extracted = await extractVisualDescriptions(
+    state,
     bookMessage,
     state.playerOrientation,
     sceneObject,
@@ -667,11 +674,11 @@ async function upsertVisualDescriptions(state: GameState, bookMessage: string): 
   const now = new Date().toISOString();
 
   // 更新 Field Visual Description 的文案
-  if (matchedFieldRecord) {
+  if (shouldWriteVisualDescriptionContent(extracted.field) && matchedFieldRecord) {
     matchedFieldRecord.content = extracted.field;
     // matchedFieldRecord.center = { ...state.playerPosition };
     matchedFieldRecord.updatedAt = now;
-  } else {
+  } else if (shouldWriteVisualDescriptionContent(extracted.field)) {
     const newRecord: FieldVisualDescriptionRecord = {
       id: randomUUID(),
       center: { ...state.playerPosition },
@@ -684,7 +691,7 @@ async function upsertVisualDescriptions(state: GameState, bookMessage: string): 
 
   // 更新 Exterior Visual Description 的文案
   for (const exterior of extracted.exteriors) {
-    if (!visibleBuildingIds.includes(exterior.buildingId) || !exterior.content.trim()) {
+    if (!visibleBuildingIds.includes(exterior.buildingId) || !shouldWriteVisualDescriptionContent(exterior.content)) {
       continue;
     }
 
@@ -697,11 +704,32 @@ async function upsertVisualDescriptions(state: GameState, bookMessage: string): 
     };
   }
 
+  // Sector VD 仍以整个 sector 为记录单位，套房内看到的细节也写回所属 sector。
+  if (
+    extracted.sector
+    && currentSectorContext
+    && shouldWriteVisualDescriptionContent(extracted.sector.content)
+  ) {
+    const existingSector = findSectorVisualDescription(
+      state,
+      extracted.sector.buildingId,
+      extracted.sector.level,
+      extracted.sector.sectorName,
+    );
+
+    const sectorId = existingSector?.id ?? randomUUID();
+    state.sectorVisualDescriptions[sectorId] = {
+      buildingId: extracted.sector.buildingId,
+      level: extracted.sector.level,
+      sectorName: extracted.sector.sectorName,
+      content: extracted.sector.content,
+      createdAt: existingSector?.record.createdAt ?? now,
+      updatedAt: now,
+    };
+  }
 }
 
 /**
- * TODO 重命名为 extractFieldExteriorVisualDescriptions
- *
  * 从某个 Book Message 里提取事实性细节供记录，以维持事实一致性。
  *
  * 这里的目标是把 Book 里已经说出的、之后应该继续视为事实的细节抽出来，
@@ -710,6 +738,7 @@ async function upsertVisualDescriptions(state: GameState, bookMessage: string): 
  * @returns
  */
 async function extractVisualDescriptions(
+  state: GameState,
   bookMessage: string,
   playerOrientation: number,
   sceneObject: SceneObject,
@@ -720,6 +749,7 @@ async function extractVisualDescriptions(
 
   const scenePrompt = buildScenePrompt(sceneObject, playerOrientation);
   const visibleBuildingIds = collectSceneBuildingIds(sceneObject);
+  const currentSectorContext = getCurrentSectorVisualDescriptionContext(state);
   const oldExteriorRecords = oldExteriorVisualDescriptions
     .filter((record): record is NonNullable<typeof record> => Boolean(record))
     .map((record) => [`buildingId=${record.buildingId}`, record.content].join('\n'))
@@ -737,6 +767,19 @@ async function extractVisualDescriptions(
     '---',
     '旧的 Exterior Visual Description：',
     oldExteriorRecords || '（暂无）',
+    '---',
+    '当前室内 Sector 上下文：',
+    currentSectorContext
+      ? [
+          `buildingId=${currentSectorContext.buildingId}`,
+          `level=${currentSectorContext.level}`,
+          `sectorName=${currentSectorContext.sectorName}`,
+          currentSectorContext.indoorPrompt,
+        ].join('\n')
+      : '（当前没有可更新的室内 Sector 上下文）',
+    '---',
+    '旧的 Sector Visual Description：',
+    currentSectorContext?.oldSectorVisualDescription ?? '（暂无）',
     '---',
     '文本描述：',
     bookMessage,
@@ -778,6 +821,48 @@ async function extractSectorVisualDescriptions(bookMessage: string) {
 
 }
 
+
+function parseExtractedVisualDescriptions(reply: string): ExtractedVisualDescriptions {
+  const parsed = JSON.parse(reply) as Partial<ExtractedVisualDescriptions>;
+  return {
+    field: normalizeExtractedVisualDescriptionContent(parsed.field) ?? NO_VISUAL_DESCRIPTION_UPDATE,
+    exteriors: Array.isArray(parsed.exteriors)
+      ? parsed.exteriors.flatMap((entry) => {
+          if (!entry || typeof entry !== 'object') {
+            return [];
+          }
+
+          const { buildingId, content } = entry as Partial<ExtractedVisualDescriptions['exteriors'][number]>;
+          const contentToReturn = normalizeExtractedVisualDescriptionContent(content);
+          return typeof buildingId === 'string'
+            && typeof contentToReturn === 'string'
+            ? [{ buildingId, content: contentToReturn }]
+            : [];
+        })
+      : [],
+    sector: parseExtractedSectorVisualDescription(parsed.sector),
+  };
+}
+
+function normalizeExtractedVisualDescriptionContent(value: unknown): string | null {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value) && value.every((item) => typeof item === 'string')) {
+    return value.join('\n');
+  }
+
+  return null;
+}
+
+function shouldWriteVisualDescriptionContent(content: string): boolean {
+  // 固定哨兵值表示“本轮不更新”，避免在解析阶段提前丢掉这层语义。
+  return content !== NO_VISUAL_DESCRIPTION_UPDATE && Boolean(content.trim());
+}
+
+//#region Field VD 函数
+
 /**
  * 根据当前玩家位置，重新计算哪些 Field Visual Description 处于激活状态。
  *
@@ -795,6 +880,41 @@ function syncActiveFieldVisualDescriptions(state: GameState): void {
 }
 
 /**
+ * 查找“距离当前位置最近，且仍在 300m 生效范围内”的 Field Visual Description。
+ *
+ * 这个函数的结果决定 upsertVisualDescriptions() 是复用旧 Field 记录还是新建记录。
+ */
+function findNearestFieldVisualDescription(
+  state: GameState,
+  position: Position,
+): FieldVisualDescriptionRecord | null {
+  const records = Object.values(state.fieldVisualDescriptions)
+    .map((record) => ({
+      record,
+      distanceMeters: distanceToPosition(record.center, position),
+    }))
+    .filter((entry) => entry.distanceMeters <= VISUAL_DESCRIPTION_RADIUS_METERS)
+    .sort((left, right) => left.distanceMeters - right.distanceMeters);
+
+  return records[0]?.record || null;
+}
+
+function formatFieldVisualDescriptionForPrompt(state: GameState, record: FieldVisualDescriptionRecord): string {
+  const distanceMeters = distanceToPosition(state.playerPosition, record.center);
+  const bearingDegrees = bearingBetweenCoordinates(
+    [state.playerPosition.lon, state.playerPosition.lat],
+    [record.center.lon, record.center.lat],
+  );
+
+  return [
+    `* 距离${Math.round(distanceMeters)}m / ${formatRelativeDirection(bearingDegrees, state.playerOrientation)}`,
+    record.content,
+  ].join('\n');
+}
+
+//#region Exterior VD 函数
+
+/**
  * TODO 添加建筑的范围过滤逻辑，避免整个 Scene Object 中的建筑全都可以看清外观细节
  * 可利用 Building Record 中的 centerPosition 信息
  */
@@ -802,8 +922,13 @@ function syncActiveExteriorVisualDescriptions(state: GameState): void {
   state.activeExteriorVisualDescriptions = Object.keys(state.exteriorVisualDescriptions)
 }
 
+//#region Sector VD 函数
+
 /**
  * 只激活玩家当前所处 building + level + sector 对应的 Sector VD。
+ * 这和 activeVisibleLocations 的 suite 内外可见范围是两套职责：
+ * - activeVisibleLocations 控制玩家当前能看到哪些室内位置；
+ * - activeSectorVisualDescriptions 控制整条 sector 级事实记录是否注入 prompt。
  * @param state
  */
 function syncActiveSectorVisualDescriptions(state: GameState): void {
@@ -832,76 +957,98 @@ function syncActiveSectorVisualDescriptions(state: GameState): void {
     .map(([id]) => id);
 }
 
-/**
- * 查找“距离当前位置最近，且仍在 300m 生效范围内”的 Field Visual Description。
- *
- * 这个函数的结果决定 upsertVisualDescriptions() 是复用旧 Field 记录还是新建记录。
- */
-function findNearestFieldVisualDescription(
-  state: GameState,
-  position: Position,
-): FieldVisualDescriptionRecord | null {
-  const records = Object.values(state.fieldVisualDescriptions)
-    .map((record) => ({
-      record,
-      distanceMeters: distanceToPosition(record.center, position),
-    }))
-    .filter((entry) => entry.distanceMeters <= VISUAL_DESCRIPTION_RADIUS_METERS)
-    .sort((left, right) => left.distanceMeters - right.distanceMeters);
+function parseExtractedSectorVisualDescription(
+  value: unknown,
+): ExtractedVisualDescriptions['sector'] {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
 
-  return records[0]?.record || null;
-}
+  const {
+    buildingId,
+    level,
+    sectorName,
+    content,
+  } = value as Partial<NonNullable<ExtractedVisualDescriptions['sector']>>;
+  const normalizedContent = normalizeExtractedVisualDescriptionContent(content);
+  if (
+    typeof buildingId !== 'string'
+    || typeof level !== 'number'
+    || typeof sectorName !== 'string'
+    || typeof normalizedContent !== 'string'
+  ) {
+    return null;
+  }
 
-function parseExtractedVisualDescriptions(reply: string): ExtractedVisualDescriptions {
-  const parsed = JSON.parse(reply) as Partial<ExtractedVisualDescriptions>;
   return {
-    field: (Array.isArray(parsed.field) && parsed.field.every(item => typeof item === "string")) ?
-      parsed.field.join('\n') : parsed.field ?? '', // 兼容 string 或 string[]
-    exteriors: Array.isArray(parsed.exteriors)
-      ? parsed.exteriors.flatMap((entry) => {
-          if (!entry || typeof entry !== 'object') {
-            return [];
-          }
-
-          const { buildingId, content } = entry as Partial<ExtractedVisualDescriptions['exteriors'][number]>;
-          const contentToReturn = (Array.isArray(content) && content.every(item => typeof item === "string")) ?
-            content.join('\n') : content ?? '';
-          return typeof buildingId === 'string'
-            ? [{ buildingId, content: contentToReturn }]
-            : [];
-        })
-      : [],
+    buildingId,
+    level,
+    sectorName,
+    content: normalizedContent,
   };
 }
-/**
- * TODO 也许可以用来一次性给所有建筑都生成 Building Schema
- * @param scene
- * @returns
- */
-function collectSceneBuildingIds(scene: SceneObject): string[] {
-  const microGridBuildingIds = scene.microGrid.cells
-    .flatMap((row) => row)
-    .flatMap((cell) => cell.baseKind === 'building' && cell.baseFeatureId ? [cell.baseFeatureId] : []);
-  const polarBuildingIds = scene.polarView?.levels
-    .flatMap((level) => level.clusters)
-    .flatMap((cluster) => cluster.features)
-    .flatMap((feature) => feature.category === 'building' ? [feature.featureId] : []) ?? [];
 
-  return [...new Set([...microGridBuildingIds, ...polarBuildingIds])];
+function findSectorVisualDescription(
+  state: GameState,
+  buildingId: string,
+  level: number,
+  sectorName: string,
+): { id: string; record: GameState['sectorVisualDescriptions'][string] } | null {
+  const entry = Object.entries(state.sectorVisualDescriptions)
+    .find(([, record]) => (
+      record.buildingId === buildingId
+      && record.level === level
+      && record.sectorName === sectorName
+    ));
+
+  return entry ? { id: entry[0], record: entry[1] } : null;
 }
 
-function formatFieldVisualDescriptionForPrompt(state: GameState, record: FieldVisualDescriptionRecord): string {
-  const distanceMeters = distanceToPosition(state.playerPosition, record.center);
-  const bearingDegrees = bearingBetweenCoordinates(
-    [state.playerPosition.lon, state.playerPosition.lat],
-    [record.center.lon, record.center.lat],
+function getCurrentSectorVisualDescriptionContext(state: GameState): {
+  buildingId: string;
+  level: number;
+  sectorName: string;
+  indoorPrompt: string;
+  oldSectorVisualDescription: string;
+} | null {
+  const location = state.playerIndoorLocation;
+  if (!location) {
+    return null;
+  }
+
+  const record = state.buildingRecords[location.buildingId];
+  if (!record) {
+    throw new Error(`Missing building record for ${location.buildingId}.`);
+  }
+
+  const roomContext = findLocationContext(record, location);
+  if (!roomContext) {
+    throw new Error(`Room ${location.roomId} is not present in building ${location.buildingId}.`);
+  }
+
+  const indoorPrompt = formatIndoorWorldStatePrompt(state);
+  if (!indoorPrompt) {
+    throw new Error(`Failed to build indoor prompt for ${location.buildingId}.`);
+  }
+
+  const oldSector = findSectorVisualDescription(
+    state,
+    location.buildingId,
+    location.level,
+    roomContext.sectorName,
   );
 
-  return [
-    `* 距离${Math.round(distanceMeters)}m / ${formatRelativeDirection(bearingDegrees, state.playerOrientation)}`,
-    record.content,
-  ].join('\n');
+  return {
+    buildingId: location.buildingId,
+    level: location.level,
+    sectorName: roomContext.sectorName,
+    indoorPrompt,
+    oldSectorVisualDescription: oldSector?.record.content ?? NO_VISUAL_DESCRIPTION_UPDATE,
+  };
 }
+
+
+//#region 帮助函数
 
 async function initializeOpeningIndoorState(state: GameState): Promise<void> {
   const containingBuilding = await findContainingBuildingFeatureId(state.playerPosition);
@@ -918,6 +1065,23 @@ async function initializeOpeningIndoorState(state: GameState): Promise<void> {
   record.tags = containingBuilding.tags;
   state.buildingRecords[record.featureId] = record;
   state.playerIndoorLocation = chooseInitialIndoorLocation(record);
+}
+
+/**
+ * TODO 也许可以用来一次性给所有建筑都生成 Building Schema
+ * @param scene
+ * @returns
+ */
+function collectSceneBuildingIds(scene: SceneObject): string[] {
+  const microGridBuildingIds = scene.microGrid.cells
+    .flatMap((row) => row)
+    .flatMap((cell) => cell.baseKind === 'building' && cell.baseFeatureId ? [cell.baseFeatureId] : []);
+  const polarBuildingIds = scene.polarView?.levels
+    .flatMap((level) => level.clusters)
+    .flatMap((cluster) => cluster.features)
+    .flatMap((feature) => feature.category === 'building' ? [feature.featureId] : []) ?? [];
+
+  return [...new Set([...microGridBuildingIds, ...polarBuildingIds])];
 }
 
 /**
@@ -978,8 +1142,6 @@ function formatIndoorWorldStatePrompt(state: GameState): string | null {
     visibleLocations || '（暂无）',
   ].join('\n');
 }
-
-//#region 帮助函数
 
 /**
  * 把工具定义转成提示词中的纯文本说明，供 Game State Manager 阅读。
