@@ -10,7 +10,8 @@ jest.mock("../src/services/scene/scenePrompt", () => ({
 
 jest.mock("../src/services/gameSystem/systemPrompts", () => ({
   BUILD_GAME_STATE_MANAGER_SYSTEM: jest.fn(() => ""),
-  INITIAL_BOOK_MESSAGE_SYSTEM: "",
+  INDOOR_INITIAL_BOOK_MESSAGE_SYSTEM: "",
+  OUTDOOR_INITIAL_BOOK_MESSAGE_SYSTEM: "",
   REGULAR_BOOK_MESSAGE_SYSTEM: "",
   VISUAL_DESCRIPTION_SYSTEM: "",
 }));
@@ -78,7 +79,10 @@ function buildGameState(): GameState {
     activeExteriorVisualDescriptions: [],
     exteriorVisualDescriptions: {},
     buildingSchemas: {},
-    levelVisualDescriptions: {},
+    buildingRecords: {},
+    activeVisibleLocations: [],
+    sectorVisualDescriptions: {},
+    activeSectorVisualDescriptions: [],
   };
 }
 
@@ -96,10 +100,10 @@ function buildSession(): GameSession {
 }
 
 describe("applyGameStateToolCalls", () => {
-  it("updates player orientation to the move bearing after a valid move", () => {
+  it("updates player orientation to the move bearing after a valid move", async () => {
     const gameState = buildGameState();
 
-    applyGameStateToolCalls(gameState, [
+    await applyGameStateToolCalls(gameState, [
       {
         name: "move_player",
         arguments: {
@@ -113,10 +117,10 @@ describe("applyGameStateToolCalls", () => {
     expect(gameState.playerOrientation).toBe(90);
   });
 
-  it("does not update orientation when move_player arguments are invalid", () => {
+  it("does not update orientation when move_player arguments are invalid", async () => {
     const gameState = buildGameState();
 
-    applyGameStateToolCalls(gameState, [
+    await applyGameStateToolCalls(gameState, [
       {
         name: "move_player",
         arguments: {

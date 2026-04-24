@@ -33,12 +33,15 @@ import {
 import { applyMovePlayerTool } from './toolMovePlayer.js';
 import { formatRelativeDirection } from '../scene/polarViewPrompt.js';
 import {
+  applySetPlayerIndoorLocationTool,
+  applySyncActiveIndoorLocationsTool,
+  buildBasicActiveIndoorLocations,
   chooseInitialIndoorLocation,
-  ensureBuildingSchema,
-  fillBasicActiveIndoorLocations,
+  ensureBuildingRecord,
   findContainingBuildingFeatureId,
   findLocationContext,
-  generateBuildingRecord,
+  formatBuildingRecordPrompt,
+  resolveVisibleIndoorLocation,
 } from './toolIndoorPosition.js';
 
 interface GameStateToolCall {
@@ -150,7 +153,7 @@ export async function streamGameStart(emit: EmitGameEvent): Promise<GameSession>
   const session = await createRuntimeSession();
   const workingState = cloneGameState(session.gameState);
   await initializeOpeningIndoorState(workingState);
-  fillBasicActiveIndoorLocations(workingState);
+  syncDerivedPromptState(workingState);
 
   const openingMessage = await streamInitialBookMessage(workingState, emit);
 
@@ -262,7 +265,7 @@ async function executeTurnStream(
 
     // 先让专门的 agent 决定“这句玩家输入会触发哪些状态操作”。
     const toolCalls = await gameStateManager(workingState);
-    applyGameStateToolCalls(workingState, toolCalls);
+    await applyGameStateToolCalls(workingState, toolCalls);
     // 在生成当前回合 Book 之前，刷新 prompt 依赖的派生状态
     syncDerivedPromptState(workingState);
 
@@ -369,7 +372,7 @@ async function streamInitialBookMessage(
         { lat: state.playerPosition.lat, lon: state.playerPosition.lon, radius: INITIAL_SCENE_RADIUS_METERS },
         state.playerOrientation,
       );
-  const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
+  const worldStatePrompt = await toWorldStatePrompt(state, sceneObject, false);
   const systemPrompt = isIndoorOpening
     ? INDOOR_INITIAL_BOOK_MESSAGE_SYSTEM
     : OUTDOOR_INITIAL_BOOK_MESSAGE_SYSTEM;
@@ -559,7 +562,7 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
  * @param onlyVisible 是否只包含可见部分（给 Book 消息生成者用）
  * @returns 同时兼容室内与室外上下文的提示词
  */
-async function toWorldStatePrompt(
+export async function toWorldStatePrompt(
   state: GameState,
   scene?: SceneObject,
   onlyVisible: boolean = true,
@@ -587,7 +590,13 @@ async function toWorldStatePrompt(
       record.content,
     ].join('\n'))
     .join('\n\n');
-  const buildingRecordPrompt = "TODO: 在帮助函数处添加一个函数，把Building Record 转化为提示词；这部分可通过onlyVisible=true关掉"
+  const buildingLocation = state.playerIndoorLocation;
+  const currentBuildingRecord = buildingLocation
+    ? state.buildingRecords[buildingLocation.buildingId]
+    : null;
+  const buildingRecordPrompt = !onlyVisible && currentBuildingRecord
+    ? formatBuildingRecordPrompt(currentBuildingRecord)
+    : null;
 
   const sections = [
     '玩家周遭环境数据：',
@@ -604,8 +613,10 @@ async function toWorldStatePrompt(
     '---',
     '玩家当前激活的室内 Sector 细节记录：',
     sectorVisualDescriptions || '（暂无）',
-    // 添加 buildingRecordPrompt，如果 onlyVisible=false
   ];
+  if (buildingRecordPrompt) {
+    sections.push('---', '当前建筑的 Building Record：', buildingRecordPrompt);
+  }
 
   return sections.join('\n');
 }
@@ -617,7 +628,7 @@ async function toWorldStatePrompt(
  * - 参数合法才会执行；
  * - 成功移动后，玩家朝向也会改成这次移动方向；
  */
-export function applyGameStateToolCalls(state: GameState, toolCalls: GameStateToolCall[]): void {
+export async function applyGameStateToolCalls(state: GameState, toolCalls: GameStateToolCall[]): Promise<void> {
   for (const toolCall of toolCalls) {
     console.log(`[${new Date().toISOString()}] 开始解析 ${toolCall.name} 工具参数：`, toolCall.arguments);
 
@@ -625,8 +636,14 @@ export function applyGameStateToolCalls(state: GameState, toolCalls: GameStateTo
 
     switch (toolCall.name) {
       case MOVE_PLAYER_TOOL.name:
-        applyMovePlayerTool(state, args)
-        break
+        applyMovePlayerTool(state, args);
+        break;
+      case SET_PLAYER_INDOOR_LOCATION_TOOL.name:
+        await applySetPlayerIndoorLocationTool(state, args);
+        break;
+      case SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL.name:
+        applySyncActiveIndoorLocationsTool(state, args);
+        break;
     }
 
   }
@@ -878,8 +895,46 @@ function syncActiveFieldVisualDescriptions(state: GameState): void {
 /**
  * 刷新 Book prompt 与前端 debug 快照共用的派生状态，不负责写入新的长期记录。
  */
-function syncDerivedPromptState(state: GameState): void {
-  fillBasicActiveIndoorLocations(state);
+export function syncDerivedPromptState(state: GameState): void {
+  const basicVisibleLocations = buildBasicActiveIndoorLocations(state);
+  const basicKeys = new Set(basicVisibleLocations.map((location) => [
+    location.buildingId,
+    String(location.level),
+    location.suiteId ?? "",
+    location.roomId ?? "",
+  ].join("|")));
+  const mergedVisibleLocations = [...basicVisibleLocations];
+  const activeBuildingId = state.playerIndoorLocation?.buildingId;
+  if (activeBuildingId) {
+    const record = state.buildingRecords[activeBuildingId];
+    if (record) {
+      const extraVisibleLocations = state.activeVisibleLocations
+        .filter((location) => location.buildingId === activeBuildingId)
+        .filter((location) => !basicKeys.has([
+          location.buildingId,
+          String(location.level),
+          location.suiteId ?? "",
+          location.roomId ?? "",
+        ].join("|")))
+        .map((location) => resolveVisibleIndoorLocation(record, location))
+        .filter((location): location is NonNullable<typeof location> => Boolean(location));
+      mergedVisibleLocations.push(...extraVisibleLocations);
+    }
+  }
+  const seenVisibleLocationKeys = new Set<string>();
+  state.activeVisibleLocations = mergedVisibleLocations.filter((location) => {
+    const key = [
+      location.buildingId,
+      String(location.level),
+      location.suiteId ?? "",
+      location.roomId ?? "",
+    ].join("|");
+    if (seenVisibleLocationKeys.has(key)) {
+      return false;
+    }
+    seenVisibleLocationKeys.add(key);
+    return true;
+  });
   syncActiveFieldVisualDescriptions(state);
   syncActiveExteriorVisualDescriptions(state);
   syncActiveSectorVisualDescriptions(state);
@@ -1058,11 +1113,9 @@ async function initializeOpeningIndoorState(state: GameState): Promise<void> {
   }
 
   // 开局命中建筑后必须把整条室内链路跑通，避免后续 prompt 看到半成品状态。
-  const schema = await ensureBuildingSchema(containingBuilding.featureId, state);
-  const record = generateBuildingRecord(schema);
+  const record = await ensureBuildingRecord(containingBuilding.featureId, state);
   // 建筑命中查询拿到的 tags 需要稳定保留在 record 中，供开局与后续回合复用。
   record.tags = containingBuilding.tags;
-  state.buildingRecords[record.featureId] = record;
   state.playerIndoorLocation = chooseInitialIndoorLocation(record);
 }
 

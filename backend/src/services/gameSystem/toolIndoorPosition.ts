@@ -128,6 +128,18 @@ export async function ensureBuildingSchema(featureId: FeatureId, state: GameStat
   return resolved;
 }
 
+export async function ensureBuildingRecord(featureId: FeatureId, state: GameState): Promise<BuildingRecord> {
+  const existing = state.buildingRecords[featureId];
+  if (existing) {
+    return existing;
+  }
+
+  const schema = await ensureBuildingSchema(featureId, state);
+  const record = generateBuildingRecord(schema);
+  state.buildingRecords[featureId] = record;
+  return record;
+}
+
 /**
  * 把 BuildingSchema 转成运行期更易消费的 BuildingRecord。
  * 这里会把 count > 1 的房间膨胀成多个具名 roomId，方便玩家位置与可见范围直接引用。
@@ -185,6 +197,65 @@ export function chooseInitialIndoorLocation(record: BuildingRecord): PlayerIndoo
   };
 }
 
+export function chooseBuildingEntranceIndoorLocation(record: BuildingRecord): PlayerIndoorLocation {
+  const firstLevel = record.levels[1];
+  if (!firstLevel) {
+    return chooseInitialIndoorLocation(record);
+  }
+
+  const entranceRooms = Object.values(firstLevel.sectors)
+    .flatMap((sector) => listSectorIndoorRoomContexts(1, sector))
+    .filter((entry): entry is IndoorRoomContext & { roomId: string } => (
+      entry.locationType === "room"
+      && Boolean(entry.roomId)
+      && getRoomAccess(record, entry) === "entrance"
+    ));
+  if (entranceRooms.length > 0) {
+    const chosen = pickRandom(entranceRooms);
+    return {
+      buildingId: record.featureId,
+      level: 1,
+      roomId: chosen.roomId,
+    };
+  }
+
+  const nonSubRooms = Object.values(firstLevel.sectors)
+    .flatMap((sector) => listSectorIndoorRoomContexts(1, sector))
+    .filter((entry) => entry.locationType !== "subRoom");
+  if (nonSubRooms.length === 0) {
+    return chooseInitialIndoorLocation(record);
+  }
+
+  const chosen = pickRandom(nonSubRooms);
+  if (chosen.locationType === "room" && chosen.roomId) {
+    return {
+      buildingId: record.featureId,
+      level: 1,
+      roomId: chosen.roomId,
+    };
+  }
+
+  if (chosen.locationType === "suite" && chosen.suiteId) {
+    const level = record.levels[1];
+    const sector = level?.sectors[chosen.sectorName];
+    const suite = sector?.rooms[chosen.suiteId];
+    if (suite && "subRooms" in suite) {
+      const subRooms = Object.values(suite.subRooms);
+      if (subRooms.length > 0) {
+        const pickedSubRoom = pickRandom(subRooms);
+        return {
+          buildingId: record.featureId,
+          level: 1,
+          suiteId: chosen.suiteId,
+          roomId: pickedSubRoom.roomId,
+        };
+      }
+    }
+  }
+
+  return chooseInitialIndoorLocation(record);
+}
+
 /**
  * 反查玩家当前所处位置的楼层、sector 和 suite 上下文。
  * 这样 world state、可见范围和 sector VD 激活都能共用同一套定位结果。
@@ -222,11 +293,13 @@ export function findLocationContext(
  * @returns
  */
 export function fillBasicActiveIndoorLocations(state: GameState): void {
-  // 获取玩家所在室内位置
+  state.activeVisibleLocations = buildBasicActiveIndoorLocations(state);
+}
+
+export function buildBasicActiveIndoorLocations(state: GameState): PlayerVisibleLocation[] {
   const location = state.playerIndoorLocation;
   if (!location) {
-    state.activeVisibleLocations = [];
-    return;
+    return [];
   }
 
   const record = state.buildingRecords[location.buildingId];
@@ -246,12 +319,160 @@ export function fillBasicActiveIndoorLocations(state: GameState): void {
   }
 
   if (roomContext.locationType === "subRoom" && roomContext.suiteId) { // 套房内则只可见内部子房间
-    const locatedSuiteSubRooms = listSuiteSubRoomVisibleLocations(location.buildingId, roomContext.level, sector, roomContext.suiteId)
-    state.activeVisibleLocations = dedupeVisibleLocations(locatedSuiteSubRooms);
+    const locatedSuiteSubRooms = listSuiteSubRoomVisibleLocations(location.buildingId, roomContext.level, sector, roomContext.suiteId);
+    return dedupeVisibleLocations(locatedSuiteSubRooms);
   } else { // 否则是默认生成的基板 activePlayerVisibleLocations
     const basicVisibleLocations = listSectorVisibleLocations(location.buildingId, roomContext.level, sector);
-    state.activeVisibleLocations = dedupeVisibleLocations(basicVisibleLocations);
+    return dedupeVisibleLocations(basicVisibleLocations);
   }
+}
+
+type IndoorLocationMove = "enter" | "leave" | "move";
+type IndoorVisibleEdit = "reveal" | "hide";
+
+export async function applySetPlayerIndoorLocationTool(
+  state: GameState,
+  args: any,
+): Promise<void> {
+  const move = typeof args?.move === "string" ? args.move : "";
+  if (move !== "enter" && move !== "leave" && move !== "move") {
+    return;
+  }
+
+  if (move === "leave") {
+    state.playerIndoorLocation = null;
+    state.activeVisibleLocations = [];
+    return;
+  }
+
+  if (move === "enter") {
+    if (typeof args?.buildingId !== "string" || !args.buildingId) {
+      return;
+    }
+
+    const record = await ensureBuildingRecord(args.buildingId, state);
+    state.playerIndoorLocation = chooseBuildingEntranceIndoorLocation(record);
+    return;
+  }
+
+  if (!state.playerIndoorLocation) {
+    return;
+  }
+
+  const targetBuildingId = typeof args?.buildingId === "string" && args.buildingId
+    ? args.buildingId
+    : state.playerIndoorLocation.buildingId;
+  const level = Number(args?.level);
+  const roomId = typeof args?.roomId === "string" ? args.roomId : "";
+  const suiteId = typeof args?.suiteId === "string" && args.suiteId ? args.suiteId : undefined;
+  if (!Number.isFinite(level) || !roomId) {
+    return;
+  }
+
+  const record = await ensureBuildingRecord(targetBuildingId, state);
+  const targetLocation = resolveOccupiableIndoorLocation(record, {
+    buildingId: targetBuildingId,
+    level,
+    suiteId,
+    roomId,
+  });
+  if (!targetLocation) {
+    return;
+  }
+
+  state.playerIndoorLocation = targetLocation;
+}
+
+export function applySyncActiveIndoorLocationsTool(state: GameState, args: any): void {
+  const location = state.playerIndoorLocation;
+  if (!location) {
+    return;
+  }
+
+  const edit = typeof args?.edit === "string" ? args.edit : "";
+  if (edit !== "reveal" && edit !== "hide") {
+    return;
+  }
+
+  const level = Number(args?.level);
+  const suiteId = typeof args?.suiteId === "string" && args.suiteId ? args.suiteId : undefined;
+  const roomId = typeof args?.roomId === "string" && args.roomId ? args.roomId : undefined;
+  if (!Number.isFinite(level)) {
+    return;
+  }
+
+  const record = state.buildingRecords[location.buildingId];
+  if (!record) {
+    return;
+  }
+
+  const targetLocation = resolveVisibleIndoorLocation(record, {
+    buildingId: location.buildingId,
+    level,
+    suiteId,
+    roomId,
+  });
+  if (!targetLocation) {
+    return;
+  }
+
+  if (edit === "reveal") {
+    state.activeVisibleLocations = dedupeVisibleLocations([
+      ...state.activeVisibleLocations,
+      targetLocation,
+    ]);
+    return;
+  }
+
+  const currentKey = toVisibleLocationKey(location);
+  const targetKey = toVisibleLocationKey(targetLocation);
+  if (currentKey === targetKey) {
+    return;
+  }
+
+  state.activeVisibleLocations = state.activeVisibleLocations
+    .filter((entry) => toVisibleLocationKey(entry) !== targetKey);
+}
+
+export function formatBuildingRecordPrompt(record: BuildingRecord): string {
+  const levelLines = Object.values(record.levels)
+    .sort((left, right) => left.level - right.level)
+    .flatMap((level) => {
+      const sectorLines = Object.values(level.sectors).flatMap((sector) => {
+        const roomLines = Object.values(sector.rooms).flatMap((room) => {
+          if ("subRooms" in room) {
+            const subRoomLines = Object.values(room.subRooms)
+              .map((subRoom) => `      - subRoom ${subRoom.roomId}: ${subRoom.description}`);
+            return [
+              `    - suite ${room.suiteId}: ${room.description}`,
+              ...subRoomLines,
+            ];
+          }
+
+          const access = room.access ? ` [access=${room.access}]` : "";
+          return [`    - room ${room.roomId}: ${room.description}${access}`];
+        });
+
+        return [
+          `  - sector ${sector.name} (area=${sector.area}, center=(${sector.centerPosition.lat}, ${sector.centerPosition.lon}))`,
+          ...roomLines,
+        ];
+      });
+
+      return [
+        `- level ${level.level}: ${level.description}`,
+        ...sectorLines,
+      ];
+    });
+
+  return [
+    `buildingId=${record.featureId}`,
+    `category=${record.category}`,
+    `center=(${record.centerPosition.lat}, ${record.centerPosition.lon})`,
+    `tags=${JSON.stringify(record.tags)}`,
+    "levels:",
+    ...levelLines,
+  ].join("\n");
 }
 
 //#region 蓝图生成建筑
@@ -455,6 +676,77 @@ function dedupeVisibleLocations(locations: PlayerVisibleLocation[]): PlayerVisib
     seen.add(key);
     return true;
   });
+}
+
+export function resolveVisibleIndoorLocation(
+  record: BuildingRecord,
+  location: PlayerVisibleLocation,
+): PlayerVisibleLocation | null {
+  const context = findLocationContext(record, location);
+  if (!context) {
+    return null;
+  }
+
+  if (context.locationType === "suite") {
+    return {
+      buildingId: record.featureId,
+      level: context.level,
+      suiteId: context.suiteId,
+    };
+  }
+
+  if (!context.roomId) {
+    return null;
+  }
+
+  return {
+    buildingId: record.featureId,
+    level: context.level,
+    ...(context.suiteId ? { suiteId: context.suiteId } : {}),
+    roomId: context.roomId,
+  };
+}
+
+export function resolveOccupiableIndoorLocation(
+  record: BuildingRecord,
+  location: PlayerVisibleLocation,
+): PlayerIndoorLocation | null {
+  const context = findLocationContext(record, location);
+  if (!context || context.locationType === "suite" || !context.roomId) {
+    return null;
+  }
+
+  return {
+    buildingId: record.featureId,
+    level: context.level,
+    ...(context.suiteId ? { suiteId: context.suiteId } : {}),
+    roomId: context.roomId,
+  };
+}
+
+function getRoomAccess(record: BuildingRecord, context: IndoorRoomContext): BuildingRoom["access"] | undefined {
+  if (context.locationType !== "room" || !context.roomId) {
+    return undefined;
+  }
+
+  const level = record.levels[context.level];
+  const sector = level?.sectors[context.sectorName];
+  if (!sector) {
+    return undefined;
+  }
+
+  const room = Object.values(sector.rooms)
+    .find((entry): entry is BuildingRoom => !("subRooms" in entry) && entry.roomId === context.roomId);
+  return room?.access;
+}
+
+function toVisibleLocationKey(location: PlayerVisibleLocation): string {
+  return [
+    location.buildingId,
+    String(location.level),
+    location.suiteId ?? "",
+    location.roomId ?? "",
+  ].join("|");
 }
 
 /**

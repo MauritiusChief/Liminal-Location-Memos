@@ -13,20 +13,22 @@ jest.mock("../src/services/scene/polarViewPrompt", () => ({
 }));
 
 jest.mock("../src/services/gameSystem/toolIndoorPosition.js", () => ({
-  chooseInitialIndoorLocation: jest.fn(),
-  ensureBuildingSchema: jest.fn(),
-  fillBasicActiveIndoorLocations: jest.fn((state) => {
+  applySetPlayerIndoorLocationTool: jest.fn(),
+  applySyncActiveIndoorLocationsTool: jest.fn(),
+  buildBasicActiveIndoorLocations: jest.fn((state) => {
     if (!state.playerIndoorLocation) {
-      state.activeVisibleLocations = [];
-      return;
+      return [];
     }
 
-    state.activeVisibleLocations = [{
+    return [{
       buildingId: state.playerIndoorLocation.buildingId,
       level: state.playerIndoorLocation.level,
       roomId: state.playerIndoorLocation.roomId,
     }];
   }),
+  chooseInitialIndoorLocation: jest.fn(),
+  ensureBuildingRecord: jest.fn(),
+  ensureBuildingSchema: jest.fn(),
   findContainingBuildingFeatureId: jest.fn(),
   findLocationContext: jest.fn((record, location) => {
     if (!record || !location) {
@@ -41,7 +43,9 @@ jest.mock("../src/services/gameSystem/toolIndoorPosition.js", () => ({
       roomDescription: "客厅",
     };
   }),
+  formatBuildingRecordPrompt: jest.fn(() => "building record prompt"),
   generateBuildingRecord: jest.fn(),
+  resolveVisibleIndoorLocation: jest.fn((record, location) => location),
 }), { virtual: true });
 
 jest.mock("../src/services/gameSystem/systemPrompts", () => ({
