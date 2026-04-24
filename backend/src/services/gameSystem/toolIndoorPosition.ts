@@ -240,7 +240,7 @@ export function findLocationContext(
 
 /**
  * 根据当前玩家室内位置生成基板 active visible locations。
- * 当前最小规则只暴露所在 sector 内的普通房间与 suite 外部。
+ * 在普通房间时只可见所在 sector 内的普通房间与 suite 外部，在 suite 时则只有子房间可见。
  * @param state
  * @returns
  */
@@ -268,18 +268,13 @@ export function fillBasicActiveIndoorLocations(state: GameState): void {
     throw new Error(`Sector ${roomContext.sectorName} is not present in building ${location.buildingId} level ${roomContext.level}.`);
   }
 
-  // 默认生成的基板 activePlayerVisibleLocations
-  const basicVisibleLocations = listSectorVisibleLocations(location.buildingId, roomContext.level, sector);
-  // 找到所处的套房的子房间
-  const locatedSuiteSubRooms = roomContext.locationType === "subRoom" && roomContext.suiteId
-    ? listSuiteSubRoomVisibleLocations(location.buildingId, roomContext.level, sector, roomContext.suiteId)
-    : [];
-
-  // 过滤掉所处的套房本身
-  const locatedVisibleLocations = locatedSuiteSubRooms.length > 0
-    ? basicVisibleLocations.filter(loc => loc.suiteId !== roomContext.suiteId)
-    : basicVisibleLocations
-  state.activeVisibleLocations = dedupeVisibleLocations([...locatedVisibleLocations, ...locatedSuiteSubRooms]);
+  if (roomContext.locationType === "subRoom" && roomContext.suiteId) { // 套房内则只可见内部子房间
+    const locatedSuiteSubRooms = listSuiteSubRoomVisibleLocations(location.buildingId, roomContext.level, sector, roomContext.suiteId)
+    state.activeVisibleLocations = dedupeVisibleLocations(locatedSuiteSubRooms);
+  } else { // 否则是默认生成的基板 activePlayerVisibleLocations
+    const basicVisibleLocations = listSectorVisibleLocations(location.buildingId, roomContext.level, sector);
+    state.activeVisibleLocations = dedupeVisibleLocations(basicVisibleLocations);
+  }
 }
 
 //#region 蓝图生成建筑

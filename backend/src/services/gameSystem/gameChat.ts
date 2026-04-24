@@ -577,8 +577,8 @@ async function toWorldStatePrompt(state: GameState, scene?: SceneObject): Promis
     .filter((record): record is NonNullable<typeof record> => Boolean(record))
     .map((record) => [
       `buildingId=${record.buildingId}`,
-      `level=${record.level}`,
-      `sector=${record.sectorName}`,
+      `楼层：level ${record.level}`,
+      `区域：${record.sectorName}`,
       record.content,
     ].join('\n'))
     .join('\n\n');
@@ -947,19 +947,19 @@ function formatIndoorWorldStatePrompt(state: GameState): string | null {
       // 套房
       if (visibleContext.locationType === 'suite') {
         return [
-          `* level=${visibleContext.level}`,
-          `sector=${visibleContext.sectorName}`,
-          `suite=${visibleContext.suiteId} / ${visibleContext.suiteDescription} （仅表层可见）`,
-        ].join(' / ');
+          `* 楼层：level ${visibleContext.level}`,
+          `区域：${visibleContext.sectorName}`,
+          `套房：${visibleContext.suiteId} - ${visibleContext.suiteDescription} （仅表层可见）`,
+        ].join(' - ');
       }
       // 兼容普通房间和套房子房间
       return [
-        `* level=${visibleContext.level}`,
-        `sector=${visibleContext.sectorName}`,
+        `* 楼层：level ${visibleContext.level}`,
+        `区域：${visibleContext.sectorName}`,
         visibleContext.suiteId
-          ? `suite=${visibleContext.suiteId} / roomId=${visibleContext.roomId} / ${visibleContext.roomDescription}`
-          : `roomId=${visibleContext.roomId} / ${visibleContext.roomDescription}`,
-      ].join(' / ');
+          ? `套房：${visibleContext.suiteId} - 房间ID：${visibleContext.roomId} - ${visibleContext.roomDescription}`
+          : `房间ID：${visibleContext.roomId} - ${visibleContext.roomDescription}`,
+      ].join(' - ');
     })
     .filter((entry): entry is string => Boolean(entry))
     .join('\n');
@@ -970,7 +970,7 @@ function formatIndoorWorldStatePrompt(state: GameState): string | null {
     `buildingCenter=(${record.centerPosition.lat}, ${record.centerPosition.lon})`,
     `buildingTags=${JSON.stringify(record.tags)}`,
     `当前楼层：level ${location.level}`,
-    `当前 Sector：${roomContext.sectorName}`,
+    `当前区域：${roomContext.sectorName}`,
     roomContext.suiteId
       ? `当前房间：套房 ${roomContext.suiteId} - 房间 ${roomContext.roomId} - ${roomContext.roomDescription}`
       : `当前房间：房间 ${roomContext.roomId} - ${roomContext.roomDescription}`,
