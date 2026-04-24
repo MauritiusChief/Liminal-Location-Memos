@@ -2,7 +2,7 @@ import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { DbBuildingFeatureDetailRow, FeatureDetail, FeatureId, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
 import { Position } from "./gameSessionStore.js";
-import { trimTagValue } from "../utils.js";
+import { pickRandom, trimTagValue } from "../utils.js";
 import { APARTMENT_CATEGORY, buildApartmentCategorySchemaFromDistribution, finishApartmentBuildingSchema, isAmbiguousApartmentCategory, selectApartmentPatternKey } from "./buildingApartment.js";
 import { APARTMENT_UTILITY_CATEGORY } from "./buildingApartmentUtility.js";
 import { buildHouseCategorySchemaFromDistribution, finishHouseBuildingSchema, HOUSE_CATEGORY, isAmbiguousHouseCategory, selectHousePatternKey } from "./buildingHouse.js";
@@ -876,28 +876,6 @@ function hasContainedPoiTag(
     const tagValue = trimTagValue(poi.tags[key]);
     return tagValue !== null && valueSet.has(tagValue);
   });
-}
-
-/**
- * 以支持权重和反对权重加权随机得到结果
- * @param supportingWeight
- * @param nonSupportingWeight 为负数
- * @returns true 代表支持，false 代表反对
- */
-export function weightedBoolean(supportingWeight: number, nonSupportingWeight: number): boolean {
-  const totalWeight = supportingWeight + nonSupportingWeight;
-  return Math.random() * totalWeight < supportingWeight;
-}
-
-/**
- * 从给定列表中均匀随机取一个值。
- *
- * @param values 候选值列表
- * @returns 被选中的值
- */
-export function pickRandom<T>(values: T[]): T {
-  const index = Math.min(values.length - 1, Math.floor(Math.random() * values.length));
-  return values[index];
 }
 
 /**

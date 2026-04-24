@@ -1,5 +1,4 @@
-import type { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategoryRoomSchema, CategorySchema, RoomSchema, SectorDistributionSchem, SuiteSchema } from "./buildingSchema.js";
-import { pickRandom, weightedBoolean, type PatternDistribution } from "./buildingSchema.js";
+import type { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategoryRoomSchema, CategorySchema, RoomSchema, SectorDistributionSchem, SuiteSchema, PatternDistribution } from "./buildingSchema.js";
 import type { FeatureId } from "../featureDetail.js";
 import {
   ALL_LEVELS,
@@ -13,6 +12,7 @@ import {
   TOP_LEVEL,
   type HouseDetermingFactor,
 } from "./buildingUtils.js";
+import { pickRandom, weightedBoolean } from "../utils.js";
 
 type ApartmentSuiteRoomDefinition = {
   desc: string;
