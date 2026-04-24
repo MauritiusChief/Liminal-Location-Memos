@@ -1,4 +1,5 @@
 import { query } from "@/db/client.js";
+import { loadServiceSql } from "@/db/sqlLoader.js";
 import { DbBuildingFeatureDetailRow, FeatureId, mapBuildingDetailRowToFeatureDetail } from "../featureDetail.js";
 import { BuildingSchema, RoomSchema, SuiteSchema, generateBuildingSchema, pickRandom } from "./buildingClassifier.js";
 import { GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position } from "./gameSessionStore.js";
@@ -75,6 +76,8 @@ const BEDROOM_WILD_TARGET_KEYS: BedroomWildTargetKey[] = ["bedroom", "kids_bedro
 
 //#region 主函数
 
+const fetchBuildingTagsByPositionSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingTagsByPosition.sql");
+
 /**
  * 根据玩家坐标查找所处建筑。
  *
@@ -84,33 +87,7 @@ const BEDROOM_WILD_TARGET_KEYS: BedroomWildTargetKey[] = ["bedroom", "kids_bedro
  * @returns 命中的 building feature id，或者 null
  */
 export async function findContainingBuildingFeatureId(position: Position): Promise<ContainingBuildingSnapshot | null> {
-  const sql = `
-SELECT
-  b.osm_type || '/' || b.osm_id AS feature_id,
-  b.osm_type,
-  b.osm_id,
-  GeometryType(b.geom) AS geometry_type,
-  ST_X(ST_Centroid(b.geom)) AS center_lon,
-  ST_Y(ST_Centroid(b.geom)) AS center_lat,
-  jsonb_strip_nulls(
-    jsonb_build_object(
-      'name', b.name,
-      'building', b.building,
-      'man_made', b.man_made,
-      'height', b.height,
-      'level', b.level,
-      'building:levels', b.building_levels
-    ) || b.tags_extra
-  )::jsonb AS tags,
-  b.relations,
-  b.outline_references,
-  b.meta,
-  b.tainted,
-  '[]'::jsonb AS contained_pois
-FROM osm_buildings b
-WHERE ST_Covers(b.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326))
-LIMIT 1;
-`;
+  const sql = await fetchBuildingTagsByPositionSqlPromise;
   const result = await query<DbContainingBuildingRow>(sql, [position.lon, position.lat]);
   const row = result.rows[0];
   if (!row) {
