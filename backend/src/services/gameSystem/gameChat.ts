@@ -642,10 +642,8 @@ interface ExtractedVisualDescriptions {
 }
 
 /**
- * TODO 添加 Sector Visual Description 更新逻辑
- *
  * BOOK MESSAGE 已发送出去之后，根据此 BOOK MESSAGE 为最新的玩家位置
- * 补写或更新 Field Visual Description 与 Exterior Visual Description。
+ * 补写或更新 Field Visual Description 与 Exterior Visual Description 与 Sector Visual Description。
  *
  * Field VD 的规则是：
  * - 若 300m 范围内已有最近的一条记录，则更新它；
@@ -660,7 +658,6 @@ async function upsertVisualDescriptions(state: GameState, bookMessage: string): 
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: VISUAL_DESCRIPTION_RADIUS_METERS }, state.playerOrientation);
   const visibleBuildingIds = collectSceneBuildingIds(sceneObject);
   const matchedFieldRecord = findNearestFieldVisualDescription(state, state.playerPosition);
-  const currentSectorContext = getCurrentSectorVisualDescriptionContext(state);
 
   const extracted = await extractVisualDescriptions(
     state,
@@ -706,7 +703,6 @@ async function upsertVisualDescriptions(state: GameState, bookMessage: string): 
   // Sector VD 仍以整个 sector 为记录单位，套房内看到的细节也写回所属 sector。
   if (
     extracted.sector
-    && currentSectorContext
     && shouldWriteVisualDescriptionContent(extracted.sector.content)
   ) {
     const existingSector = findSectorVisualDescription(
@@ -749,6 +745,7 @@ async function extractVisualDescriptions(
   const scenePrompt = buildScenePrompt(sceneObject, playerOrientation);
   const visibleBuildingIds = collectSceneBuildingIds(sceneObject);
   const currentSectorContext = getCurrentSectorVisualDescriptionContext(state);
+  const indoorPrompt = formatIndoorWorldStatePrompt(state);
   const oldExteriorRecords = oldExteriorVisualDescriptions
     .filter((record): record is NonNullable<typeof record> => Boolean(record))
     .map((record) => [`buildingId=${record.buildingId}`, record.content].join('\n'))
@@ -768,17 +765,10 @@ async function extractVisualDescriptions(
     oldExteriorRecords || '（暂无）',
     '---',
     '当前室内 Sector 上下文：',
-    currentSectorContext
-      ? [
-          // `buildingId=${currentSectorContext.buildingId}`,
-          // `level=${currentSectorContext.level}`,
-          // `sectorName=${currentSectorContext.sectorName}`,
-          currentSectorContext.indoorPrompt,
-        ].join('\n')
-      : '（当前没有可更新的室内 Sector 上下文）',
+    indoorPrompt ?? '（当前没有可更新的室内 Sector 上下文）',
     '---',
     '旧的 Sector Visual Description：',
-    currentSectorContext?.oldSectorVisualDescription ?? '（暂无）',
+    currentSectorContext ?? '（暂无）',
     '---',
     '文本描述：',
     bookMessage,
@@ -1013,13 +1003,12 @@ function findSectorVisualDescription(
   return entry ? { id: entry[0], record: entry[1] } : null;
 }
 
-function getCurrentSectorVisualDescriptionContext(state: GameState): {
-  buildingId: string;
-  level: number;
-  sectorName: string;
-  indoorPrompt: string;
-  oldSectorVisualDescription: string;
-} | null {
+/**
+ * 获取当前的 Sector Visual Description
+ * @param state
+ * @returns
+ */
+function getCurrentSectorVisualDescriptionContext(state: GameState): string | null {
   const location = state.playerIndoorLocation;
   if (!location) {
     return null;
@@ -1047,13 +1036,7 @@ function getCurrentSectorVisualDescriptionContext(state: GameState): {
     roomContext.sectorName,
   );
 
-  return {
-    buildingId: location.buildingId,
-    level: location.level,
-    sectorName: roomContext.sectorName,
-    indoorPrompt,
-    oldSectorVisualDescription: oldSector?.record.content ?? NO_VISUAL_DESCRIPTION_UPDATE,
-  };
+  return oldSector?.record.content ?? null;
 }
 
 
@@ -1094,7 +1077,7 @@ function collectSceneBuildingIds(scene: SceneObject): string[] {
 }
 
 /**
- * 组装 `玩家当前室内场景摘要` 部分的提示词
+ * 组装 `玩家当前室内场景摘要` 部分的提示词，只显示玩家能看到的部分（来自 activeVisibleLocations）
  * @param state
  * @returns
  */
