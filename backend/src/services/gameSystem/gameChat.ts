@@ -50,7 +50,7 @@ export type GameStreamEvent =
   | { type: 'queue_rejected'; message: string; session: GameClientSessionSnapshot }
   | { type: 'error'; message: string };
 
-type EmitGameEvent = (event: GameStreamEvent) => void | Promise<void>;
+export type EmitGameEvent = (event: GameStreamEvent) => void | Promise<void>;
 
 const INITIAL_SCENE_RADIUS_METERS = 1000;
 const VISUAL_DESCRIPTION_RADIUS_METERS = 300;
@@ -271,130 +271,6 @@ async function finalizeVisualDescription(session: GameSession, bookMessage: stri
     await updateRuntimeSession(session);
   } finally {
     session.runtime.pendingVisualDescription = false;
-  }
-}
-
-/**
- * 根据 request 生成 Scene Prompt，然后 stream 第一条 Book Message
- * @param state
- * @param emit
- * @returns 整个游戏的第一条描述周遭状况的 Book Message
- */
-async function streamInitialBookMessage(
-  state: GameState,
-  emit: EmitGameEvent,
-): Promise<string> {
-  console.log(`[${new Date().toISOString()}] initialBookMessage() 触发`);
-
-  const isIndoorOpening = Boolean(state.playerIndoorLocation);
-  const sceneObject = isIndoorOpening
-    ? undefined
-    : await buildSceneFromRequest(
-        { lat: state.playerPosition.lat, lon: state.playerPosition.lon, radius: INITIAL_SCENE_RADIUS_METERS },
-        state.playerOrientation,
-      );
-  const worldStatePrompt = await toWorldStatePrompt(state, sceneObject, false);
-  const systemPrompt = isIndoorOpening
-    ? INDOOR_INITIAL_BOOK_MESSAGE_SYSTEM
-    : OUTDOOR_INITIAL_BOOK_MESSAGE_SYSTEM;
-  await writeGameDebugRequest({
-    mode: 'user-message',
-    functionName: 'streamInitialBookMessage',
-    systemPrompt,
-    userMessage: worldStatePrompt,
-  });
-
-  let reply = '';
-  let reasoning = '';
-
-  try {
-    for await (const event of streamReplySingleMessage(
-      systemPrompt,
-      worldStatePrompt,
-    )) {
-      if (event.replyDelta) {
-        reply += event.replyDelta;
-        await emit({ type: 'book_reply_delta', text: event.replyDelta });
-      }
-      if (event.reasoningDelta) {
-        reasoning += event.reasoningDelta;
-      }
-    }
-
-    await writeGameDebugResult({
-      functionName: 'streamInitialBookMessage',
-      reply,
-      reasoning,
-    });
-    return reply;
-  } catch (error) {
-    await writeGameDebugResult({
-      functionName: 'initialBookMessage',
-      error,
-    });
-    throw error;
-  }
-}
-
-/**
- * 流式输送常规回合 Book Message。
- * 过程中会用到传统的 sys, user, assist, tool, assist... 这样的 messages 结构。
- *
- * 和开场消息不同，这里会把最近一段 messageHistory 与 worldStatePrompt 一起发给模型，
- * 因此它代表的是“承接上下文的正式回合输出”。
- * @param state
- * @param emit
- * @returns
- */
-async function streamRegularBookMessage(
-  state: GameState,
-  emit: EmitGameEvent,
-): Promise<string> {
-  console.log(`[${new Date().toISOString()}] generateBookMessage() 触发`);
-
-  const { lat, lon } = state.playerPosition;
-  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: WORLD_STATE_RADIUS_METERS}, state.playerOrientation);
-  const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
-  // 组装消息历史
-  const messageHistory = state.messageHistory.slice(Math.max(0, state.messageHistory.length - 12));
-  await writeGameDebugRequest({
-    mode: 'full-messages',
-    functionName: 'streamRegularBookMessage',
-    systemPrompt: REGULAR_BOOK_MESSAGE_SYSTEM,
-    gameMessages: messageHistory,
-    worldStatePrompt,
-  });
-
-  let reply = '';
-  let reasoning = '';
-
-  try {
-    for await (const event of streamReplyFullMessages(
-      REGULAR_BOOK_MESSAGE_SYSTEM,
-      messageHistory,
-      worldStatePrompt,
-    )) {
-      if (event.replyDelta) {
-        reply += event.replyDelta;
-        await emit({ type: 'book_reply_delta', text: event.replyDelta });
-      }
-      if (event.reasoningDelta) {
-        reasoning += event.reasoningDelta;
-      }
-    }
-
-    await writeGameDebugResult({
-      functionName: 'streamRegularBookMessage',
-      reply,
-      reasoning,
-    });
-    return reply;
-  } catch (error) {
-    await writeGameDebugResult({
-      functionName: 'streamRegularBookMessage',
-      error,
-    });
-    throw error;
   }
 }
 

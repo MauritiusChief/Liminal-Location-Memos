@@ -31,6 +31,8 @@
 * 拿到纸和笔之后，可以画地图
   * 画的图仅有点和线，点的话放一个图标表示建筑
 
+* 添加渐进式披露或者路由者，减缓单次对话负担
+
 * gameChat 当中把 Scene Object 也加入流转，避免反复 sql 消耗性能
 
 * Open-Meteo Land Cover API
