@@ -1,7 +1,7 @@
 import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
-import type { BuildingCandidate, BuildingSchema, CategoryDefinition} from "./buildingClassifier.js";
-import { fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, weightedBoolean } from "./buildingClassifier.js";
+import type { BuildingCandidate, BuildingSchema, CategoryDefinition} from "./buildingSchema.js";
+import { fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, weightedBoolean } from "./buildingSchema.js";
 import { distanceToPosition } from "../geometry.js";
 
 /**

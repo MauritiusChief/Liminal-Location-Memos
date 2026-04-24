@@ -1,5 +1,5 @@
-import type { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategoryRoomSchema, CategorySchema, PatternDistribution, RoomSchema, SectorDistributionSchem } from "./buildingClassifier.js";
-import { weightedBoolean } from "./buildingClassifier.js";
+import type { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategoryRoomSchema, CategorySchema, PatternDistribution, RoomSchema, SectorDistributionSchem } from "./buildingSchema.js";
+import { weightedBoolean } from "./buildingSchema.js";
 import type { FeatureId } from "../featureDetail.js";
 import {
   GROUND_LEVEL,

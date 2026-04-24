@@ -1,5 +1,5 @@
-import type { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategoryRoomSchema, CategorySchema, RoomSchema, SectorDistributionSchem, SuiteSchema } from "./buildingClassifier.js";
-import { pickRandom, weightedBoolean, type PatternDistribution } from "./buildingClassifier.js";
+import type { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategoryRoomSchema, CategorySchema, RoomSchema, SectorDistributionSchem, SuiteSchema } from "./buildingSchema.js";
+import { pickRandom, weightedBoolean, type PatternDistribution } from "./buildingSchema.js";
 import type { FeatureId } from "../featureDetail.js";
 import {
   ALL_LEVELS,
