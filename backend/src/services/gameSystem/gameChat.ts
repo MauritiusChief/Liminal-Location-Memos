@@ -547,8 +547,8 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
 
 /**
  * TODO：
- * - 添加把 state 中的 active visible locations 转化为提示词（玩家可视的建筑位置数据）
- * - 根据玩家是否在室内切换是否启用 scenePrompt、field VD、 exterior VD（室外时才启用）、sector VD（玩家周遭室内场景细节记录）（室内时才启用）
+ * 拆分为给 Game State Manager 用的完整版 world state，
+ * 和 Book 消息生成者使用的只关心可见部分的 world state
  *
  * 把当前 GameState 转成可消费的 world-state 提示词。
  * world-state 提示词消费者：
@@ -556,9 +556,14 @@ async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> 
  * - Game State Manager
  * @param state
  * @param scene 已按照合理半径获取的 Scene Object；室内开局时可留空
+ * @param onlyVisible 是否只包含可见部分（给 Book 消息生成者用）
  * @returns 同时兼容室内与室外上下文的提示词
  */
-async function toWorldStatePrompt(state: GameState, scene?: SceneObject): Promise<string> {
+async function toWorldStatePrompt(
+  state: GameState,
+  scene?: SceneObject,
+  onlyVisible: boolean = true,
+): Promise<string> {
   // 室外相关的信息
   const scenePrompt = scene ? buildScenePrompt(scene, state.playerOrientation) : null;
   const fieldVisualDescriptions = Object.entries(state.fieldVisualDescriptions)
@@ -582,6 +587,7 @@ async function toWorldStatePrompt(state: GameState, scene?: SceneObject): Promis
       record.content,
     ].join('\n'))
     .join('\n\n');
+  const buildingRecordPrompt = "TODO: 在帮助函数处添加一个函数，把Building Record 转化为提示词；这部分可通过onlyVisible=true关掉"
 
   const sections = [
     '玩家周遭环境数据：',
@@ -598,6 +604,7 @@ async function toWorldStatePrompt(state: GameState, scene?: SceneObject): Promis
     '---',
     '玩家当前激活的室内 Sector 细节记录：',
     sectorVisualDescriptions || '（暂无）',
+    // 添加 buildingRecordPrompt，如果 onlyVisible=false
   ];
 
   return sections.join('\n');

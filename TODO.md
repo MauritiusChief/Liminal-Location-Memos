@@ -2,8 +2,8 @@
 
 ## 重构计划
 
-* Visual Dscrption 提示词，明确提示因为 World State 范围窄，描述中必定包含不在 World State 范围内的建筑。因此这部分不在范围内建筑的细节不能记录，避免产生混淆。
 * backend/routes/api.ts 拆分为小的文件，不要全挤在一起
+* 拆分 gameChat 到 Visual Description、Game State
 
 ## 近期计划
 
@@ -32,3 +32,13 @@
   * 画的图仅有点和线，点的话放一个图标表示建筑
 
 * gameChat 当中把 Scene Object 也加入流转，避免反复 sql 消耗性能
+
+* Open-Meteo Land Cover API
+  * 获取地表覆盖
+  * https://archive-api.open-meteo.com/v1/era5-land
+* Open-Meteo API
+  * 气候、降水
+ * https://api.open-meteo.com/v1/forecast
+* Open-Elevation API
+  * 经纬度返回海拔
+  * https://api.open-elevation.com/api/v1/lookup?locations=LAT,LON
