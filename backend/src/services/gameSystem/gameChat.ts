@@ -263,11 +263,8 @@ async function executeTurnStream(
     // 先让专门的 agent 决定“这句玩家输入会触发哪些状态操作”。
     const toolCalls = await gameStateManager(workingState);
     applyGameStateToolCalls(workingState, toolCalls);
-    // 以防玩家位置更新了，需要更新一下位置会影响激活效果的 VD 的 id
-    fillBasicActiveIndoorLocations(workingState);
-    syncActiveFieldVisualDescriptions(workingState);
-    syncActiveExteriorVisualDescriptions(workingState);
-    syncActiveSectorVisualDescriptions(workingState);
+    // 在生成当前回合 Book 之前，刷新 prompt 依赖的派生状态
+    syncDerivedPromptState(workingState);
 
     const bookMessage = await streamRegularBookMessage(workingState, emit);
     workingState.messageHistory.push({
@@ -344,6 +341,8 @@ async function finalizeVisualDescription(session: GameSession, bookMessage: stri
   try {
     const nextState = cloneGameState(session.gameState);
     await upsertVisualDescriptions(nextState, bookMessage);
+    // 后台新写入 VD 记录之后，刷新提交给前端快照的 active 列表
+    syncDerivedPromptState(nextState);
     session.gameState = nextState;
     await updateRuntimeSession(session);
   } finally {
@@ -771,9 +770,9 @@ async function extractVisualDescriptions(
     '当前室内 Sector 上下文：',
     currentSectorContext
       ? [
-          `buildingId=${currentSectorContext.buildingId}`,
-          `level=${currentSectorContext.level}`,
-          `sectorName=${currentSectorContext.sectorName}`,
+          // `buildingId=${currentSectorContext.buildingId}`,
+          // `level=${currentSectorContext.level}`,
+          // `sectorName=${currentSectorContext.sectorName}`,
           currentSectorContext.indoorPrompt,
         ].join('\n')
       : '（当前没有可更新的室内 Sector 上下文）',
@@ -877,6 +876,16 @@ function syncActiveFieldVisualDescriptions(state: GameState): void {
     );
 
   state.activeFieldVisualDescriptions = records.map((record) => record.id);
+}
+
+/**
+ * 刷新 Book prompt 与前端 debug 快照共用的派生状态，不负责写入新的长期记录。
+ */
+function syncDerivedPromptState(state: GameState): void {
+  fillBasicActiveIndoorLocations(state);
+  syncActiveFieldVisualDescriptions(state);
+  syncActiveExteriorVisualDescriptions(state);
+  syncActiveSectorVisualDescriptions(state);
 }
 
 /**

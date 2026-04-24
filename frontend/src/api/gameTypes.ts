@@ -28,6 +28,15 @@ export interface ExteriorVisualDescriptionRecord {
   updatedAt: string;
 }
 
+export interface SectorVisualDescriptionRecord {
+  buildingId: string;
+  level: number;
+  sectorName: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface BuildingSchemaSubRoom {
   count: number;
   desc: string;
@@ -52,18 +61,18 @@ export interface BuildingLevelSchemaDefinition {
 
 export type BuildingSchema = Record<string, BuildingLevelSchemaDefinition>;
 
-export interface LevelVisualDescriptionRecord {
-  buildingId: string;
-  level: number;
-  content: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface PlayerIndoorLocation {
   buildingId: string;
   level: number;
-  roomKey: string;
+  suiteId?: string;
+  roomId: string;
+}
+
+export interface PlayerVisibleLocation {
+  buildingId: string;
+  level: number;
+  suiteId?: string;
+  roomId?: string;
 }
 
 export interface GameSessionSnapshot {
@@ -76,8 +85,11 @@ export interface GameSessionSnapshot {
   fieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: string[];
   exteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
+  sectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
+  activeSectorVisualDescriptions: string[];
   buildingSchemas: Record<string, BuildingSchema>;
-  levelVisualDescriptions: Record<string, LevelVisualDescriptionRecord>;
+  buildingRecords: Record<string, unknown>;
+  activeVisibleLocations: PlayerVisibleLocation[];
   llmProvider?: string;
   pendingVisualDescription: boolean;
   hasQueuedPlayerMessage: boolean;
