@@ -1,3 +1,5 @@
+import { GameState } from "./gameSessionStore.js";
+import { fillBasicActiveIndoorLocations } from "./toolActiveIndoorLocations.js";
 
 
 /**
@@ -230,48 +232,9 @@ function syncActiveFieldVisualDescriptions(state: GameState): void {
 }
 
 /**
- * 刷新 Book prompt 与前端 debug 快照共用的派生状态，不负责写入新的长期记录。
+ * 更新 Book Composer 与前端 debug 快照共用的 activeXxx 记录，不负责写入新的长期记录。
  */
-export function syncDerivedPromptState(state: GameState): void {
-  const basicVisibleLocations = buildBasicActiveIndoorLocations(state);
-  const basicKeys = new Set(basicVisibleLocations.map((location) => [
-    location.buildingId,
-    String(location.level),
-    location.suiteId ?? "",
-    location.roomId ?? "",
-  ].join("|")));
-  const mergedVisibleLocations = [...basicVisibleLocations];
-  const activeBuildingId = state.playerIndoorLocation?.buildingId;
-  if (activeBuildingId) {
-    const record = state.buildingRecords[activeBuildingId];
-    if (record) {
-      const extraVisibleLocations = state.activeVisibleLocations
-        .filter((location) => location.buildingId === activeBuildingId)
-        .filter((location) => !basicKeys.has([
-          location.buildingId,
-          String(location.level),
-          location.suiteId ?? "",
-          location.roomId ?? "",
-        ].join("|")))
-        .map((location) => resolveVisibleIndoorLocation(record, location))
-        .filter((location): location is NonNullable<typeof location> => Boolean(location));
-      mergedVisibleLocations.push(...extraVisibleLocations);
-    }
-  }
-  const seenVisibleLocationKeys = new Set<string>();
-  state.activeVisibleLocations = mergedVisibleLocations.filter((location) => {
-    const key = [
-      location.buildingId,
-      String(location.level),
-      location.suiteId ?? "",
-      location.roomId ?? "",
-    ].join("|");
-    if (seenVisibleLocationKeys.has(key)) {
-      return false;
-    }
-    seenVisibleLocationKeys.add(key);
-    return true;
-  });
+export function syncActiveVisualDescriptions(state: GameState): void {
   syncActiveFieldVisualDescriptions(state);
   syncActiveExteriorVisualDescriptions(state);
   syncActiveSectorVisualDescriptions(state);

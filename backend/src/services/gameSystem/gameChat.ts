@@ -1,22 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {
-  bearingBetweenCoordinates,
-  distanceToPosition,
-} from '@/services/geometry.js';
-import { buildSceneFromRequest, SceneObject } from '../scene/sceneObject.js';
-import { buildScenePrompt } from '../scene/scenePrompt.js';
-import {
-  INDOOR_INITIAL_BOOK_MESSAGE_SYSTEM,
-  OUTDOOR_INITIAL_BOOK_MESSAGE_SYSTEM,
-  REGULAR_BOOK_MESSAGE_SYSTEM,
-  VISUAL_DESCRIPTION_SYSTEM,
-} from './systemPrompts.js';
-import { writeGameDebugRequest, writeGameDebugResult } from './gameDebug.js';
-import {
-  generateJsonReplySingleMessage,
-  streamReplyFullMessages,
-  streamReplySingleMessage,
-} from './llm.js';
+import { SceneObject } from '../scene/sceneObject.js';
 import {
   cloneGameState,
   createRuntimeSession,
@@ -24,20 +7,18 @@ import {
   GameSession,
   GameState,
   getRuntimeSession,
-  FieldVisualDescriptionRecord,
-  Position,
   toClientGameSessionSnapshot,
   updateRuntimeSession,
 } from './gameSessionStore.js';
-import { formatRelativeDirection } from '../scene/polarViewPrompt.js';
 import {
-  buildBasicActiveIndoorLocations,
   chooseInitialIndoorLocation,
   ensureBuildingRecord,
   findContainingBuildingFeatureId,
   findLocationContext,
-  resolveVisibleIndoorLocation,
 } from './toolIndoorPosition.js';
+import { streamInitialBookMessage } from './agentBookComposer.js';
+import { syncActiveVisualDescriptions } from './agentVisualDescriber.js';
+import { fillBasicActiveIndoorLocations } from './toolActiveIndoorLocations.js';
 
 export type GameStreamEvent =
   | { type: 'player_message_accepted'; text: string }
@@ -51,10 +32,6 @@ export type GameStreamEvent =
   | { type: 'error'; message: string };
 
 export type EmitGameEvent = (event: GameStreamEvent) => void | Promise<void>;
-
-const INITIAL_SCENE_RADIUS_METERS = 1000;
-const VISUAL_DESCRIPTION_RADIUS_METERS = 300;
-const NO_VISUAL_DESCRIPTION_UPDATE = '__NO_UPDATE__';
 
 //#region 出口函数
 
@@ -74,7 +51,8 @@ export async function streamGameStart(emit: EmitGameEvent): Promise<GameSession>
   const session = await createRuntimeSession();
   const workingState = cloneGameState(session.gameState);
   await initializeOpeningIndoorState(workingState);
-  syncDerivedPromptState(workingState);
+  fillBasicActiveIndoorLocations(workingState);
+  // syncActiveVisualDescriptions(workingState);
 
   const openingMessage = await streamInitialBookMessage(workingState, emit);
 
@@ -188,7 +166,7 @@ async function executeTurnStream(
     const toolCalls = await gameStateManager(workingState);
     await applyGameStateToolCalls(workingState, toolCalls);
     // 在生成当前回合 Book 之前，刷新 prompt 依赖的派生状态
-    syncDerivedPromptState(workingState);
+    syncActiveVisualDescriptions(workingState);
 
     const bookMessage = await streamRegularBookMessage(workingState, emit);
     workingState.messageHistory.push({
@@ -264,9 +242,9 @@ async function commitBookMessage(
 async function finalizeVisualDescription(session: GameSession, bookMessage: string): Promise<void> {
   try {
     const nextState = cloneGameState(session.gameState);
-    await upsertVisualDescriptions(nextState, bookMessage);
-    // 后台新写入 VD 记录之后，刷新提交给前端快照的 active 列表
-    syncDerivedPromptState(nextState);
+    // await upsertVisualDescriptions(nextState, bookMessage);
+    // // 后台新写入 VD 记录之后，刷新提交给前端快照的 active 列表
+    // syncActiveVisualDescriptions(nextState);
     session.gameState = nextState;
     await updateRuntimeSession(session);
   } finally {
@@ -290,6 +268,7 @@ async function initializeOpeningIndoorState(state: GameState): Promise<void> {
   // 建筑命中查询拿到的 tags 需要稳定保留在 record 中，供开局与后续回合复用。
   record.tags = containingBuilding.tags;
   state.playerIndoorLocation = chooseInitialIndoorLocation(record);
+  fillBasicActiveIndoorLocations(state)
 }
 
 /**
@@ -307,65 +286,6 @@ function collectSceneBuildingIds(scene: SceneObject): string[] {
     .flatMap((feature) => feature.category === 'building' ? [feature.featureId] : []) ?? [];
 
   return [...new Set([...microGridBuildingIds, ...polarBuildingIds])];
-}
-
-/**
- * 组装 `玩家当前室内场景摘要` 部分的提示词，只显示玩家能看到的部分（来自 activeVisibleLocations）
- * @param state
- * @returns
- */
-function formatIndoorWorldStatePrompt(state: GameState): string | null {
-  const location = state.playerIndoorLocation;
-  if (!location) {
-    return null;
-  }
-
-  const record = state.buildingRecords[location.buildingId];
-
-  const roomContext = findLocationContext(record, location);
-  if (!roomContext) {
-    throw new Error(`Room ${location.roomId} is not present in building ${location.buildingId}.`);
-  }
-
-  const visibleLocations = state.activeVisibleLocations
-    .map((entry) => {
-      const visibleContext = findLocationContext(record, entry);
-      if (!visibleContext) {
-        return null;
-      }
-      // 套房
-      if (visibleContext.locationType === 'suite') {
-        return [
-          `* 楼层：level ${visibleContext.level}`,
-          `区域：${visibleContext.sectorName}`,
-          `套房：${visibleContext.suiteId} - ${visibleContext.suiteDescription} （仅表层可见）`,
-        ].join(' - ');
-      }
-      // 兼容普通房间和套房子房间
-      return [
-        `* 楼层：level ${visibleContext.level}`,
-        `区域：${visibleContext.sectorName}`,
-        visibleContext.suiteId
-          ? `套房：${visibleContext.suiteId} - 房间ID：${visibleContext.roomId} - ${visibleContext.roomDescription}`
-          : `房间ID：${visibleContext.roomId} - ${visibleContext.roomDescription}`,
-      ].join(' - ');
-    })
-    .filter((entry): entry is string => Boolean(entry))
-    .join('\n');
-
-  return [
-    `buildingId=${record.featureId}`,
-    `buildingCategory=${record.category}`,
-    `buildingCenter=(${record.centerPosition.lat}, ${record.centerPosition.lon})`,
-    `buildingTags=${JSON.stringify(record.tags)}`,
-    `当前楼层：level ${location.level}`,
-    `当前区域：${roomContext.sectorName}`,
-    roomContext.suiteId
-      ? `当前房间：套房 ${roomContext.suiteId} - 房间 ${roomContext.roomId} - ${roomContext.roomDescription}`
-      : `当前房间：房间 ${roomContext.roomId} - ${roomContext.roomDescription}`,
-    '当前可见的室内位置：',
-    visibleLocations || '（暂无）',
-  ].join('\n');
 }
 
 

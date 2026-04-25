@@ -93,7 +93,7 @@ function toBuildingLevel(level: number, schema: BuildingSchema["levels"][string]
       name: sectorName,
       area: sector.area,
       centerPosition: sector.centerPosition,
-      rooms: expandSectorRooms(sector.rooms),
+      rooms: expandSectorRooms(level, sector.rooms),
     };
     return accumulator;
   }, {});
@@ -111,6 +111,7 @@ function toBuildingLevel(level: number, schema: BuildingSchema["levels"][string]
  * @returns
  */
 function expandSectorRooms(
+  level: number,
   rooms: Record<string, RoomSchema | SuiteSchema>,
 ): Record<string, BuildingRoom | BuildingSuite> {
   const expandedEntries: Array<readonly [string, BuildingRoom | BuildingSuite]> = [];
@@ -118,11 +119,11 @@ function expandSectorRooms(
     if ("subRooms" in room) {
       const suiteCount = normalizeCount(room.count);
       rangeCount(suiteCount).forEach((index) => {
-        const suiteId = toIndexedRoomId(roomKey, index, suiteCount);
+        const suiteId = toIndexedRoomId(level, roomKey, index, suiteCount);
         expandedEntries.push([suiteId, {
           suiteId,
           description: room.description,
-          subRooms: expandSuiteSubRooms(suiteId, room.subRooms),
+          subRooms: expandSuiteSubRooms(level, suiteId, room.subRooms),
         }]);
       });
       return;
@@ -130,7 +131,7 @@ function expandSectorRooms(
 
     const roomCount = normalizeCount(room.count);
     rangeCount(roomCount).forEach((index) => {
-      const roomId = toIndexedRoomId(roomKey, index, roomCount);
+      const roomId = toIndexedRoomId(level, roomKey, index, roomCount);
       expandedEntries.push([roomId, {
         roomId,
         description: room.description,
@@ -144,21 +145,23 @@ function expandSectorRooms(
 
 /**
  * 从蓝图生成套房的子房间
+ * @param level
  * @param suiteId
  * @param subRooms
  * @returns
  */
 function expandSuiteSubRooms(
+  level: number,
   suiteId: string,
   subRooms: SuiteSchema["subRooms"],
 ): Record<string, BuildingSubRoom> {
   const expandedEntries = Object.entries(subRooms).flatMap(([subRoomKey, subRoom]) => {
     // TODO 目前只有一种通配房间
     if (subRoomKey === BEDROOM_WILD_KEY) {
-      return expandBedroomWildSubRooms(suiteId, normalizeCount(subRoom.count));
+      return expandBedroomWildSubRooms(level, suiteId, normalizeCount(subRoom.count));
     }
 
-    return expandConcreteSubRooms(suiteId, subRoomKey, subRoom.description, normalizeCount(subRoom.count));
+    return expandConcreteSubRooms(level, suiteId, subRoomKey, subRoom.description, normalizeCount(subRoom.count));
   });
 
   return Object.fromEntries(expandedEntries);
@@ -171,12 +174,14 @@ function expandSuiteSubRooms(
  * `bedroom_wild` 的 count 是共享预算，至少保留 1 个普通卧室，剩余额度再随机分给儿童卧室与办公室。
  */
 function expandBedroomWildSubRooms(
+  level: number,
   suiteId: string,
   count: number,
 ): Array<readonly [string, BuildingSubRoom]> {
   const allocations = allocateBedroomWildTargets(count);
   return BEDROOM_WILD_TARGET_KEYS.flatMap((roomKey: BedroomWildTargetKey) => (
     expandConcreteSubRooms(
+      level,
       suiteId,
       roomKey,
       describeBedroomWildTarget(roomKey),
@@ -213,13 +218,14 @@ function describeBedroomWildTarget(roomKey: BedroomWildTargetKey): string {
 }
 
 function expandConcreteSubRooms(
+  level: number,
   suiteId: string,
   subRoomKey: string,
   description: string,
   count: number,
 ): Array<readonly [string, BuildingSubRoom]> {
   return rangeCount(count).map((index) => {
-    const roomId = `${suiteId}/${toIndexedRoomId(subRoomKey, index, count)}`;
+    const roomId = `${suiteId}/${toIndexedRoomId(level, subRoomKey, index, count)}`;
     return [roomId, {
       roomId,
       description,
@@ -240,6 +246,6 @@ function rangeCount(count: number): number[] {
   return Array.from({ length: count }, (_, index) => index + 1);
 }
 
-function toIndexedRoomId(roomKey: string, index: number, count: number): string {
-  return count > 1 ? `${roomKey}_${index}` : roomKey;
+function toIndexedRoomId(level: number, roomKey: string, index: number, count: number): string {
+  return count > 1 ? `${roomKey}_lvl${level}_idx${index}` : `lvl${level}_${roomKey}`;
 }

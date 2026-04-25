@@ -138,13 +138,13 @@ export async function generateReplyFullMessages(
  * 组装 generateReplyFullMessages() 所用的传统 messages 数组以及插入虚拟 refresh_world_state 函数的 call/return
  * @param systemPrompt
  * @param gameMessages 被用于构造的 GameMessage 列，不一定是全部 message
- * @param worldState
+ * @param statePrompt
  * @returns
  */
 export function buildFullMessagesRequestMessages(
   systemPrompt: string,
   gameMessages: GameMessage[],
-  worldState: string,
+  statePrompt: string,
 ): ChatMessage {
   const messages: DeepSeekMessage[] | OpenRouterMessage[] = [{ role: 'system', content: systemPrompt }];
   gameMessages.forEach((message) => {
@@ -153,21 +153,21 @@ export function buildFullMessagesRequestMessages(
       : messages.push({ role: 'user', content: message.content });
   });
 
-  const syntheticToolId = 'synthetic_get_world_state';
+  const syntheticToolId = 'synthetic_get_game_state';
   // 填充虚假 tool call
   messages.push({
     role: 'assistant',
     content: '',
     reasoning_content: '',
     tool_calls: [{
-      id: syntheticToolId, type: "function", function: { name: "refresh_world_state", arguments: "{}" }
+      id: syntheticToolId, type: "function", function: { name: "refresh_game_state", arguments: "{}" }
     }]
   });
   // 填充虚假 tool return
   messages.push({
     role: 'tool',
     tool_call_id: syntheticToolId,
-    content: worldState,
+    content: statePrompt,
   });
 
   return messages;

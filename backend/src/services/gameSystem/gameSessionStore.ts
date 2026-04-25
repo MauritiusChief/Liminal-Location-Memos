@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { BuildingSchema } from './buildingSchema.js';
 import { FeatureId } from '../featureDetail.js';
 import { BuildingRecord } from './buildingRecord.js';
+import { GameStateToolCall } from './agentStateManager.js';
 
 export interface Position {
   lat: number;
@@ -11,12 +12,14 @@ export interface Position {
 }
 
 /**
- * 仅记录游戏对话，不包含系统提示词或者工具消息
+ * 仅记录游戏对话和对玩家对话识别后直接产生的工具调用记录，
+ * 不包含系统提示词或者 refresh state 工具消息
  */
 export type GameMessage =
   | {
       role: 'player';
       content: string;
+      stateChange?: GameStateToolCall[]
     }
   | {
       role: 'book';

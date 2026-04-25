@@ -24,7 +24,7 @@ type WriteGameDebugRequestParams =
       functionName: string;
       systemPrompt: string;
       gameMessages: GameMessage[];
-      worldStatePrompt: string;
+      statePrompt: string;
     };
 
 type WriteGameDebugResultParams =
@@ -76,13 +76,13 @@ export function buildGameDebugRequestArtifacts(params: WriteGameDebugRequestPara
   const requestMessages = buildFullMessagesRequestMessages(
     params.systemPrompt,
     params.gameMessages,
-    params.worldStatePrompt,
+    params.statePrompt,
   );
 
   artifacts.push({
     suffix: 'full-messages',
     extension: 'md',
-    content: formatFullMessagesDebugSnapshot(requestMessages.slice(1), params.worldStatePrompt),
+    content: formatFullMessagesDebugSnapshot(requestMessages.slice(1), params.statePrompt),
   });
 
   return artifacts;

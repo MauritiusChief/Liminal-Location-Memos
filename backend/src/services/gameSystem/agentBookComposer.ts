@@ -1,11 +1,13 @@
 import { bearingBetweenCoordinates, distanceBetweenCoordinates, distanceToPosition } from "../geometry.js";
 import { formatRelativeDirection } from "../scene/polarViewPrompt.js";
-import { SceneObject } from "../scene/sceneObject.js";
+import { buildSceneFromRequest, SceneObject } from "../scene/sceneObject.js";
 import { buildScenePrompt } from "../scene/scenePrompt.js";
 import { BuildingRecord } from "./buildingRecord.js";
 import { EmitGameEvent } from "./gameChat.js";
+import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
 import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, SectorVisualDescriptionRecord } from "./gameSessionStore.js";
-import { findLocationContext } from "./toolIndoorPosition.js";
+import { streamReplyFullMessages, streamReplySingleMessage } from "./llm.js";
+import { INDOOR_INITIAL_BOOK_MESSAGE_SYSTEM, OUTDOOR_INITIAL_BOOK_MESSAGE_SYSTEM, REGULAR_BOOK_MESSAGE_SYSTEM } from "./systemPrompts.js";
 
 /**
  * 每次在 Book Composer 使用之前通过 Game State 生成，随即转为 Player State Prompt
@@ -17,9 +19,11 @@ interface PlayerState {
   playerVisionRange: number;
   recentMessageHistory: GameMessage[];
   // 下列内容经过筛选，只包含玩家可见部分
-  activeFieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
-  activeExteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
+  activeBuildingRecords: Record<string, BuildingRecord>;
   activeVisibleLocations: PlayerVisibleLocation[];
+  // 只包含玩家可见的 Visual Description
+  activeFieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
+  activeExteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>
   activeSectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
 }
 
@@ -33,24 +37,26 @@ export async function streamInitialBookMessage(
   state: GameState,
   emit: EmitGameEvent,
 ): Promise<string> {
-  console.log(`[${new Date().toISOString()}] initialBookMessage() 触发`);
+  console.log(`[${new Date().toISOString()}] streamInitialBookMessage() 触发`);
 
-  const isIndoorOpening = Boolean(state.playerIndoorLocation);
-  const sceneObject = isIndoorOpening
+  const playerState = pickPlayerState(state)
+  const { lat, lon } = playerState.playerPosition;
+  const {playerVisionRange, playerOrientation, playerIndoorLocation} = playerState
+
+  // TODO 目前暂时做成根据是否有室内位置返回布尔值，以后情况复杂了再改
+  const openingRouteer = Boolean(playerIndoorLocation);
+  const sceneObject = openingRouteer
     ? undefined
-    : await buildSceneFromRequest(
-        { lat: state.playerPosition.lat, lon: state.playerPosition.lon, radius: INITIAL_SCENE_RADIUS_METERS },
-        state.playerOrientation,
-      );
-  const worldStatePrompt = await toWorldStatePrompt(state, sceneObject, false);
-  const systemPrompt = isIndoorOpening
+    : await buildSceneFromRequest({ lat, lon, radius: playerVisionRange }, playerOrientation);
+  const playerStatePrompt = toPlayerStatePrompt(playerState, sceneObject);
+  const systemPrompt = openingRouteer
     ? INDOOR_INITIAL_BOOK_MESSAGE_SYSTEM
     : OUTDOOR_INITIAL_BOOK_MESSAGE_SYSTEM;
   await writeGameDebugRequest({
     mode: 'user-message',
     functionName: 'streamInitialBookMessage',
     systemPrompt,
-    userMessage: worldStatePrompt,
+    userMessage: playerStatePrompt,
   });
 
   let reply = '';
@@ -59,7 +65,7 @@ export async function streamInitialBookMessage(
   try {
     for await (const event of streamReplySingleMessage(
       systemPrompt,
-      worldStatePrompt,
+      playerStatePrompt,
     )) {
       if (event.replyDelta) {
         reply += event.replyDelta;
@@ -86,11 +92,10 @@ export async function streamInitialBookMessage(
 }
 
 /**
- * 流式输送常规回合 Book Message。
+ * 输入 GameState，挑选所需部分组成 PlayerState，然后流式输送常规回合 Book Message。
  * 过程中会用到传统的 sys, user, assist, tool, assist... 这样的 messages 结构。
  *
- * 和开场消息不同，这里会把最近一段 messageHistory 与 worldStatePrompt 一起发给模型，
- * 因此它代表的是“承接上下文的正式回合输出”。
+ * 这里最近一段 messageHistory 是从 PlayerState 中分离出来的，随后会和包含了 Scene Prompt 的 playerStatePrompt 一起发给模型。
  * @param state
  * @param emit
  * @returns
@@ -101,9 +106,11 @@ export async function streamRegularBookMessage(
 ): Promise<string> {
   console.log(`[${new Date().toISOString()}] generateBookMessage() 触发`);
 
-  const { lat, lon } = state.playerPosition;
-  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: WORLD_STATE_RADIUS_METERS}, state.playerOrientation);
-  const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
+  const playerState = pickPlayerState(state)
+  const { lat, lon } = playerState.playerPosition;
+  const {playerVisionRange, playerOrientation} = playerState
+  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: playerVisionRange}, playerOrientation);
+  const playerStatePrompt = toPlayerStatePrompt(playerState, sceneObject);
   // 组装消息历史
   const messageHistory = state.messageHistory.slice(Math.max(0, state.messageHistory.length - 12));
   await writeGameDebugRequest({
@@ -111,7 +118,7 @@ export async function streamRegularBookMessage(
     functionName: 'streamRegularBookMessage',
     systemPrompt: REGULAR_BOOK_MESSAGE_SYSTEM,
     gameMessages: messageHistory,
-    worldStatePrompt,
+    statePrompt: playerStatePrompt,
   });
 
   let reply = '';
@@ -121,7 +128,7 @@ export async function streamRegularBookMessage(
     for await (const event of streamReplyFullMessages(
       REGULAR_BOOK_MESSAGE_SYSTEM,
       messageHistory,
-      worldStatePrompt,
+      playerStatePrompt,
     )) {
       if (event.replyDelta) {
         reply += event.replyDelta;
@@ -153,6 +160,15 @@ const PLAYER_STATE_BUILDING_RECORD_RANGE = 300
 
 function pickPlayerState(state: GameState): PlayerState {
   const {playerPosition, playerOrientation, playerIndoorLocation, playerVisionRange, activeVisibleLocations} = state
+  // TODO 也许需要动用数据库，判断建筑的最近点而非建筑的中心
+  const activeBuildingRecords = Object.fromEntries(Object.entries(state.buildingRecords).filter(
+    ([featureId, record]) => {
+      // const {lon: recordLon, lat: recordLat} = record.centerPosition
+      // const {lon: playerLon, lat: playerLat} = state.playerPosition
+      // return distanceBetweenCoordinates([recordLon, recordLat], [playerLon, playerLat]) < PLAYER_STATE_BUILDING_RECORD_RANGE
+      return featureId === state.playerIndoorLocation?.buildingId
+    }
+  ))
   const activeFieldVisualDescriptions = Object.fromEntries(Object.entries(state.fieldVisualDescriptions).filter(
     ([uuid, _]) => state.activeFieldVisualDescriptions.includes(uuid)
   ))
@@ -168,15 +184,16 @@ function pickPlayerState(state: GameState): PlayerState {
     playerIndoorLocation,
     playerVisionRange,
     recentMessageHistory: state.messageHistory.slice(-12),
+    activeVisibleLocations,
+    activeBuildingRecords,
     activeFieldVisualDescriptions,
     activeExteriorVisualDescriptions,
-    activeVisibleLocations,
     activeSectorVisualDescriptions,
   }
 }
 
 /**
- * 玩家可见、已知的信息
+ * 玩家可见、已知的信息，但不包括历史消息信息（历史消息只在 streamRegularBookMessage 用到，故由其自行提取并处理）
  * @param state
  * @param scene 已根据 playerVisionRange 生成的 SceneObject
  * @returns
@@ -192,6 +209,12 @@ function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): string {
   const visibleLocationPrompt = state.playerIndoorLocation
     ? state.activeVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
     : null;
+
+  const indoorLocationPrompt = formatIndoorLocationPrompt(state)
+
+  const sectorVisualDescriptionPrompt = Object.values(state.activeSectorVisualDescriptions)
+    .map((record) => [`buildingId=${record.buildingId}`, `区域：level ${record.level} - ${record.sectorName}`, record.content].join('\n'))
+    .join('\n\n');
   // 组装提示词
   const sections = [
     '玩家周遭室外环境摘要：',
@@ -203,8 +226,14 @@ function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): string {
     '玩家周遭建筑外观细节记录：',
     exteriorVisualDescriptionPrompt || '（暂无）',
     '---',
+    '玩家所处房间：',
+    indoorLocationPrompt || '（当前未提供室内位置）',
+    '---',
     '玩家可见室内场景摘要：',
     visibleLocationPrompt || '（当前未提供室内摘要）',
+    '---',
+    '玩家所处室内区域细节记录：',
+    sectorVisualDescriptionPrompt || '（暂无）',
   ];
   return sections.join('\n');
 }
@@ -241,4 +270,24 @@ function formatVisibleLocationPrompt(visibleLocation: PlayerVisibleLocation): st
       ? `套房：${visibleLocation.suiteId} - 房间ID：${visibleLocation.roomId} - ${visibleLocation.roomDescription}`
       : `房间ID：${visibleLocation.roomId} - ${visibleLocation.roomDescription}`,
   ].join(' - ');
+}
+
+function formatIndoorLocationPrompt(state: PlayerState): string | null {
+  const location = state.playerIndoorLocation;
+  if (!location) {
+    return null;
+  }
+  const record = state.activeBuildingRecords[location.buildingId];
+
+  return [
+    `建筑ID：${record.featureId}`,
+    `建筑类别：${record.category}`,
+    `建筑几何中心：(${record.centerPosition.lat}, ${record.centerPosition.lon})`,
+    `建筑附带标签：${JSON.stringify(record.tags)}`,
+    `当前楼层：level ${location.level}`,
+    `当前区域：${location.sectorName}`,
+    location.suiteId
+      ? `当前房间：套房 ${location.suiteId} - 房间 ${location.roomId} - ${location.roomDescription}`
+      : `当前房间：房间 ${location.roomId} - ${location.roomDescription}`,
+  ].join('\n')
 }

@@ -7,7 +7,7 @@ import { applySyncActiveIndoorLocationsTool } from "./toolActiveIndoorLocations.
 import { applySetPlayerIndoorLocationTool } from "./toolIndoorPosition.js";
 import { applyMovePlayerTool } from "./toolMovePlayer.js";
 
-interface GameStateToolCall {
+export interface GameStateToolCall {
   name: string;
   arguments: Record<string, unknown>;
 }

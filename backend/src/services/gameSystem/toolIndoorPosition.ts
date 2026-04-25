@@ -152,47 +152,6 @@ export async function applySetPlayerIndoorLocationTool(
 }
 
 /**
- * 根据当前玩家室内位置生成基板 active visible locations。
- * 在普通房间时只可见所在 sector 内的普通房间与 suite 外部，在 suite 时则只有子房间可见。
- * @param state
- * @returns
- */
-export function fillBasicActiveIndoorLocations(state: GameState): void {
-  state.activeVisibleLocations = buildBasicActiveIndoorLocations(state);
-}
-
-export function buildBasicActiveIndoorLocations(state: GameState): PlayerVisibleLocation[] {
-  const location = state.playerIndoorLocation;
-  if (!location) {
-    return [];
-  }
-
-  const record = state.buildingRecords[location.buildingId];
-  if (!record) {
-    throw new Error(`Missing building record for ${location.buildingId}.`);
-  }
-
-  // TODO 反查逻辑也许不需要？可改成 location 存储足够的信息
-  const roomContext = findLocationContext(record, location);
-  if (!roomContext) {
-    throw new Error(`Room ${location.roomId} is not present in building ${location.buildingId}.`);
-  }
-
-  const sector = record.levels[roomContext.level]?.sectors[roomContext.sectorName];
-  if (!sector) {
-    throw new Error(`Sector ${roomContext.sectorName} is not present in building ${location.buildingId} level ${roomContext.level}.`);
-  }
-
-  if (roomContext.locationType === "subRoom" && roomContext.suiteId) { // 套房内则只可见内部子房间
-    const locatedSuiteSubRooms = listSuiteSubRoomVisibleLocations(location.buildingId, roomContext.level, sector, roomContext.suiteId);
-    return dedupeVisibleLocations(locatedSuiteSubRooms);
-  } else { // 否则是默认生成的基板 activePlayerVisibleLocations
-    const basicVisibleLocations = listSectorVisibleLocations(location.buildingId, roomContext.level, sector);
-    return dedupeVisibleLocations(basicVisibleLocations);
-  }
-}
-
-/**
  * 反查玩家当前所处位置的楼层、sector 和 suite 上下文。
  * 这样 world state、可见范围和 sector VD 激活都能共用同一套定位结果。
  * @param record
@@ -294,8 +253,11 @@ export function chooseInitialIndoorLocation(record: BuildingRecord): PlayerIndoo
   return {
     buildingId: record.featureId,
     level: chosen.level,
-    ...(chosen.suiteId ? { suiteId: chosen.suiteId } : {}),
+    sectorName: chosen.sectorName,
+    locationType: chosen.locationType,
+    ...(chosen.suiteId ? { suiteId: chosen.suiteId, suiteDescription: chosen.suiteDescription } : {}),
     roomId: chosen.roomId!,
+    roomDescription: chosen.roomDescription,
   };
 }
 
@@ -317,6 +279,8 @@ export function chooseBuildingEntranceIndoorLocation(record: BuildingRecord): Pl
     return {
       buildingId: record.featureId,
       level: 1,
+      sectorName: chosen.sectorName,
+      locationType: chosen.locationType,
       roomId: chosen.roomId,
     };
   }
@@ -367,7 +331,7 @@ export function chooseBuildingEntranceIndoorLocation(record: BuildingRecord): Pl
  * @param sector
  * @returns 包括套房子房间和套房本身在内的所有房间
  */
-function listSectorIndoorRoomContexts(level: number, sector: BuildingSector): IndoorRoomContext[] {
+export function listSectorIndoorRoomContexts(level: number, sector: BuildingSector): IndoorRoomContext[] {
   const contexts: IndoorRoomContext[] = [];
   Object.entries(sector.rooms).forEach(([roomKey, room]) => {
     if ("subRooms" in room) {
@@ -425,36 +389,19 @@ export function listSectorVisibleLocations(
     .map((context) => ({
       buildingId,
       level: context.level,
-      ...(context.suiteId ? { suiteId: context.suiteId } : {}),
-      ...(context.locationType === "room" && context.roomId ? { roomId: context.roomId } : {}),
+      sectorName: sector.name,
+      locationType: context.locationType,
+      ...(
+        context.suiteId
+        ? {suiteId: context.suiteId, suiteDescription: context.suiteDescription}
+        : {}
+      ),
+      ...(
+        context.locationType === "room" && context.roomId
+        ? { roomId: context.roomId, roomDescription: context.roomDescription }
+        : {}
+      ),
     }));
-}
-
-/**
- * 列出某套房内部所有的子房间
- * @param buildingId
- * @param level
- * @param sector
- * @param suiteId
- * @returns
- */
-function listSuiteSubRoomVisibleLocations(
-  buildingId: FeatureId,
-  level: number,
-  sector: BuildingSector,
-  suiteId: string,
-): PlayerVisibleLocation[] {
-  const suite = sector.rooms[suiteId];
-  if (!suite || !("subRooms" in suite)) {
-    return [];
-  }
-
-  return Object.values(suite.subRooms).map((subRoom) => ({
-    buildingId,
-    level,
-    suiteId,
-    roomId: subRoom.roomId,
-  }));
 }
 
 //#region 辅助函数
@@ -474,35 +421,6 @@ export function dedupeVisibleLocations(locations: PlayerVisibleLocation[]): Play
     seen.add(key);
     return true;
   });
-}
-
-export function resolveVisibleIndoorLocation(
-  record: BuildingRecord,
-  location: PlayerVisibleLocation,
-): PlayerVisibleLocation | null {
-  const context = findLocationContext(record, location);
-  if (!context) {
-    return null;
-  }
-
-  if (context.locationType === "suite") {
-    return {
-      buildingId: record.featureId,
-      level: context.level,
-      suiteId: context.suiteId,
-    };
-  }
-
-  if (!context.roomId) {
-    return null;
-  }
-
-  return {
-    buildingId: record.featureId,
-    level: context.level,
-    ...(context.suiteId ? { suiteId: context.suiteId } : {}),
-    roomId: context.roomId,
-  };
 }
 
 export function resolveOccupiableIndoorLocation(
