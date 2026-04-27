@@ -3,20 +3,31 @@ import { fillBasicActiveIndoorLocations } from "./toolActiveIndoorLocations.js";
 
 
 /**
- * BOOK MESSAGE 已发送出去之后，根据此 BOOK MESSAGE 为最新的玩家位置
- * 补写或更新 Field Visual Description 与 Exterior Visual Description 与 Sector Visual Description。
+ * TODO 按照注释补完函数逻辑
+ *
+ * BOOK MESSAGE 已发送出去之后，根据此 BOOK MESSAGE 为最新的玩家位置激活的 activeXxx 索引
+ * 撰写或更新 Field / Exterior / Sector Visual Description。
  *
  * Field VD 的规则是：
- * - 若 300m 范围内已有最近的一条记录，则更新它；
- * - 否则创建一条新的记录。
+ * - 索引为经纬度
+ * - 玩家经纬度变化则重新计算激活的索引
+ * - 若 playerVisionRange 范围内已有索引，则更新索引所指向的记录；
+ * - 否则以当前经纬度为索引创建一条新的记录。
  *
  * Exterior VD 的规则是：
- * - 只更新当前 300m Scene Object 中可引用的建筑；
- * - 每个建筑以 featureId 作为记录主键。
+ * - 索引为建筑ID
+ * - 玩家经纬度变化则重新计算激活的索引
+ * - 若 playerVisionRange 范围内有索引指向的建筑则更新之；
+ * - 若无索引指向某建筑但可辨认 BOOK MESSAGE 描述某建筑，则新建索引指向此建筑并撰写 VD。
+ *
+ * Sector VD 的规则是：
+ * - 索引为建筑ID-楼层No.-区域名
+ * - 玩家在楼层里移动则重新计算激活的索引
+ * - 只撰写或者更新激活的索引指向的记录
  */
 export async function upsertVisualDescriptions(state: GameState, bookMessage: string): Promise<void> {
   const { lat, lon } = state.playerPosition;
-  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: VISUAL_DESCRIPTION_RADIUS_METERS }, state.playerOrientation);
+  const sceneObject = await buildSceneFromRequest({ lat, lon, radius: state.playerVisionRange }, state.playerOrientation);
   const visibleBuildingIds = collectSceneBuildingIds(sceneObject);
   const matchedFieldRecord = findNearestFieldVisualDescription(state, state.playerPosition);
 
@@ -220,7 +231,7 @@ function shouldWriteVisualDescriptionContent(content: string): boolean {
  *
  * 当前最小规则很直白：只要中心点在玩家 300m 范围内，就算 active。
  */
-function syncActiveFieldVisualDescriptions(state: GameState): void {
+function updateActiveFieldVisualDescriptionRefs(state: GameState): void {
   const records = Object.values(state.fieldVisualDescriptions)
     .filter((record) => distanceToPosition(record.center, state.playerPosition) <= VISUAL_DESCRIPTION_RADIUS_METERS)
     .sort(
@@ -232,12 +243,13 @@ function syncActiveFieldVisualDescriptions(state: GameState): void {
 }
 
 /**
- * 更新 Book Composer 与前端 debug 快照共用的 activeXxx 记录，不负责写入新的长期记录。
+ * 更新 Book Composer 与前端 debug 快照共用的 activeXxx 记录索引，
+ * 确保 activeXxx 列表总是指向最新状态下可见的细节记录。
  */
-export function syncActiveVisualDescriptions(state: GameState): void {
-  syncActiveFieldVisualDescriptions(state);
-  syncActiveExteriorVisualDescriptions(state);
-  syncActiveSectorVisualDescriptions(state);
+export function updateActiveVisualDescriptionRefs(state: GameState): void {
+  updateActiveFieldVisualDescriptionRefs(state);
+  updateActiveExteriorVisualDescriptionRefs(state);
+  updateActiveSectorVisualDescriptionRefs(state);
 }
 
 /**
@@ -266,7 +278,7 @@ function findNearestFieldVisualDescription(
  * TODO 添加建筑的范围过滤逻辑，避免整个 Scene Object 中的建筑全都可以看清外观细节
  * 可利用 Building Record 中的 centerPosition 信息
  */
-function syncActiveExteriorVisualDescriptions(state: GameState): void {
+function updateActiveExteriorVisualDescriptionRefs(state: GameState): void {
   state.activeExteriorVisualDescriptions = Object.keys(state.exteriorVisualDescriptions)
 }
 
@@ -279,7 +291,7 @@ function syncActiveExteriorVisualDescriptions(state: GameState): void {
  * - activeSectorVisualDescriptions 控制整条 sector 级事实记录是否注入 prompt。
  * @param state
  */
-function syncActiveSectorVisualDescriptions(state: GameState): void {
+function updateActiveSectorVisualDescriptionRefs(state: GameState): void {
   const location = state.playerIndoorLocation;
   if (!location) {
     state.activeSectorVisualDescriptions = [];

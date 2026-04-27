@@ -17,7 +17,7 @@ import {
   findLocationContext,
 } from './toolIndoorPosition.js';
 import { streamInitialBookMessage } from './agentBookComposer.js';
-import { syncActiveVisualDescriptions } from './agentVisualDescriber.js';
+import { updateActiveVisualDescriptionRefs, upsertVisualDescriptions } from './agentVisualDescriber.js';
 import { fillBasicActiveIndoorLocations } from './toolActiveIndoorLocations.js';
 
 export type GameStreamEvent =
@@ -52,7 +52,7 @@ export async function streamGameStart(emit: EmitGameEvent): Promise<GameSession>
   const workingState = cloneGameState(session.gameState);
   await initializeOpeningIndoorState(workingState);
   fillBasicActiveIndoorLocations(workingState);
-  // syncActiveVisualDescriptions(workingState);
+  // updateActiveVisualDescriptionRefs(workingState);
 
   const openingMessage = await streamInitialBookMessage(workingState, emit);
 
@@ -166,7 +166,7 @@ async function executeTurnStream(
     const toolCalls = await gameStateManager(workingState);
     await applyGameStateToolCalls(workingState, toolCalls);
     // 在生成当前回合 Book 之前，刷新 prompt 依赖的派生状态
-    syncActiveVisualDescriptions(workingState);
+    updateActiveVisualDescriptionRefs(workingState);
 
     const bookMessage = await streamRegularBookMessage(workingState, emit);
     workingState.messageHistory.push({
@@ -242,9 +242,9 @@ async function commitBookMessage(
 async function finalizeVisualDescription(session: GameSession, bookMessage: string): Promise<void> {
   try {
     const nextState = cloneGameState(session.gameState);
-    // await upsertVisualDescriptions(nextState, bookMessage);
+    await upsertVisualDescriptions(nextState, bookMessage);
     // // 后台新写入 VD 记录之后，刷新提交给前端快照的 active 列表
-    // syncActiveVisualDescriptions(nextState);
+    // updateActiveVisualDescriptionRefs(nextState);
     session.gameState = nextState;
     await updateRuntimeSession(session);
   } finally {
