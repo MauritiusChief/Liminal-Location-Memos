@@ -75,8 +75,8 @@ ${INDOOR_NAME_INFO_HINT}
 `
 
 export const FIELD_VISUAL_DESCRIPTION_SYSTEM = `
-你是一个文字探索游戏的事实性细节记录者。你的任务是从一段文本中判断出描述周遭环境中非建筑的， OpenStreetMap 数据摘要没有表示、但之后应该继续视为事实的细节。若有则相应输出，若没有则输出\`__NO_UPDATE__\`。
-如果已有旧的事实性细节记录，这些记录也会被一并输入作为参考。
+你是一个文字探索游戏的环境事实性细节(Field Visual Description)记录者。你的任务是从一段文本中判断出描述周遭环境中非建筑的， OpenStreetMap 数据摘要没有表示、但之后应该继续视为事实的细节。若有则相应输出，若没有则输出\`__NO_UPDATE__\`。
+如果已有旧的 Field Visual Description，这些记录也会被一并输入作为参考。
 
 该地点周围的 OpenStreetMap 数据摘要分为微网格与极坐标摘要（若有）两个部分：
 - 微网格部分使用一个边长 5 米的 12 × 12 的网格表示，玩家位于此 60m × 60m 方形区域的几何中心，反映非常近距离的空间关系。
@@ -98,8 +98,8 @@ export const FIELD_VISUAL_DESCRIPTION_SYSTEM = `
 `
 
 export const EXTERIOR_VISUAL_DESCRIPTION_SYSTEM = `
-你是一个文字探索游戏的事实性细节记录者。你的任务是从一段文本中判断出可明确对应到某个建筑 id 的外观的，OpenStreetMap 数据摘要没有表示、但之后应该继续视为事实的细节。若有则相应输出，若没有则输出空数组。
-如果已有旧的事实性细节记录，这些记录也会被一并输入作为参考。
+你是一个文字探索游戏的建筑外观事实性细节(Exterior Visual Description)记录者。你的任务是从一段文本中判断出可明确对应到某个建筑 id 的外观的，OpenStreetMap 数据摘要没有表示、但之后应该继续视为事实的细节。若有则相应输出，若没有则输出空数组。
+如果已有旧的 Exterior Visual Description，这些记录也会被一并输入作为参考。
 
 该地点周围的 OpenStreetMap 数据摘要分为微网格与极坐标摘要（若有）两个部分：
 - 微网格部分使用一个边长 5 米的 12 × 12 的网格表示，玩家位于此 60m × 60m 方形区域的几何中心，反映非常近距离的空间关系。
@@ -125,8 +125,8 @@ export const EXTERIOR_VISUAL_DESCRIPTION_SYSTEM = `
 `
 
 export const SECTOR_VISUAL_DESCRIPTION_SYSTEM = `
-你是一个文字探索游戏的事实性细节记录者。你的任务是从一段文本中判断出可明确对应到当前楼层区域且之后应该继续视为事实的细节。若有则相应输出，若没有则输出\`__NO_UPDATE__\`。
-如果已有旧的事实性细节记录，这些记录也会被一并输入作为参考。
+你是一个文字探索游戏的楼层区域事实性细节(Sector Visual Description)记录者。你的任务是从一段文本中判断出可明确对应到当前楼层区域且之后应该继续视为事实的细节。若有则相应输出，若没有则输出\`__NO_UPDATE__\`。
+如果已有旧的 Sector Visual Description，这些记录也会被一并输入作为参考。
 
 该地点周围的室内摘要数据分为所处房间和可见室内场景列表两个部分：
 - 所处房间包含从此房间从当前建筑、楼层、区域到房间的一系列信息。

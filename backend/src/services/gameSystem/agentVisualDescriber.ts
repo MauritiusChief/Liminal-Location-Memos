@@ -191,6 +191,7 @@ async function extractFieldVisualDescriptions(
       reply: extracted,
       reasoning: response.reasoning,
     });
+    console.log(`[${new Date().toISOString()}] extractFieldVisualDescriptions() 执行成功`);
     return extracted;
   } catch (error) {
     await writeGameDebugResult({
@@ -282,6 +283,7 @@ async function extractExteriorVisualDescriptions(
       reply: extracted,
       reasoning: response.reasoning,
     });
+    console.log(`[${new Date().toISOString()}] extractExteriorVisualDescriptions() 执行成功`);
     return extracted;
   } catch (error) {
     await writeGameDebugResult({
@@ -355,6 +357,7 @@ async function extractSectorVisualDescriptions(
       reply: extracted,
       reasoning: response.reasoning,
     });
+    console.log(`[${new Date().toISOString()}] extractSectorVisualDescriptions() 执行成功`);
     return extracted;
   } catch (error) {
     await writeGameDebugResult({

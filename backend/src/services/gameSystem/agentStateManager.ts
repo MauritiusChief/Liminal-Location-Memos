@@ -1,9 +1,12 @@
-import { buildSceneFromRequest } from "../scene/sceneObject.js";
+import { distanceBetweenCoordinates } from "../geometry.js";
+import { buildSceneFromRequest, SceneObject } from "../scene/sceneObject.js";
+import { buildScenePrompt } from "../scene/scenePrompt.js";
+import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatVisibleLocationPrompt } from "./agentBookComposer.js";
+import { BuildingRecord } from "./buildingRecord.js";
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
-import { GameState } from "./gameSessionStore.js";
+import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, SectorVisualDescriptionRecord } from "./gameSessionStore.js";
 import { generateJsonReplySingleMessage } from "./llm.js";
 import { BUILD_GAME_STATE_MANAGER_SYSTEM } from "./systemPrompts.js";
-import { applySyncActiveIndoorLocationsTool } from "./toolActiveIndoorLocations.js";
 import { applySetPlayerIndoorLocationTool } from "./toolIndoorPosition.js";
 import { applyMovePlayerTool } from "./toolMovePlayer.js";
 
@@ -22,6 +25,26 @@ interface GameStateToolDef {
       description: string;
     };
   };
+}
+
+/**
+ * TODO 似乎和 Player State 差异不大？
+ * 专门给 Game State Manager 用的，略去无关消息但全面的游戏状态，聚焦于焦点内容。
+ * 随后会被直接转为 World State Prompt
+ */
+export interface WorldState {
+  playerPosition: Position;
+  playerOrientation: number;
+  playerIndoorLocation: PlayerIndoorLocation | null;
+  playerVisionRange: number;
+  recentMessageHistory: GameMessage[];
+  // 下列内容经过筛选，只包含玩家可见部分
+  activeBuildingRecords: Record<string, BuildingRecord>;
+  activeVisibleLocations: PlayerVisibleLocation[];
+  // 只包含玩家可见的 Visual Description
+  activeFieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
+  activeExteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>
+  activeSectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
 }
 
 const WORLD_STATE_RADIUS_METERS = 500;
@@ -47,13 +70,18 @@ const MOVE_PLAYER_TOOL: GameStateToolDef = {
 const SET_PLAYER_INDOOR_LOCATION_TOOL: GameStateToolDef = {
   name: 'set_player_indoor_location',
   description: [
-    '当用户明确或隐含地要求玩家进入或离开建筑，或者在建筑的房间之间移动时，使用此工具改变游戏角色在建筑中的位置。'
+    '当用户明确或隐含地要求玩家进入或离开建筑，或者在建筑的房间之间移动时，使用此工具改变游戏角色在建筑中的位置。',
+    '此工具允许特定条件下在缺失参数时自动补全参数，因此在特定条件下时可以省略某些参数（比如进入建筑时，此工具会自动补全目标位置为建筑的入口），具体哪些参数在何种情况下可省略参见参数的描述。',
+    '注意：',
+    '- 即使用户要求了行动，也要分析是否有阻碍行动的障碍、玩家状态是否支持此次行动等条件。如果分析表明这次行动无法进行，可以不使用此工具（令玩家在建筑中的位置不变）或者将行动的类型/目的位置改为逻辑上更合理的地方（比如试图离开建筑发现大门被锁而变为移动到大堂）。',
+    '- 行动的类型为进入或离开建筑时，以及在楼层内跨越区域移动时，需要同步调用 move_player 工具来改变玩家的实际经纬度；不用考虑是否真实落在建筑内/外的问题，实际落盘时会微调到合理的临近位置。'
   ],
   arguments: {
     move: { type: 'string', optional: false, description: '玩家行动的类型，必须为`enter`(进入建筑), `leave`(离开建筑), `move`(在建筑中移动)这三者之一。'},
     buildingId: { type: 'string', optional: true, description: '玩家移动的目标建筑物体，为该建筑物的 featureId，仅在 `leave` 行动类型下为非必须参数。'},
     level: { type: 'number', optional: true, description: '玩家移动的目标楼层，为该楼层的层号数，仅在 `move` 行动类型下为必须参数。'},
-    suiteId: { type: 'string', optional: true, description: '若目标位置位于某套房内部，则填写该套房的 id。'},
+    sectorName: { type: 'string', optional: true, description: '玩家移动的目标房间所在的区域，仅在同一楼层间移动时为必须参数。'},
+    suiteId: { type: 'string', optional: true, description: '若玩家移动的目标房间位于某套房内部，则填写该套房的 id。'},
     roomId: { type: 'string', optional: true, description: '玩家移动的目标房间的 id，仅在同一楼层间移动时为必须参数。'},
   }
 }
@@ -89,24 +117,42 @@ const SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL: GameStateToolDef = {
 export async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> {
   console.log(`[${new Date().toISOString()}] gameStateManager() 触发`);
 
-  const toolDefs = [MOVE_PLAYER_TOOL, SET_PLAYER_INDOOR_LOCATION_TOOL, SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL].map((def) => toToolPrompt(def));
+  const toolDefs = [
+    MOVE_PLAYER_TOOL,
+    SET_PLAYER_INDOOR_LOCATION_TOOL,
+    // SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL,
+  ].map((def) => toToolPrompt(def));
   const systemPrompt = BUILD_GAME_STATE_MANAGER_SYSTEM(toolDefs);
   const messageHistory = state.messageHistory;
   const latestPlayerMessage = messageHistory[messageHistory.length - 1];
   const { lat, lon } = state.playerPosition;
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: WORLD_STATE_RADIUS_METERS}, state.playerOrientation);
-  const worldStatePrompt = await toWorldStatePrompt(state, sceneObject);
+  const worldState = pickWorldState(state)
+  const worldStatePrompt = await toWorldStatePrompt(worldState, sceneObject);
   // 组装背景消息提示词
   const message = [
     '玩家发送的消息：',
     `> ${latestPlayerMessage?.content ?? ''}\n`,
+    '---',
     '近期对话历史：',
     messageHistory
       .slice(Math.max(0, messageHistory.length - 6), messageHistory.length - 1)
       .map((messageEntry) => {
-        const hint = messageEntry.role === 'book' ? '**游戏输出**' : '**玩家输入**';
         const contentLines = messageEntry.content.split('\n')
-        return `> ${hint}：\n${contentLines.map(line => `> ${line}`).join('\n')}\n>`;
+        if (messageEntry.role === 'book') {
+          return `> **游戏输出**：\n${contentLines.map(line => `> ${line}`).join('\n')}\n>`;
+        } else {
+          const toolCall = messageEntry.stateChange
+          const toolCallLines = toolCall
+            ? JSON.stringify(toolCall, null, 2).split('\n')
+            : ['（无游戏状态变化）']
+          return [
+            `> **玩家输入**：\n${contentLines.map(line => `> ${line}`).join('\n')}`,
+            '>',
+            `> **游戏状态变化：**：\n${toolCallLines.map(line => `> ${line}`).join('\n')}`,
+            '>',
+          ].join('\n');
+        }
       })
       .join('\n'),
     '---',
@@ -148,79 +194,6 @@ export async function gameStateManager(state: GameState): Promise<GameStateToolC
 }
 
 /**
- * TODO：
- * 拆分为给 Game State Manager 用的完整版 world state，
- * 和 Book 消息生成者使用的只关心可见部分的 world state
- *
- * 把当前 GameState 转成可消费的 world-state 提示词。
- * world-state 提示词消费者：
- * - Book 消息生成者
- * - Game State Manager
- * @param state
- * @param scene 已按照合理半径获取的 Scene Object；室内开局时可留空
- * @param onlyVisible 是否只包含可见部分（给 Book 消息生成者用）
- * @returns 同时兼容室内与室外上下文的提示词
- */
-export async function toWorldStatePrompt(
-  state: GameState,
-  scene?: SceneObject,
-  onlyVisible: boolean = true,
-): Promise<string> {
-  // 室外相关的信息
-  const scenePrompt = scene ? buildScenePrompt(scene, state.playerOrientation) : null;
-  const fieldVisualDescriptions = Object.entries(state.fieldVisualDescriptions)
-    .filter(([id]) => state.activeFieldVisualDescriptions.includes(id))
-    .map(([, record]) => formatFieldVisualDescriptionForPrompt(state, record))
-    .join('\n\n');
-  const exteriorVisualDescriptions = state.activeExteriorVisualDescriptions
-    .map((buildingId) => state.exteriorVisualDescriptions[buildingId])
-    .filter((record): record is NonNullable<typeof record> => Boolean(record))
-    .map((record) => [`buildingId=${record.buildingId}`, record.content].join('\n'))
-    .join('\n');
-  // 室内相关的信息
-  const indoorPrompt = formatIndoorWorldStatePrompt(state);
-  const sectorVisualDescriptions = state.activeSectorVisualDescriptions
-    .map((id) => state.sectorVisualDescriptions[id])
-    .filter((record): record is NonNullable<typeof record> => Boolean(record))
-    .map((record) => [
-      `buildingId=${record.buildingId}`,
-      `楼层：level ${record.level}`,
-      `区域：${record.sectorName}`,
-      record.content,
-    ].join('\n'))
-    .join('\n\n');
-  const buildingLocation = state.playerIndoorLocation;
-  const currentBuildingRecord = buildingLocation
-    ? state.buildingRecords[buildingLocation.buildingId]
-    : null;
-  const buildingRecordPrompt = !onlyVisible && currentBuildingRecord
-    ? formatBuildingRecordPrompt(currentBuildingRecord)
-    : null;
-
-  const sections = [
-    '玩家周遭环境数据：',
-    scenePrompt || '（当前未提供室外场景摘要）',
-    '---',
-    '玩家周遭环境场地细节记录：',
-    fieldVisualDescriptions || '（暂无）',
-    '---',
-    '玩家周遭建筑外观细节记录：',
-    exteriorVisualDescriptions || '（暂无）',
-    '---',
-    '玩家当前室内场景摘要：',
-    indoorPrompt || '（当前未提供室内场景摘要）',
-    '---',
-    '玩家当前激活的室内 Sector 细节记录：',
-    sectorVisualDescriptions || '（暂无）',
-  ];
-  if (buildingRecordPrompt) {
-    sections.push('---', '当前建筑的 Building Record：', buildingRecordPrompt);
-  }
-
-  return sections.join('\n');
-}
-
-/**
  * 执行 Game State Manager 给出的工具调用。
  *
  * 当前只支持 move_player：
@@ -240,12 +213,103 @@ export async function applyGameStateToolCalls(state: GameState, toolCalls: GameS
       case SET_PLAYER_INDOOR_LOCATION_TOOL.name:
         await applySetPlayerIndoorLocationTool(state, args);
         break;
-      case SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL.name:
-        applySyncActiveIndoorLocationsTool(state, args);
-        break;
+      // case SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL.name:
+      //   applySyncActiveIndoorLocationsTool(state, args);
+      //   break;
     }
 
   }
+}
+
+//#region 内部逻辑
+
+export function pickWorldState(state: GameState): WorldState {
+  const {playerPosition, playerOrientation, playerIndoorLocation, playerVisionRange, activeVisibleLocations} = state
+  // TODO 也许需要动用数据库，判断建筑的最近点而非建筑的中心
+  const activeBuildingRecords = Object.fromEntries(Object.entries(state.buildingRecords).filter(
+    ([featureId, record]) => {
+      const {lon: recordLon, lat: recordLat} = record.centerPosition
+      const {lon: playerLon, lat: playerLat} = state.playerPosition
+      return distanceBetweenCoordinates([recordLon, recordLat], [playerLon, playerLat]) < state.playerVisionRange
+      // return featureId === state.playerIndoorLocation?.buildingId
+    }
+  ))
+  const activeFieldVisualDescriptions = Object.fromEntries(Object.entries(state.fieldVisualDescriptions).filter(
+    ([uuid, _]) => state.activeFieldVisualDescriptions.includes(uuid)
+  ))
+  const activeExteriorVisualDescriptions = Object.fromEntries(Object.entries(state.exteriorVisualDescriptions).filter(
+    ([featureId, _]) => state.activeExteriorVisualDescriptions.includes(featureId)
+  ))
+  const activeSectorVisualDescriptions = Object.fromEntries(Object.entries(state.sectorVisualDescriptions).filter(
+    ([uuid, _]) => state.activeSectorVisualDescriptions.includes(uuid)
+  ))
+  return {
+    playerPosition,
+    playerOrientation,
+    playerIndoorLocation,
+    playerVisionRange,
+    recentMessageHistory: state.messageHistory.slice(-12),
+    activeVisibleLocations,
+    activeBuildingRecords,
+    activeFieldVisualDescriptions,
+    activeExteriorVisualDescriptions,
+    activeSectorVisualDescriptions,
+  }
+}
+
+/**
+ * 把当前 GameState 转成可消费的 world-state 提示词。
+ * 消费者为 Game State Manager。相比 Player State 多了相关建筑完整结构
+ * @param state
+ * @param scene 已按照合理半径获取的 Scene Object
+ * @returns
+ */
+export async function toWorldStatePrompt(state: WorldState, scene?: SceneObject): Promise<string> {
+  // 室外相关的信息
+  const scenePrompt = scene ? buildScenePrompt(scene, state.playerOrientation) : null;
+  const fieldVisualDescriptionPrompt =  Object.values(state.activeFieldVisualDescriptions)
+    .map(record => formatFieldVisualDescriptionPrompt(state, record))
+    .join('\n\n')
+  const exteriorVisualDescriptionPrompt =  Object.values(state.activeExteriorVisualDescriptions)
+    .map((record) => [`建筑ID：${record.buildingId}`, record.content].join('\n'))
+    .join('\n');
+  // 室内相关的信息
+  const indoorLocationPrompt = formatIndoorLocationPrompt(state)
+
+  const sectorVisualDescriptionPrompt = Object.values(state.activeSectorVisualDescriptions)
+    .map((record) => [`建筑ID：${record.buildingId}`, `区域：level ${record.level} - ${record.sectorName}`, record.content].join('\n'))
+    .join('\n\n');
+  const visibleLocationPrompt = state.playerIndoorLocation
+    ? state.activeVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
+    : null;
+  const buildingRecordPrompt = Object.values(state.activeBuildingRecords)
+    .map(record => formatBuildingRecordPrompt(record))
+    .join('\n\n')
+
+  const sections = [
+    '玩家周遭室外环境摘要：',
+    scenePrompt || '（当前未提供室外摘要）',
+    '---',
+    '玩家周遭地点细节记录：',
+    fieldVisualDescriptionPrompt || '（暂无）',
+    '---',
+    '玩家周遭建筑外观细节记录：',
+    exteriorVisualDescriptionPrompt || '（暂无）',
+    '---',
+    '玩家所处房间：',
+    indoorLocationPrompt || '（当前未提供室内位置）',
+    '---',
+    '相关建筑完整结构：',
+    buildingRecordPrompt || '（暂无）',
+    '---',
+    '玩家可见室内场景摘要：',
+    visibleLocationPrompt || '（当前未提供室内摘要）',
+    '---',
+    '玩家所处室内区域细节记录：',
+    sectorVisualDescriptionPrompt || '（暂无）',
+  ];
+
+  return sections.join('\n');
 }
 
 //#region 辅助函数
@@ -268,4 +332,50 @@ function toToolPrompt(toolDef: GameStateToolDef): string {
     '参数：',
     argsStringArray.join('\n'),
   ].join('\n');
+}
+
+/**
+ * 描述某一建筑完整的细节
+ * @param record
+ * @returns
+ */
+function formatBuildingRecordPrompt(record: BuildingRecord): string {
+  const levelLines = Object.values(record.levels)
+    .sort((left, right) => left.level - right.level)
+    .flatMap((level) => {
+      const sectorLines = Object.values(level.sectors).flatMap((sector) => {
+        const roomLines = Object.values(sector.rooms).flatMap((room) => {
+          if ("subRooms" in room) {
+            const subRoomLines = Object.values(room.subRooms)
+              .map((subRoom) => `      - 子房间 ${subRoom.roomId}: ${subRoom.description}`);
+            return [
+              `    - 套房 ${room.suiteId}: ${room.description}`,
+              ...subRoomLines,
+            ];
+          }
+
+          const access = room.access ? ` [通道类型：${room.access}]` : "";
+          return [`    - 房间 ${room.roomId}: ${room.description}${access}`];
+        });
+
+        return [
+          `  - 区域 ${sector.name} [面积：${sector.area}, 几何中心：(${sector.centerPosition.lat}, ${sector.centerPosition.lon})]`,
+          ...roomLines,
+        ];
+      });
+
+      return [
+        `- 楼层 ${level.level}: ${level.description}`,
+        ...sectorLines,
+      ];
+    });
+
+  return [
+    `建筑ID：${record.featureId}`,
+    `建筑类别：${record.category}`,
+    `建筑几何中心：(${record.centerPosition.lat}, ${record.centerPosition.lon})`,
+    `建筑附带标签：${JSON.stringify(record.tags)}`,
+    "楼层：",
+    ...levelLines,
+  ].join("\n");
 }

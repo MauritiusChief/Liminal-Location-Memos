@@ -1,7 +1,7 @@
 import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { DbBuildingFeatureDetailRow, FeatureDetail, FeatureId, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
-import { Position } from "./gameSessionStore.js";
+import { GameState, Position } from "./gameSessionStore.js";
 import { pickRandom, trimTagValue } from "../utils.js";
 import { APARTMENT_CATEGORY, buildApartmentCategorySchemaFromDistribution, finishApartmentBuildingSchema, isAmbiguousApartmentCategory, selectApartmentPatternKey } from "./buildingApartment.js";
 import { APARTMENT_UTILITY_CATEGORY } from "./buildingApartmentUtility.js";
@@ -224,6 +224,33 @@ export async function generateBuildingSchema(
   const buildingSchemas = finishBuildingSchema(sectorDistributionSchems, candidate)
 
   return buildingSchemas;
+}
+
+/**
+ * 针对某建筑，获取存储在 GameState 中的 Building Schema 或者生成所需的 Building Schema。
+ * @param featureId
+ * @param state
+ */
+export async function ensureBuildingSchema(featureId: FeatureId, state: GameState): Promise<BuildingSchema> {
+  const existing = state.buildingSchemas[featureId];
+  if (existing) {
+    return existing;
+  }
+
+  const generated = await generateBuildingSchema(featureId, Object.values(state.buildingSchemas));
+  if (!generated) {
+    throw new Error(`Failed to generate building schema for ${featureId}.`);
+  }
+
+  Object.assign(state.buildingSchemas, generated);
+
+  const resolved = state.buildingSchemas[featureId]
+    ?? (Object.keys(generated).length === 1 ? Object.values(generated)[0] : undefined);
+  if (!resolved) {
+    throw new Error(`Generated building schema does not contain ${featureId}.`);
+  }
+
+  return resolved;
 }
 
 /**

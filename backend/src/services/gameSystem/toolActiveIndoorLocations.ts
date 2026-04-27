@@ -1,7 +1,7 @@
 import { FeatureId } from "../featureDetail.js";
 import { BuildingSector } from "./buildingRecord.js";
 import { GameState, PlayerVisibleLocation } from "./gameSessionStore.js";
-import { dedupeVisibleLocations, listSectorVisibleLocations } from "./toolIndoorPosition.js";
+import { dedupeVisibleLocations, findLocationContext, listSectorVisibleLocations } from "./toolIndoorPosition.js";
 
 
 /**
@@ -24,24 +24,13 @@ export function applySyncActiveIndoorLocationsTool(state: GameState, args: any):
   const level = Number(args?.level);
   const suiteId = typeof args?.suiteId === "string" && args.suiteId ? args.suiteId : undefined;
   const roomId = typeof args?.roomId === "string" && args.roomId ? args.roomId : undefined;
-  if (!Number.isFinite(level)) {
-    return;
-  }
+  if (!Number.isFinite(level)) return
 
   const record = state.buildingRecords[location.buildingId];
-  if (!record) {
-    return;
-  }
+  if (!record) return
 
-  const targetLocation = resolveVisibleIndoorLocation(record, {
-    buildingId: location.buildingId,
-    level,
-    suiteId,
-    roomId,
-  });
-  if (!targetLocation) {
-    return;
-  }
+  const targetLocation = findLocationContext(record, level, suiteId, roomId)
+  if (!targetLocation) return
 
   if (edit === "reveal") {
     state.activeVisibleLocations = dedupeVisibleLocations([

@@ -2,6 +2,7 @@ import { bearingBetweenCoordinates, distanceBetweenCoordinates, distanceToPositi
 import { formatRelativeDirection } from "../scene/polarViewPrompt.js";
 import { buildSceneFromRequest, SceneObject } from "../scene/sceneObject.js";
 import { buildScenePrompt } from "../scene/scenePrompt.js";
+import { WorldState } from "./agentStateManager.js";
 import { BuildingRecord } from "./buildingRecord.js";
 import { EmitGameEvent } from "./gameChat.js";
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
@@ -26,6 +27,8 @@ export interface PlayerState {
   activeExteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>
   activeSectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
 }
+
+//#region 主函数
 
 /**
  * 根据 request 生成 Scene Prompt，然后 stream 第一条 Book Message
@@ -193,7 +196,7 @@ export function pickPlayerState(state: GameState): PlayerState {
 }
 
 /**
- * 玩家可见、已知的信息，但不包括历史消息信息（历史消息只在 streamRegularBookMessage 用到，故由其自行提取并处理）
+ * 玩家可见、已知的信息，但不包括历史消息信息（历史消息只在 streamRegularBookMessage 用到，故由其自行提取并处理）和活跃的建筑信息（用在了玩家所处房间提示词生成函数内部）
  * @param state
  * @param scene 已根据 playerVisionRange 生成的 SceneObject
  * @returns
@@ -204,7 +207,7 @@ export function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): st
     .map(record => formatFieldVisualDescriptionPrompt(state, record))
     .join('\n\n')
   const exteriorVisualDescriptionPrompt =  Object.values(state.activeExteriorVisualDescriptions)
-    .map((record) => [`buildingId=${record.buildingId}`, record.content].join('\n'))
+    .map((record) => [`建筑ID：${record.buildingId}`, record.content].join('\n'))
     .join('\n');
   const visibleLocationPrompt = state.playerIndoorLocation
     ? state.activeVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
@@ -213,7 +216,7 @@ export function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): st
   const indoorLocationPrompt = formatIndoorLocationPrompt(state)
 
   const sectorVisualDescriptionPrompt = Object.values(state.activeSectorVisualDescriptions)
-    .map((record) => [`buildingId=${record.buildingId}`, `区域：level ${record.level} - ${record.sectorName}`, record.content].join('\n'))
+    .map((record) => [`建筑ID：${record.buildingId}`, `区域：level ${record.level} - ${record.sectorName}`, record.content].join('\n'))
     .join('\n\n');
   // 组装提示词
   const sections = [
@@ -240,7 +243,13 @@ export function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): st
 
 //#region 辅助函数
 
-export function formatFieldVisualDescriptionPrompt(state: PlayerState, record: FieldVisualDescriptionRecord): string {
+/**
+ * 描述带有方位信息的 Field Visual Description
+ * @param state
+ * @param record
+ * @returns
+ */
+export function formatFieldVisualDescriptionPrompt(state: PlayerState | WorldState, record: FieldVisualDescriptionRecord): string {
   const distanceMeters = distanceToPosition(state.playerPosition, record.center);
   const bearingDegrees = bearingBetweenCoordinates(
     [state.playerPosition.lon, state.playerPosition.lat],
@@ -272,7 +281,12 @@ export function formatVisibleLocationPrompt(visibleLocation: PlayerVisibleLocati
   ].join(' - ');
 }
 
-export function formatIndoorLocationPrompt(state: PlayerState): string | null {
+/**
+ * 专门描述玩家所在的房间，以及顺带的此房间所在的楼层、区域、建筑信息
+ * @param state
+ * @returns
+ */
+export function formatIndoorLocationPrompt(state: PlayerState | WorldState): string | null {
   const location = state.playerIndoorLocation;
   if (!location) {
     return null;

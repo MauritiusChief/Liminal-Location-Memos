@@ -1,6 +1,9 @@
+import { loadServiceSql } from "@/db/sqlLoader.js";
 import { pickRandom } from "../utils.js";
-import { BuildingSchema, RoomSchema, SuiteSchema } from "./buildingSchema.js";
-import { Position } from "./gameSessionStore.js";
+import { BuildingSchema, ensureBuildingSchema, generateBuildingSchema, RoomSchema, SuiteSchema } from "./buildingSchema.js";
+import { GameState, Position } from "./gameSessionStore.js";
+import { query } from "@/db/client.js";
+import { DbBuildingFeatureDetailRow, FeatureId, mapBuildingDetailRowToFeatureDetail } from "../featureDetail.js";
 
 export interface BuildingRecord {
   featureId: string;
@@ -10,7 +13,7 @@ export interface BuildingRecord {
   levels: Record<number, BuildingLevel>; // key 为楼层数号
 }
 
-interface BuildingLevel {
+export interface BuildingLevel {
   level: number;
   description: string;
   sectors: Record<string, BuildingSector>; // key 为该 Sector 的名字
@@ -48,6 +51,16 @@ export interface BuildingSubRoom {
   description: string;
 }
 
+interface DbContainingBuildingRow extends DbBuildingFeatureDetailRow {
+  center_lon: number;
+  center_lat: number;
+}
+
+interface ContainingBuildingSnapshot {
+  featureId: FeatureId;
+  tags: Record<string, string>;
+}
+
 //#region 常量
 
 const BEDROOM_WILD_KEY = "bedroom_wild";
@@ -77,6 +90,43 @@ export function generateBuildingRecord(schema: BuildingSchema): BuildingRecord {
     tags: {},
     levels,
   };
+}
+
+const fetchBuildingTagsByPositionSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingTagsByPosition.sql");
+
+/**
+ * 根据玩家坐标查找所处建筑。
+ *
+ * 若返回 feature id，说明开局应走室内分支；
+ * 若没有结果，则保持室外开局。
+ * @param position
+ * @returns 命中的 building feature id，或者 null
+ */
+export async function findContainingBuildingFeatureId(position: Position): Promise<ContainingBuildingSnapshot | null> {
+  const sql = await fetchBuildingTagsByPositionSqlPromise;
+  const result = await query<DbContainingBuildingRow>(sql, [position.lon, position.lat]);
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  const detail = mapBuildingDetailRowToFeatureDetail(row);
+  return {
+    featureId: detail.featureId,
+    tags: detail.tags,
+  };
+}
+
+export async function ensureBuildingRecord(featureId: FeatureId, state: GameState): Promise<BuildingRecord> {
+  const existing = state.buildingRecords[featureId];
+  if (existing) {
+    return existing;
+  }
+
+  const schema = await ensureBuildingSchema(featureId, state);
+  const record = generateBuildingRecord(schema);
+  state.buildingRecords[featureId] = record;
+  return record;
 }
 
 //#region 蓝图生成建筑

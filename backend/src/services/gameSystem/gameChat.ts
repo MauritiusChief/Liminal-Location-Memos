@@ -7,18 +7,17 @@ import {
   GameSession,
   GameState,
   getRuntimeSession,
+  PlayerIndoorLocation,
   toClientGameSessionSnapshot,
   updateRuntimeSession,
 } from './gameSessionStore.js';
-import {
-  chooseInitialIndoorLocation,
-  ensureBuildingRecord,
-  findContainingBuildingFeatureId,
-  findLocationContext,
-} from './toolIndoorPosition.js';
-import { streamInitialBookMessage } from './agentBookComposer.js';
+import {chooseRandomIndoorLocation, listSectorIndoorRoomContexts} from './toolIndoorPosition.js';
+import { streamInitialBookMessage, streamRegularBookMessage } from './agentBookComposer.js';
 import { updateActiveVisualDescriptionRefs, upsertVisualDescriptions } from './agentVisualDescriber.js';
 import { fillBasicActiveIndoorLocations } from './toolActiveIndoorLocations.js';
+import { applyGameStateToolCalls, gameStateManager } from './agentStateManager.js';
+import { BuildingRecord, ensureBuildingRecord, findContainingBuildingFeatureId } from './buildingRecord.js';
+import { pickRandom } from '../utils.js';
 
 export type GameStreamEvent =
   | { type: 'player_message_accepted'; text: string }
@@ -267,7 +266,7 @@ async function initializeOpeningIndoorState(state: GameState): Promise<void> {
   const record = await ensureBuildingRecord(containingBuilding.featureId, state);
   // 建筑命中查询拿到的 tags 需要稳定保留在 record 中，供开局与后续回合复用。
   record.tags = containingBuilding.tags;
-  state.playerIndoorLocation = chooseInitialIndoorLocation(record);
+  state.playerIndoorLocation = chooseRandomIndoorLocation(record);
   fillBasicActiveIndoorLocations(state)
 }
 

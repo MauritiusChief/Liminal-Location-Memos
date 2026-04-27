@@ -1,11 +1,11 @@
-import { query } from "@/db/client.js";
-import { loadServiceSql } from "@/db/sqlLoader.js";
-import { DbBuildingFeatureDetailRow, FeatureId, mapBuildingDetailRowToFeatureDetail } from "../featureDetail.js";
-import { BuildingSchema, generateBuildingSchema } from "./buildingSchema.js";
+import { FeatureId } from "../featureDetail.js";
 import { GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position } from "./gameSessionStore.js";
-import { BuildingRecord, BuildingRoom, BuildingSector, generateBuildingRecord } from "./buildingRecord.js";
+import { BuildingLevel, BuildingRecord, BuildingRoom, BuildingSector, ensureBuildingRecord } from "./buildingRecord.js";
 import { pickRandom } from "../utils.js";
 
+/**
+ * suiteId 和 roomId 均可选，因此可以表示单纯的套房概念本身的同时也可以表示房间
+ */
 export interface IndoorRoomContext {
   level: number;
   sectorName: string;
@@ -16,84 +16,10 @@ export interface IndoorRoomContext {
   roomDescription?: string;
 }
 
-interface DbContainingBuildingRow extends DbBuildingFeatureDetailRow {
-  center_lon: number;
-  center_lat: number;
-}
-
-export interface ContainingBuildingSnapshot {
-  featureId: FeatureId;
-  tags: Record<string, string>;
-}
-
 //#region 主函数
 
-const fetchBuildingTagsByPositionSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingTagsByPosition.sql");
-
 /**
- * 根据玩家坐标查找所处建筑。
- *
- * 若返回 feature id，说明开局应走室内分支；
- * 若没有结果，则保持室外开局。
- * @param position
- * @returns 命中的 building feature id，或者 null
- */
-export async function findContainingBuildingFeatureId(position: Position): Promise<ContainingBuildingSnapshot | null> {
-  const sql = await fetchBuildingTagsByPositionSqlPromise;
-  const result = await query<DbContainingBuildingRow>(sql, [position.lon, position.lat]);
-  const row = result.rows[0];
-  if (!row) {
-    return null;
-  }
-
-  const detail = mapBuildingDetailRowToFeatureDetail(row);
-  return {
-    featureId: detail.featureId,
-    tags: detail.tags,
-  };
-}
-
-/**
- * 针对某建筑，获取存储在 GameState 中的 Building Schema 或者生成所需的 Building Schema。
- * @param featureId
- * @param state
- */
-export async function ensureBuildingSchema(featureId: FeatureId, state: GameState): Promise<BuildingSchema> {
-  const existing = state.buildingSchemas[featureId];
-  if (existing) {
-    return existing;
-  }
-
-  const generated = await generateBuildingSchema(featureId, Object.values(state.buildingSchemas));
-  if (!generated) {
-    throw new Error(`Failed to generate building schema for ${featureId}.`);
-  }
-
-  Object.assign(state.buildingSchemas, generated);
-
-  const resolved = state.buildingSchemas[featureId]
-    ?? (Object.keys(generated).length === 1 ? Object.values(generated)[0] : undefined);
-  if (!resolved) {
-    throw new Error(`Generated building schema does not contain ${featureId}.`);
-  }
-
-  return resolved;
-}
-
-export async function ensureBuildingRecord(featureId: FeatureId, state: GameState): Promise<BuildingRecord> {
-  const existing = state.buildingRecords[featureId];
-  if (existing) {
-    return existing;
-  }
-
-  const schema = await ensureBuildingSchema(featureId, state);
-  const record = generateBuildingRecord(schema);
-  state.buildingRecords[featureId] = record;
-  return record;
-}
-
-/**
- * 实际被呼叫的函数
+ * 实际执行的设置玩家位置的函数
  * @param state
  * @param args
  * @returns
@@ -117,7 +43,7 @@ export async function applySetPlayerIndoorLocationTool(
     if (typeof args?.buildingId !== "string" || !args.buildingId) {
       return;
     }
-
+    // 自动选取一楼入口
     const record = await ensureBuildingRecord(args.buildingId, state);
     state.playerIndoorLocation = chooseBuildingEntranceIndoorLocation(record);
     return;
@@ -130,149 +56,80 @@ export async function applySetPlayerIndoorLocationTool(
   const targetBuildingId = typeof args?.buildingId === "string" && args.buildingId
     ? args.buildingId
     : state.playerIndoorLocation.buildingId;
+  const record = await ensureBuildingRecord(targetBuildingId, state);
   const level = Number(args?.level);
+  // const sectorName = typeof args?.sectorName === "string" ? args.sectorName : "";
   const roomId = typeof args?.roomId === "string" ? args.roomId : "";
   const suiteId = typeof args?.suiteId === "string" && args.suiteId ? args.suiteId : undefined;
   if (!Number.isFinite(level) || !roomId) {
+    // 自动选择 level 此楼层的垂直通道
+    state.playerIndoorLocation = chooseLevelVirtialAccessIndoorLocation(args.buildingId, record.levels[level])
     return;
   }
 
-  const record = await ensureBuildingRecord(targetBuildingId, state);
-  const targetLocation = resolveOccupiableIndoorLocation(record, {
-    buildingId: targetBuildingId,
-    level,
-    suiteId,
-    roomId,
-  });
-  if (!targetLocation) {
-    return;
-  }
+  const targetLocation = findLocationContext(record, level, suiteId, roomId)
+  if (!targetLocation) return
 
   state.playerIndoorLocation = targetLocation;
 }
 
 /**
  * 反查玩家当前所处位置的楼层、sector 和 suite 上下文。
- * 这样 world state、可见范围和 sector VD 激活都能共用同一套定位结果。
  * @param record
- * @param location 兼容 PlayerIndoorLocation 和 PlayerVisibleLocation
+ * @param levelCode
+ * @param suiteId
+ * @param roomId
  * @returns
  */
 export function findLocationContext(
   record: BuildingRecord,
-  location: PlayerIndoorLocation | PlayerVisibleLocation,
-): IndoorRoomContext | null {
-  const level = record.levels[location.level];
+  levelCode: number,
+  suiteId: string,
+  roomId: string,
+): PlayerIndoorLocation | null {
+  const level = record.levels[levelCode];
   if (!level) {
     return null;
   }
 
   for (const sector of Object.values(level.sectors)) {
-    const roomContext = listSectorIndoorRoomContexts(location.level, sector)
+    const roomContext = listSectorIndoorRoomContexts(levelCode, sector)
       .find((entry) => (
-        entry.roomId === location.roomId
-        && entry.suiteId === location.suiteId
+        entry.roomId === roomId
+        && entry.suiteId === suiteId
       ));
     if (roomContext) {
-      return roomContext;
+      return {
+        buildingId: record.featureId,
+        roomId,
+        roomDescription: roomContext.roomDescription || "",
+        ...roomContext
+      };
     }
   }
 
   return null;
 }
 
-export function formatBuildingRecordPrompt(record: BuildingRecord): string {
-  const levelLines = Object.values(record.levels)
-    .sort((left, right) => left.level - right.level)
-    .flatMap((level) => {
-      const sectorLines = Object.values(level.sectors).flatMap((sector) => {
-        const roomLines = Object.values(sector.rooms).flatMap((room) => {
-          if ("subRooms" in room) {
-            const subRoomLines = Object.values(room.subRooms)
-              .map((subRoom) => `      - subRoom ${subRoom.roomId}: ${subRoom.description}`);
-            return [
-              `    - suite ${room.suiteId}: ${room.description}`,
-              ...subRoomLines,
-            ];
-          }
-
-          const access = room.access ? ` [access=${room.access}]` : "";
-          return [`    - room ${room.roomId}: ${room.description}${access}`];
-        });
-
-        return [
-          `  - sector ${sector.name} (area=${sector.area}, center=(${sector.centerPosition.lat}, ${sector.centerPosition.lon}))`,
-          ...roomLines,
-        ];
-      });
-
-      return [
-        `- level ${level.level}: ${level.description}`,
-        ...sectorLines,
-      ];
-    });
-
-  return [
-    `buildingId=${record.featureId}`,
-    `category=${record.category}`,
-    `center=(${record.centerPosition.lat}, ${record.centerPosition.lon})`,
-    `tags=${JSON.stringify(record.tags)}`,
-    "levels:",
-    ...levelLines,
-  ].join("\n");
-}
-
 //#region 内部逻辑函数
 
 /**
- * 为开局选择一个可实际停留的室内位置。
- * suite 只是逻辑概念，因此候选只包含普通房间与 suite 内的 subRoom。
+ * 寻找带入口的房间，若没有则在1楼随机选择一个房间
  * @param record
  * @returns
  */
-export function chooseInitialIndoorLocation(record: BuildingRecord): PlayerIndoorLocation {
-  const levels = Object.values(record.levels);
-  if (levels.length === 0) {
-    throw new Error(`Building record ${record.featureId} has no levels.`);
-  }
-
-  const level = pickRandom(levels);
-  const sectors = Object.values(level.sectors);
-  if (sectors.length === 0) {
-    throw new Error(`Building record ${record.featureId} level ${level.level} has no sectors.`);
-  }
-
-  const sector = pickRandom(sectors);
-  // 此处过滤所有抽象套房
-  const roomContexts = listSectorIndoorRoomContexts(level.level, sector).filter(room => room.locationType !== 'suite');
-  if (roomContexts.length === 0) {
-    throw new Error(`Building record ${record.featureId} level ${level.level} sector ${sector.name} has no occupiable rooms.`);
-  }
-
-  const chosen = pickRandom(roomContexts);
-  return {
-    buildingId: record.featureId,
-    level: chosen.level,
-    sectorName: chosen.sectorName,
-    locationType: chosen.locationType,
-    ...(chosen.suiteId ? { suiteId: chosen.suiteId, suiteDescription: chosen.suiteDescription } : {}),
-    roomId: chosen.roomId!,
-    roomDescription: chosen.roomDescription,
-  };
-}
-
 export function chooseBuildingEntranceIndoorLocation(record: BuildingRecord): PlayerIndoorLocation {
   const firstLevel = record.levels[1];
   if (!firstLevel) {
-    return chooseInitialIndoorLocation(record);
+    return chooseRandomIndoorLocation(record);
   }
-
+  // 优先选取一楼带入口的房间
   const entranceRooms = Object.values(firstLevel.sectors)
     .flatMap((sector) => listSectorIndoorRoomContexts(1, sector))
     .filter((entry): entry is IndoorRoomContext & { roomId: string } => (
       entry.locationType === "room"
       && Boolean(entry.roomId)
-      && getRoomAccess(record, entry) === "entrance"
+      && getRoomAccessInBuilding(record, entry) === "entrance"
     ));
   if (entranceRooms.length > 0) {
     const chosen = pickRandom(entranceRooms);
@@ -282,44 +139,87 @@ export function chooseBuildingEntranceIndoorLocation(record: BuildingRecord): Pl
       sectorName: chosen.sectorName,
       locationType: chosen.locationType,
       roomId: chosen.roomId,
+      roomDescription: chosen.roomDescription ?? ""
     };
   }
+  // 若无则在1楼随机选择
+  return chooseRandomLevelIndoorLocation(record.featureId, firstLevel);
+}
 
-  const nonSubRooms = Object.values(firstLevel.sectors)
-    .flatMap((sector) => listSectorIndoorRoomContexts(1, sector))
-    .filter((entry) => entry.locationType !== "subRoom");
-  if (nonSubRooms.length === 0) {
-    return chooseInitialIndoorLocation(record);
-  }
-
-  const chosen = pickRandom(nonSubRooms);
-  if (chosen.locationType === "room" && chosen.roomId) {
+/**
+ * 寻找给定楼层带垂直通道的的房间，若无则在此楼层随机选择一个房间
+ * @param featureId
+ * @param level
+ * @returns
+ */
+export function chooseLevelVirtialAccessIndoorLocation(featureId: FeatureId, level: BuildingLevel): PlayerIndoorLocation {
+  const accessRooms = Object.values(level)
+    .filter((entry): entry is IndoorRoomContext & { roomId: string} => (
+      entry.locationType === "room"
+      && Boolean(entry.roomId)
+      && getRoomAccessInLevel(level, entry) === "vertical"
+    ))
+  if (accessRooms.length > 0) {
+    const chosen = pickRandom(accessRooms);
     return {
-      buildingId: record.featureId,
+      buildingId: featureId,
       level: 1,
+      sectorName: chosen.sectorName,
+      locationType: chosen.locationType,
       roomId: chosen.roomId,
+      roomDescription: chosen.roomDescription ?? ""
     };
   }
+  // 随机选择
+  return chooseRandomLevelIndoorLocation(featureId, level);
+}
 
-  if (chosen.locationType === "suite" && chosen.suiteId) {
-    const level = record.levels[1];
-    const sector = level?.sectors[chosen.sectorName];
-    const suite = sector?.rooms[chosen.suiteId];
-    if (suite && "subRooms" in suite) {
-      const subRooms = Object.values(suite.subRooms);
-      if (subRooms.length > 0) {
-        const pickedSubRoom = pickRandom(subRooms);
-        return {
-          buildingId: record.featureId,
-          level: 1,
-          suiteId: chosen.suiteId,
-          roomId: pickedSubRoom.roomId,
-        };
-      }
-    }
+/**
+ * 在整个建筑中随机选择一个可实际停留的室内位置。
+ * suite 只是逻辑概念，因此候选只包含普通房间与 suite 内的 subRoom。
+ * @param record
+ * @returns
+ */
+export function chooseRandomIndoorLocation(record: BuildingRecord): PlayerIndoorLocation {
+  const levels = Object.values(record.levels);
+  if (levels.length === 0) {
+    throw new Error(`Building record ${record.featureId} has no levels.`);
   }
 
-  return chooseInitialIndoorLocation(record);
+  const level = pickRandom(levels);
+
+  return chooseRandomLevelIndoorLocation(record.featureId, level)
+}
+
+/**
+ * 在给定楼层中随机选择一个可实际停留的室内位置。
+ * suite 只是逻辑概念，因此候选只包含普通房间与 suite 内的 subRoom。
+ * @param level
+ * @param record
+ */
+function chooseRandomLevelIndoorLocation(featureId: FeatureId, level: BuildingLevel): PlayerIndoorLocation {
+  const sectors = Object.values(level.sectors);
+  if (sectors.length === 0) {
+    throw new Error(`Building record ${featureId} level ${level.level} has no sectors.`);
+  }
+
+  const sector = pickRandom(sectors);
+  // 此处过滤所有抽象套房
+  const roomContexts = listSectorIndoorRoomContexts(level.level, sector).filter(room => room.locationType !== 'suite');
+  if (roomContexts.length === 0) {
+    throw new Error(`Building record ${featureId} level ${level.level} sector ${sector.name} has no occupiable rooms.`);
+  }
+
+  const chosen = pickRandom(roomContexts);
+  return {
+    buildingId: featureId,
+    level: chosen.level,
+    sectorName: chosen.sectorName,
+    locationType: chosen.locationType,
+    ...(chosen.suiteId ? { suiteId: chosen.suiteId, suiteDescription: chosen.suiteDescription } : {}),
+    roomId: chosen.roomId!,
+    roomDescription: chosen.roomDescription ?? "",
+  };
 }
 
 //#region 扁平化函数
@@ -423,29 +323,16 @@ export function dedupeVisibleLocations(locations: PlayerVisibleLocation[]): Play
   });
 }
 
-export function resolveOccupiableIndoorLocation(
-  record: BuildingRecord,
-  location: PlayerVisibleLocation,
-): PlayerIndoorLocation | null {
-  const context = findLocationContext(record, location);
-  if (!context || context.locationType === "suite" || !context.roomId) {
-    return null;
-  }
-
-  return {
-    buildingId: record.featureId,
-    level: context.level,
-    ...(context.suiteId ? { suiteId: context.suiteId } : {}),
-    roomId: context.roomId,
-  };
-}
-
-function getRoomAccess(record: BuildingRecord, context: IndoorRoomContext): BuildingRoom["access"] | undefined {
+function getRoomAccessInBuilding(record: BuildingRecord, context: IndoorRoomContext): BuildingRoom["access"] | undefined {
   if (context.locationType !== "room" || !context.roomId) {
     return undefined;
   }
 
   const level = record.levels[context.level];
+  return getRoomAccessInLevel(level, context)
+}
+
+function getRoomAccessInLevel(level: BuildingLevel, context: IndoorRoomContext): BuildingRoom["access"] | undefined {
   const sector = level?.sectors[context.sectorName];
   if (!sector) {
     return undefined;
