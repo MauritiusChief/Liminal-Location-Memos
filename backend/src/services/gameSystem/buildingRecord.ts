@@ -161,7 +161,7 @@ function expandSuiteSubRooms(
       return expandBedroomWildSubRooms(level, suiteId, normalizeCount(subRoom.count));
     }
 
-    return expandConcreteSubRooms(level, suiteId, subRoomKey, subRoom.description, normalizeCount(subRoom.count));
+    return expandConcreteSubRooms(suiteId, subRoomKey, subRoom.description, normalizeCount(subRoom.count));
   });
 
   return Object.fromEntries(expandedEntries);
@@ -181,7 +181,6 @@ function expandBedroomWildSubRooms(
   const allocations = allocateBedroomWildTargets(count);
   return BEDROOM_WILD_TARGET_KEYS.flatMap((roomKey: BedroomWildTargetKey) => (
     expandConcreteSubRooms(
-      level,
       suiteId,
       roomKey,
       describeBedroomWildTarget(roomKey),
@@ -218,14 +217,13 @@ function describeBedroomWildTarget(roomKey: BedroomWildTargetKey): string {
 }
 
 function expandConcreteSubRooms(
-  level: number,
   suiteId: string,
   subRoomKey: string,
   description: string,
   count: number,
 ): Array<readonly [string, BuildingSubRoom]> {
   return rangeCount(count).map((index) => {
-    const roomId = `${suiteId}/${toIndexedRoomId(level, subRoomKey, index, count)}`;
+    const roomId = `${suiteId}/${toIndexedSubRoomId(subRoomKey, index, count)}`;
     return [roomId, {
       roomId,
       description,
@@ -244,6 +242,10 @@ function normalizeCount(count: number | undefined): number {
 
 function rangeCount(count: number): number[] {
   return Array.from({ length: count }, (_, index) => index + 1);
+}
+
+function toIndexedSubRoomId(roomKey: string, index: number, count: number): string {
+  return count > 1 ? `${roomKey}_idx${index}` : `${roomKey}`;
 }
 
 function toIndexedRoomId(level: number, roomKey: string, index: number, count: number): string {
