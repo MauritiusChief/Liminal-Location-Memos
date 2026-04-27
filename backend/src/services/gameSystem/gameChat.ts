@@ -243,8 +243,8 @@ async function finalizeVisualDescription(session: GameSession, bookMessage: stri
   try {
     const nextState = cloneGameState(session.gameState);
     await upsertVisualDescriptions(nextState, bookMessage);
-    // // 后台新写入 VD 记录之后，刷新提交给前端快照的 active 列表
-    // updateActiveVisualDescriptionRefs(nextState);
+    // 后台新写入 VD 记录之后，刷新提交给前端快照的 active 列表
+    updateActiveVisualDescriptionRefs(nextState);
     session.gameState = nextState;
     await updateRuntimeSession(session);
   } finally {

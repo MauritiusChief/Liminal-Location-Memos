@@ -12,7 +12,7 @@ import { INDOOR_INITIAL_BOOK_MESSAGE_SYSTEM, OUTDOOR_INITIAL_BOOK_MESSAGE_SYSTEM
 /**
  * 每次在 Book Composer 使用之前通过 Game State 生成，随即转为 Player State Prompt
  */
-interface PlayerState {
+export interface PlayerState {
   playerPosition: Position;
   playerOrientation: number;
   playerIndoorLocation: PlayerIndoorLocation | null;
@@ -104,7 +104,7 @@ export async function streamRegularBookMessage(
   state: GameState,
   emit: EmitGameEvent,
 ): Promise<string> {
-  console.log(`[${new Date().toISOString()}] generateBookMessage() 触发`);
+  console.log(`[${new Date().toISOString()}] streamRegularBookMessage() 触发`);
 
   const playerState = pickPlayerState(state)
   const { lat, lon } = playerState.playerPosition;
@@ -158,15 +158,15 @@ const PLAYER_STATE_BUILDING_RECORD_RANGE = 300
 
 //#region 内部逻辑
 
-function pickPlayerState(state: GameState): PlayerState {
+export function pickPlayerState(state: GameState): PlayerState {
   const {playerPosition, playerOrientation, playerIndoorLocation, playerVisionRange, activeVisibleLocations} = state
   // TODO 也许需要动用数据库，判断建筑的最近点而非建筑的中心
   const activeBuildingRecords = Object.fromEntries(Object.entries(state.buildingRecords).filter(
     ([featureId, record]) => {
-      // const {lon: recordLon, lat: recordLat} = record.centerPosition
-      // const {lon: playerLon, lat: playerLat} = state.playerPosition
-      // return distanceBetweenCoordinates([recordLon, recordLat], [playerLon, playerLat]) < PLAYER_STATE_BUILDING_RECORD_RANGE
-      return featureId === state.playerIndoorLocation?.buildingId
+      const {lon: recordLon, lat: recordLat} = record.centerPosition
+      const {lon: playerLon, lat: playerLat} = state.playerPosition
+      return distanceBetweenCoordinates([recordLon, recordLat], [playerLon, playerLat]) < state.playerVisionRange
+      // return featureId === state.playerIndoorLocation?.buildingId
     }
   ))
   const activeFieldVisualDescriptions = Object.fromEntries(Object.entries(state.fieldVisualDescriptions).filter(
@@ -198,7 +198,7 @@ function pickPlayerState(state: GameState): PlayerState {
  * @param scene 已根据 playerVisionRange 生成的 SceneObject
  * @returns
  */
-function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): string {
+export function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): string {
   const scenePrompt = scene ? buildScenePrompt(scene, state.playerOrientation) : null;
   const fieldVisualDescriptionPrompt =  Object.values(state.activeFieldVisualDescriptions)
     .map(record => formatFieldVisualDescriptionPrompt(state, record))
@@ -240,7 +240,7 @@ function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): string {
 
 //#region 辅助函数
 
-function formatFieldVisualDescriptionPrompt(state: PlayerState, record: FieldVisualDescriptionRecord): string {
+export function formatFieldVisualDescriptionPrompt(state: PlayerState, record: FieldVisualDescriptionRecord): string {
   const distanceMeters = distanceToPosition(state.playerPosition, record.center);
   const bearingDegrees = bearingBetweenCoordinates(
     [state.playerPosition.lon, state.playerPosition.lat],
@@ -253,7 +253,7 @@ function formatFieldVisualDescriptionPrompt(state: PlayerState, record: FieldVis
   ].join('\n');
 }
 
-function formatVisibleLocationPrompt(visibleLocation: PlayerVisibleLocation): string {
+export function formatVisibleLocationPrompt(visibleLocation: PlayerVisibleLocation): string {
   // 套房
   if (visibleLocation.locationType === 'suite') {
     return [
@@ -272,7 +272,7 @@ function formatVisibleLocationPrompt(visibleLocation: PlayerVisibleLocation): st
   ].join(' - ');
 }
 
-function formatIndoorLocationPrompt(state: PlayerState): string | null {
+export function formatIndoorLocationPrompt(state: PlayerState): string | null {
   const location = state.playerIndoorLocation;
   if (!location) {
     return null;
