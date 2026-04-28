@@ -74,7 +74,7 @@ const SET_PLAYER_INDOOR_LOCATION_TOOL: GameStateToolDef = {
     '此工具允许特定条件下在缺失参数时自动补全参数，因此在特定条件下时可以省略某些参数（比如进入建筑时，此工具会自动补全目标位置为建筑的入口），具体哪些参数在何种情况下可省略参见参数的描述。',
     '注意：',
     '- 即使用户要求了行动，也要分析是否有阻碍行动的障碍、玩家状态是否支持此次行动等条件。如果分析表明这次行动无法进行，可以不使用此工具（令玩家在建筑中的位置不变）或者将行动的类型/目的位置改为逻辑上更合理的地方（比如试图离开建筑发现大门被锁而变为移动到大堂）。',
-    '- 行动的类型为进入或离开建筑时，以及在楼层内跨越区域移动时，需要同步调用 move_player 工具来改变玩家的实际经纬度；不用考虑是否真实落在建筑内/外的问题，实际落盘时会微调到合理的临近位置。'
+    '- 行动的类型为进入或离开建筑时，以及在楼层内长距离跨区域(sector)移动时，需要同步调用 move_player 工具来改变玩家的实际经纬度；不用考虑是否真实落在建筑内/外的问题，实际落盘时会微调到合理的临近位置。'
   ],
   arguments: {
     move: { type: 'string', optional: false, description: '玩家行动的类型，必须为`enter`(进入建筑), `leave`(离开建筑), `move`(在建筑中移动)这三者之一。'},
@@ -186,6 +186,8 @@ export async function gameStateManager(state: GameState): Promise<GameStateToolC
  * - 成功移动后，玩家朝向也会改成这次移动方向；
  */
 export async function applyGameStateToolCalls(state: GameState, toolCalls: GameStateToolCall[]): Promise<void> {
+  const isMoveIntendedIndoor = isIntendedIndoor(toolCalls);
+
   for (const toolCall of toolCalls) {
     console.log(`[${new Date().toISOString()}] 开始解析 ${toolCall.name} 工具参数：`, toolCall.arguments);
 
@@ -193,7 +195,7 @@ export async function applyGameStateToolCalls(state: GameState, toolCalls: GameS
 
     switch (toolCall.name) {
       case MOVE_PLAYER_TOOL.name:
-        applyMovePlayerTool(state, args);
+        await applyMovePlayerTool(state, args, isMoveIntendedIndoor);
         break;
       case SET_PLAYER_INDOOR_LOCATION_TOOL.name:
         await applySetPlayerIndoorLocationTool(state, args);
@@ -207,6 +209,24 @@ export async function applyGameStateToolCalls(state: GameState, toolCalls: GameS
 }
 
 //#region 内部逻辑
+
+/**
+ * 检查一下最终目的是不是室内移动
+ * @param toolCalls
+ * @returns 目的地是否应该在室内
+ */
+export function isIntendedIndoor(toolCalls: GameStateToolCall[]): boolean | undefined {
+  const finalIndoorToolCall = [...toolCalls]
+    .reverse()
+    .find((toolCall) => toolCall.name === SET_PLAYER_INDOOR_LOCATION_TOOL.name);
+  const move = finalIndoorToolCall?.arguments?.move;
+
+  if (move === "enter" || move === "move") return true
+
+  if (move === "leave") return false
+
+  return undefined;
+}
 
 export function formatGameStateManagerRecentMessageHistory(messageHistory: GameMessage[]): string {
   return messageHistory
