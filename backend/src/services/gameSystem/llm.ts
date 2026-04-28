@@ -11,6 +11,8 @@ import {
 } from "./llmTypes.js";
 import { GameMessage } from "./gameSessionStore.js";
 
+type PlayerGameMessage = Extract<GameMessage, { role: 'player' }>;
+
 type ResponseWithReasoning = {
   reply: string;
   reasoning?: string;
@@ -135,42 +137,74 @@ export async function generateReplyFullMessages(
 }
 
 /**
- * 组装 generateReplyFullMessages() 所用的传统 messages 数组以及插入虚拟 refresh_world_state 函数的 call/return
+ * 组装 streamReplyFullMessages() 所用的传统 messages 数组以及插入虚拟 refresh_world_state 函数的 call/return
  * @param systemPrompt
  * @param gameMessages 被用于构造的 GameMessage 列，不一定是全部 message
- * @param worldState
+ * @param statePrompt
  * @returns
  */
 export function buildFullMessagesRequestMessages(
   systemPrompt: string,
   gameMessages: GameMessage[],
-  worldState: string,
+  statePrompt: string,
 ): ChatMessage {
   const messages: DeepSeekMessage[] | OpenRouterMessage[] = [{ role: 'system', content: systemPrompt }];
-  gameMessages.forEach((message) => {
-    message.role === 'book'
-      ? messages.push({ role: 'assistant', content: message.content })
-      : messages.push({ role: 'user', content: message.content });
+  gameMessages.forEach((message, index) => {
+    if (message.role === 'book') {
+      messages.push({ role: 'assistant', content: message.content });
+      return;
+    }
+
+    pushPlayerMessageWithStateChange(messages, message, index);
   });
 
-  const syntheticToolId = 'synthetic_get_world_state';
+  const syntheticToolId = 'synthetic_get_game_state';
   // 填充虚假 tool call
   messages.push({
     role: 'assistant',
     content: '',
     reasoning_content: '',
     tool_calls: [{
-      id: syntheticToolId, type: "function", function: { name: "refresh_world_state", arguments: "{}" }
+      id: syntheticToolId, type: "function", function: { name: "refresh_game_state", arguments: "{}" }
     }]
   });
   // 填充虚假 tool return
   messages.push({
     role: 'tool',
     tool_call_id: syntheticToolId,
-    content: worldState,
+    content: statePrompt,
   });
 
   return messages;
+}
+
+function pushPlayerMessageWithStateChange(
+  messages: DeepSeekMessage[] | OpenRouterMessage[],
+  message: PlayerGameMessage,
+  index: number,
+): void {
+  messages.push({ role: 'user', content: message.content });
+  // // MOCK
+  // message.stateChange = [{name: "move_player", arguments: {bearingDegrees: 3, distanceMeters: 5}}]
+
+  if (!message.stateChange?.length) {
+    return;
+  }
+
+  const syntheticToolId = `synthetic_player_state_change_${index}`;
+  messages.push({
+    role: 'assistant',
+    content: '',
+    reasoning_content: '',
+    tool_calls: [{
+      id: syntheticToolId, type: "function", function: { name: "apply_player_state_changes", arguments: "{}" }
+    }]
+  });
+  messages.push({
+    role: 'tool',
+    tool_call_id: syntheticToolId,
+    content: JSON.stringify(message.stateChange, null, 2),
+  });
 }
 
 //#region Provider 分支

@@ -1,4 +1,4 @@
-import type { CategoryDefinition } from "./buildingClassifier.js";
+import type { CategoryDefinition } from "./buildingSchema.js";
 import { GROUND_LEVEL } from "./buildingUtils.js";
 
 //#region 常量

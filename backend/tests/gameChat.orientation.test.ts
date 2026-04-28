@@ -51,9 +51,18 @@ jest.mock("../src/services/osmNormalization/osmGate", () => {
   };
 });
 
+jest.mock("../src/services/gameSystem/buildingRecord", () => {
+  return {
+    ensureBuildingRecord: jest.fn(),
+    findContainingBuildingFeatureId: jest.fn(),
+  };
+});
+
 import { buildSceneFromRequest } from "../src/services/scene/sceneObject";
+import { findContainingBuildingFeatureId } from "../src/services/gameSystem/buildingRecord";
 import {
   generateJsonReplySingleMessage,
+  generateReplySingleMessage,
   streamReplyFullMessages,
 } from "../src/services/gameSystem/llm";
 import {
@@ -65,14 +74,19 @@ import {
   updateRuntimeSession,
 } from "../src/services/gameSystem/gameSessionStore";
 import { OsmCoverageSyncRetryExhaustedError } from "../src/services/osmNormalization/osmGate";
-import { applyGameStateToolCalls, streamGameTurn } from "../src/services/gameSystem/gameChat";
+import { streamGameTurn } from "../src/services/gameSystem/gameChat";
+import { applyGameStateToolCalls } from "../src/services/gameSystem/agentStateManager";
+import { movePosition } from "../src/services/gameSystem/toolMovePlayer";
 import type { GameSession, GameState } from "../src/services/gameSystem/gameSessionStore";
+
+const mockedFindContainingBuildingFeatureId = jest.mocked(findContainingBuildingFeatureId);
 
 function buildGameState(): GameState {
   return {
     playerPosition: { lat: 0, lon: 0 },
     playerOrientation: 15,
     playerIndoorLocation: null,
+    playerVisionRange: 500,
     messageHistory: [],
     activeFieldVisualDescriptions: [],
     fieldVisualDescriptions: {},
@@ -100,6 +114,10 @@ function buildSession(): GameSession {
 }
 
 describe("applyGameStateToolCalls", () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+  });
+
   it("updates player orientation to the move bearing after a valid move", async () => {
     const gameState = buildGameState();
 
@@ -133,11 +151,43 @@ describe("applyGameStateToolCalls", () => {
     expect(gameState.playerPosition).toEqual({ lat: 0, lon: 0 });
     expect(gameState.playerOrientation).toBe(15);
   });
+
+  it("uses the final indoor intent in the batch when adjusting move_player", async () => {
+    const gameState = buildGameState();
+    gameState.playerOrientation = 0;
+    const originalDestination = movePosition(gameState.playerPosition, 0, 10);
+    const expectedDestination = movePosition(originalDestination, 0, 5);
+    mockedFindContainingBuildingFeatureId
+      .mockResolvedValueOnce({ featureId: "way/1", tags: {} })
+      .mockResolvedValueOnce(null);
+
+    await applyGameStateToolCalls(gameState, [
+      {
+        name: "move_player",
+        arguments: {
+          bearingDegrees: 0,
+          distanceMeters: 10,
+        },
+      },
+      {
+        name: "set_player_indoor_location",
+        arguments: {
+          move: "leave",
+        },
+      },
+    ]);
+
+    expect(gameState.playerPosition.lat).toBeCloseTo(expectedDestination.lat, 10);
+    expect(gameState.playerPosition.lon).toBeCloseTo(expectedDestination.lon, 10);
+    expect(gameState.playerIndoorLocation).toBeNull();
+    expect(mockedFindContainingBuildingFeatureId).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("streamGameTurn", () => {
   const mockedBuildSceneFromRequest = jest.mocked(buildSceneFromRequest);
   const mockedGenerateJsonReplySingleMessage = jest.mocked(generateJsonReplySingleMessage);
+  const mockedGenerateReplySingleMessage = jest.mocked(generateReplySingleMessage);
   const mockedStreamReplyFullMessages = jest.mocked(streamReplyFullMessages);
   const mockedWriteGameDebugRequest = jest.mocked(writeGameDebugRequest);
   const mockedWriteGameDebugResult = jest.mocked(writeGameDebugResult);
@@ -178,9 +228,12 @@ describe("streamGameTurn", () => {
       reply: "[]",
       reasoning: "",
     }).mockResolvedValueOnce({
-      reply: JSON.stringify({ field: "visual notes", exteriors: [] }),
+      reply: JSON.stringify([]),
       reasoning: "",
     });
+    mockedGenerateReplySingleMessage
+      .mockResolvedValueOnce({ reply: "visual notes", reasoning: "" })
+      .mockResolvedValueOnce({ reply: "__NO_UPDATE__", reasoning: "" });
     mockedStreamReplyFullMessages.mockImplementation(async function* () {
       yield { replyDelta: "book ", done: false };
       yield { replyDelta: "reply", done: false };
@@ -206,8 +259,8 @@ describe("streamGameTurn", () => {
       "visual_description_done",
     ]);
     expect(mockedUpdateRuntimeSession).toHaveBeenCalledTimes(2);
-    expect(mockedWriteGameDebugRequest).toHaveBeenCalledTimes(3);
-    expect(mockedWriteGameDebugResult).toHaveBeenCalledTimes(3);
+    expect(mockedWriteGameDebugRequest).toHaveBeenCalledTimes(5);
+    expect(mockedWriteGameDebugResult).toHaveBeenCalledTimes(5);
     expect(mockedWriteGameDebugRequest.mock.invocationCallOrder[0]).toBeLessThan(
       mockedGenerateJsonReplySingleMessage.mock.invocationCallOrder[0],
     );
@@ -242,9 +295,12 @@ describe("streamGameTurn", () => {
       reply: "[]",
       reasoning: "",
     }).mockResolvedValueOnce({
-      reply: JSON.stringify({ field: "visual notes", exteriors: [] }),
+      reply: JSON.stringify([]),
       reasoning: "",
     });
+    mockedGenerateReplySingleMessage
+      .mockResolvedValueOnce({ reply: "visual notes", reasoning: "" })
+      .mockResolvedValueOnce({ reply: "__NO_UPDATE__", reasoning: "" });
     mockedStreamReplyFullMessages.mockImplementation(async function* () {
       yield { replyDelta: "queued reply", done: false };
       yield { done: true };
@@ -286,12 +342,12 @@ describe("streamGameTurn", () => {
       reply: "[]",
       reasoning: "",
     }).mockResolvedValueOnce({
-      reply: JSON.stringify({
-        field: "field notes",
-        exteriors: [{ buildingId: "way/123", content: "exterior notes" }],
-      }),
+      reply: JSON.stringify([{ buildingId: "way/123", content: "exterior notes" }]),
       reasoning: "",
     });
+    mockedGenerateReplySingleMessage
+      .mockResolvedValueOnce({ reply: "field notes", reasoning: "" })
+      .mockResolvedValueOnce({ reply: "__NO_UPDATE__", reasoning: "" });
     mockedStreamReplyFullMessages.mockImplementation(async function* () {
       yield { replyDelta: "book reply", done: false };
       yield { done: true };

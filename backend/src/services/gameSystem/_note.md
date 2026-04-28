@@ -10,10 +10,14 @@
 术语：
 - **Book**：指代的是剧本，也就是该剧本的主持人。是采用多种程序生成信息然后以自然语言呈现给玩家的“直接交互者”
 - **Book Message**：与 User Message 相对，指的是剧本发送给玩家的消息
-- **Game State**：纯游戏世界与对话后果，只包含长期有效、需要参与后续推演的状态
+- **Game State**：盛装所有的游戏世界与对话记录、玩家状态等数据，只包含长期有效、需要参与后续推演的状态
 - **Game Save**：可持久化恢复的存档快照。主体是 Game State 加恢复所需元数据，但不包含运行态后台任务信息
 - **Game Session**：运行时会话容器。持有 Game Save / Game State，并额外承载流式请求、后台准备、排队消息、并发控制等临时状态
-- **World State**：游戏世界以及玩家角色的状态，简单来讲就是 Game State 去掉对话记录换成 World State Tool 运行记录
+- **World State**：系统角度的游戏世界以及玩家角色的状态，会通过手段去掉无关内容防止信息爆炸
+  - 用在 Game State Manager (Agent)
+- **Player State**：玩家视角的状态描述，仅包括 World State 所有状态当中玩家知道的部分
+  - 用在 Book Composer (Agent)
+  - （TODO）记忆功能，记忆玩家明明知道的建筑地点
 
 Game State 术语：
 - **Visual Description**：用来记录某地范围内，确定性数据（比如 OSM）未呈现而让 LLM 自由发挥的地方。
@@ -29,12 +33,13 @@ Game State 术语：
     - 只有所在 Sector 的 Visual Description 才会激活
 - **Sector**：是指按边长100m（也就是外接圆半径100m）的六边形网格进行遮罩后，切分出来之后吸收细微区域形成的小区域。如果建筑不大，一个 Level 就只会有一个 Sector
   - 网格仅仅以该建筑所在面，不是全球统一网格。如果建筑面积达到阈值，优先以网格线经过建筑中心点的方式设置网格
-- **Indoor Location**：本意是指一组特定的 建筑id-楼层号-房间id，但在 Game State 的 activeIndoorLocations 中也用来记载当前玩家可看到的范围。
-  - activeIndoorLocations 决定关系如下：默认情况下只能看到所在 Sector 的普通房间与套房表层。特殊情况下：
+- **Visual Location**：在 Game State 的 activeVisualLocations 中用来记载当前玩家可看到的范围。
+  - activeVisualLocations 决定关系如下：默认情况下只能看到所在 Sector 的普通房间与套房表层。特殊情况下：
     - 处在楼梯口等，可以看见相邻楼层的垂直连接处，比如楼梯间或者阁楼
     - 破坏了视觉遮挡的情况下，可以看到套房内部的子房间
     - 破坏了视觉遮挡的情况下，可以看到 internal access 相连的另一栋建筑的 internal access 另一端房间
-  - activeIndoorLocations 不决定可互动关系，玩家总是只能和所在的 Indoor Location 互动
+  - activeVisualLocations 在玩家每次转移 Sector 时，都会重新计算并由 Game State Manager 指定特殊情况
+  - activeVisualLocations 不决定可互动关系，玩家总是只能和所在的 Indoor Location 互动
 
 （TODO）游戏建筑术语：
 - **Theme**：程序随机选择的，为该建筑或建筑某一部分添加效果的描述。比如某个民宅正在办派对，后续生成时就可能添加派对描述，甚至在建筑里生成更多派对用品与食物
@@ -55,17 +60,21 @@ Game State 术语：
 
 ## 游戏流程
 
-0. 玩家点击开始游戏后，进入游戏初始化流程。从经纬度数据读取 OSM 然后生成 Scene Prompt，让一个专门的 Agent 生成开场 Book Message
+### 开局回合
 
-1. 每次生成 Book Message 时，会先以 stream 的形式把文本增量发给前端
-2. Book Message stream 完成后，先立即提交本轮 Game Save，再由另一个 Agent 根据 Book Message 撰写或者更新 Visual Description
+1. 玩家点击开始游戏后，进入游戏初始化流程。从经纬度数据读取 OSM、生成 Building Schema 等，组装 Player State Prompt，让 Book Composer (Agent) 生成开场 Book Message
+2. 生成初始 Book Message 时，会先以 stream 的形式把文本增量发给前端
+3. Book Message stream 完成后，先立即提交本轮 Game Save，再由 Visual Describer (Agent) 根据 Book Message 和已有的世界状态撰写/更新 Visual Description
   - 为了更短的互动前静止时间，Visual Description 不再阻塞 Book Message 的送达
   - 在 Visual Description 工作完成之前，只允许暂存 1 条下一回合的 User Message；若队列已占满，则拒绝新的消息
   - 当 Visual Description 准备完毕后，排队中的下一条消息才会进入下一回合
-3. 玩家发送信息之后，先由 Game State 管理者 Agent 专门处理 Game State
-  - 如果进入了
-4. Game State 处理完毕后，处理结果以及玩家的周遭信息会以 syth tool return 的形式给到剧本主持人，生成 Book Message 并 stream 给前端
-5.
+
+### 常规回合
+
+0. 玩家发送信息，先由 Game State Manager (Agent) 通过专门处理 Game State，获取包括对话记录在内的全量游戏状态，产出多个顺序进行的 Game State Tool Call
+1. Game State 处理完毕后，处理结果以及玩家的周遭信息会以 syth tool return 的形式给到 Book Composer (Agent)，生成 Book Message
+2. Book Message 被 stream 给前端
+3. 与开局回合相似的 Visual Describer (Agent) 流程
 
 ## 建筑生成逻辑
 

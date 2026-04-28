@@ -1,8 +1,9 @@
 import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
-import type { BuildingCandidate, BuildingSchema, CategoryDefinition} from "./buildingClassifier.js";
-import { fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId, weightedBoolean } from "./buildingClassifier.js";
+import type { BuildingCandidate, BuildingSchema, CategoryDefinition} from "./buildingSchema.js";
+import { fetchBuildingCoveringAreas, fetchBuildingRoadKinds, parseBuildingFeatureId } from "./buildingSchema.js";
 import { distanceToPosition } from "../geometry.js";
+import { weightedBoolean } from "../utils.js";
 
 /**
  * 与 SQL 查询结果表一致的扁平类型

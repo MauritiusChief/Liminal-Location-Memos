@@ -1,8 +1,8 @@
 import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { DbBuildingFeatureDetailRow, FeatureDetail, FeatureId, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
-import { Position } from "./gameSessionStore.js";
-import { trimTagValue } from "../utils.js";
+import { GameState, Position } from "./gameSessionStore.js";
+import { pickRandom, trimTagValue } from "../utils.js";
 import { APARTMENT_CATEGORY, buildApartmentCategorySchemaFromDistribution, finishApartmentBuildingSchema, isAmbiguousApartmentCategory, selectApartmentPatternKey } from "./buildingApartment.js";
 import { APARTMENT_UTILITY_CATEGORY } from "./buildingApartmentUtility.js";
 import { buildHouseCategorySchemaFromDistribution, finishHouseBuildingSchema, HOUSE_CATEGORY, isAmbiguousHouseCategory, selectHousePatternKey } from "./buildingHouse.js";
@@ -224,6 +224,33 @@ export async function generateBuildingSchema(
   const buildingSchemas = finishBuildingSchema(sectorDistributionSchems, candidate)
 
   return buildingSchemas;
+}
+
+/**
+ * 针对某建筑，获取存储在 GameState 中的 Building Schema 或者生成所需的 Building Schema。
+ * @param featureId
+ * @param state
+ */
+export async function ensureBuildingSchema(featureId: FeatureId, state: GameState): Promise<BuildingSchema> {
+  const existing = state.buildingSchemas[featureId];
+  if (existing) {
+    return existing;
+  }
+
+  const generated = await generateBuildingSchema(featureId, Object.values(state.buildingSchemas));
+  if (!generated) {
+    throw new Error(`Failed to generate building schema for ${featureId}.`);
+  }
+
+  Object.assign(state.buildingSchemas, generated);
+
+  const resolved = state.buildingSchemas[featureId]
+    ?? (Object.keys(generated).length === 1 ? Object.values(generated)[0] : undefined);
+  if (!resolved) {
+    throw new Error(`Generated building schema does not contain ${featureId}.`);
+  }
+
+  return resolved;
 }
 
 /**
@@ -876,28 +903,6 @@ function hasContainedPoiTag(
     const tagValue = trimTagValue(poi.tags[key]);
     return tagValue !== null && valueSet.has(tagValue);
   });
-}
-
-/**
- * 以支持权重和反对权重加权随机得到结果
- * @param supportingWeight
- * @param nonSupportingWeight 为负数
- * @returns true 代表支持，false 代表反对
- */
-export function weightedBoolean(supportingWeight: number, nonSupportingWeight: number): boolean {
-  const totalWeight = supportingWeight + nonSupportingWeight;
-  return Math.random() * totalWeight < supportingWeight;
-}
-
-/**
- * 从给定列表中均匀随机取一个值。
- *
- * @param values 候选值列表
- * @returns 被选中的值
- */
-export function pickRandom<T>(values: T[]): T {
-  const index = Math.min(values.length - 1, Math.floor(Math.random() * values.length));
-  return values[index];
 }
 
 /**

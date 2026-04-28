@@ -1,5 +1,4 @@
-import type { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategoryRoomSchema, CategorySchema, PatternDistribution, RoomSchema, SectorDistributionSchem } from "./buildingClassifier.js";
-import { weightedBoolean } from "./buildingClassifier.js";
+import type { BuildingCandidate, BuildingSchema, CategoryDefinition, CategoryLevelSchema, CategoryRoomSchema, CategorySchema, PatternDistribution, RoomSchema, SectorDistributionSchem } from "./buildingSchema.js";
 import type { FeatureId } from "../featureDetail.js";
 import {
   GROUND_LEVEL,
@@ -7,6 +6,7 @@ import {
   TINY_RESIDENTIAL_BUILDING_AREA_MAX_SQM,
   type HouseDetermingFactor,
 } from "./buildingUtils.js";
+import { weightedBoolean } from "../utils.js";
 
 //#region 常量
 

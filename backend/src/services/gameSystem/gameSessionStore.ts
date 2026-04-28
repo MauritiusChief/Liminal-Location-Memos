@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { BuildingSchema } from './buildingClassifier.js';
-import { BuildingRecord } from './toolIndoorPosition.js';
+import { BuildingSchema } from './buildingSchema.js';
 import { FeatureId } from '../featureDetail.js';
+import { BuildingRecord } from './buildingRecord.js';
+import { GameStateToolCall } from './agentStateManager.js';
 
 export interface Position {
   lat: number;
@@ -11,12 +12,14 @@ export interface Position {
 }
 
 /**
- * 仅记录游戏对话，不包含系统提示词或者工具消息
+ * 仅记录游戏对话和对玩家对话识别后直接产生的工具调用记录，
+ * 不包含系统提示词或者 refresh state 工具消息
  */
 export type GameMessage =
   | {
       role: 'player';
       content: string;
+      stateChange?: GameStateToolCall[]
     }
   | {
       role: 'book';
@@ -57,8 +60,12 @@ export interface SectorVisualDescriptionRecord {
 export interface PlayerIndoorLocation {
   buildingId: FeatureId;
   level: number;
+  sectorName: string;
+  locationType: "room" | "suite" | "subRoom";
   suiteId?: string;
+  suiteDescription?: string;
   roomId: string;
+  roomDescription: string;
 }
 
 /**
@@ -67,8 +74,12 @@ export interface PlayerIndoorLocation {
 export interface PlayerVisibleLocation {
   buildingId: FeatureId;
   level: number;
+  sectorName: string;
+  locationType: "room" | "suite" | "subRoom";
   suiteId?: string;
+  suiteDescription?: string;
   roomId?: string;
+  roomDescription?: string;
 }
 
 /**
@@ -79,6 +90,7 @@ export interface GameState {
   playerPosition: Position;
   playerOrientation: number;
   playerIndoorLocation: PlayerIndoorLocation | null;
+  playerVisionRange: number;
   messageHistory: GameMessage[];
   activeFieldVisualDescriptions: string[];
   fieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
@@ -208,7 +220,7 @@ export async function loadGameSave(sessionId: string): Promise<GameSave | null> 
 
   try {
     const content = await readFile(savePath, 'utf8');
-    const parsed = JSON.parse(content) as Partial<GameSave> | Partial<GameState>;
+    const parsed = JSON.parse(content) as GameSave;
     return normalizeLoadedSave(sessionId, parsed);
   } catch (error) {
     if (isFileNotFound(error)) {
@@ -263,20 +275,12 @@ function createGameSave(sessionId: string): GameSave {
   };
 }
 
-function normalizeLoadedSave(sessionId: string, parsed: Partial<GameSave> | Partial<GameState>): GameSave {
-  if ('gameState' in parsed && parsed.gameState) {
-    const save = parsed as GameSave;
-    return {
-      sessionId: save.sessionId || sessionId,
-      gameState: normalizeLoadedGameState(save.gameState as Partial<GameState> & { activeIndoorLocations?: PlayerVisibleLocation[] }),
-      llmProvider: save.llmProvider,
-    };
-  }
-
-  // 兼容旧版本直接把 GameSession/GameState 写进文件的存档。
+function normalizeLoadedSave(sessionId: string, parsed: GameSave): GameSave {
+  const save = parsed as GameSave;
   return {
-    sessionId,
-    gameState: normalizeLoadedGameState(parsed as Partial<GameState> & { activeIndoorLocations?: PlayerVisibleLocation[] }),
+    sessionId: save.sessionId || sessionId,
+    gameState: save.gameState,
+    llmProvider: save.llmProvider,
   };
 }
 
@@ -285,6 +289,7 @@ function createDefaultGameState(): GameState {
     playerPosition: { ...DEFAULT_START_POSITION },
     playerOrientation: Math.floor(Math.random() * 360),
     playerIndoorLocation: null,
+    playerVisionRange: 500,
     messageHistory: [],
     activeFieldVisualDescriptions: [],
     fieldVisualDescriptions: {},
@@ -295,56 +300,6 @@ function createDefaultGameState(): GameState {
     activeVisibleLocations: [],
     sectorVisualDescriptions: {},
     activeSectorVisualDescriptions: [],
-  };
-}
-
-function normalizeLoadedGameState(
-  loadedState: Partial<GameState> & { activeIndoorLocations?: PlayerVisibleLocation[] },
-): GameState {
-  const defaults = createDefaultGameState();
-  const legacyVisibleLocations = Array.isArray(loadedState.activeIndoorLocations)
-    ? loadedState.activeIndoorLocations
-    : [];
-  const activeVisibleLocations = Array.isArray(loadedState.activeVisibleLocations)
-    ? loadedState.activeVisibleLocations
-    : legacyVisibleLocations;
-
-  return {
-    ...defaults,
-    ...loadedState,
-    playerPosition: loadedState.playerPosition ?? defaults.playerPosition,
-    playerOrientation: typeof loadedState.playerOrientation === 'number'
-      ? loadedState.playerOrientation
-      : defaults.playerOrientation,
-    playerIndoorLocation: loadedState.playerIndoorLocation
-      ? {
-          buildingId: loadedState.playerIndoorLocation.buildingId,
-          level: loadedState.playerIndoorLocation.level,
-          suiteId: loadedState.playerIndoorLocation.suiteId,
-          roomId: loadedState.playerIndoorLocation.roomId,
-        }
-      : null,
-    messageHistory: Array.isArray(loadedState.messageHistory) ? loadedState.messageHistory : defaults.messageHistory,
-    activeFieldVisualDescriptions: Array.isArray(loadedState.activeFieldVisualDescriptions)
-      ? loadedState.activeFieldVisualDescriptions
-      : defaults.activeFieldVisualDescriptions,
-    fieldVisualDescriptions: loadedState.fieldVisualDescriptions ?? defaults.fieldVisualDescriptions,
-    activeExteriorVisualDescriptions: Array.isArray(loadedState.activeExteriorVisualDescriptions)
-      ? loadedState.activeExteriorVisualDescriptions
-      : defaults.activeExteriorVisualDescriptions,
-    exteriorVisualDescriptions: loadedState.exteriorVisualDescriptions ?? defaults.exteriorVisualDescriptions,
-    buildingSchemas: loadedState.buildingSchemas ?? defaults.buildingSchemas,
-    buildingRecords: loadedState.buildingRecords ?? defaults.buildingRecords,
-    activeVisibleLocations: activeVisibleLocations.map((location) => ({
-      buildingId: location.buildingId,
-      level: location.level,
-      suiteId: location.suiteId,
-      roomId: location.roomId,
-    })),
-    sectorVisualDescriptions: loadedState.sectorVisualDescriptions ?? defaults.sectorVisualDescriptions,
-    activeSectorVisualDescriptions: Array.isArray(loadedState.activeSectorVisualDescriptions)
-      ? loadedState.activeSectorVisualDescriptions
-      : defaults.activeSectorVisualDescriptions,
   };
 }
 
