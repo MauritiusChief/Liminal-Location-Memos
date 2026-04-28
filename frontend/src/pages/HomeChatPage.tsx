@@ -51,6 +51,9 @@ export function HomeChatPage() {
   const canSubmitMessage = hasStarted
     && !request.activeBookStream
     && !session?.hasQueuedPlayerMessage;
+  const isBusy = request.status === 'loading';
+  const isStarting = isBusy && request.activeAction === 'start';
+  const isRestoring = isBusy && request.activeAction === 'restore';
 
   return (
     <section>
@@ -107,16 +110,20 @@ export function HomeChatPage() {
                   <button
                     type="button"
                     onClick={() => void dispatch(restoreStoredSession())}
-                    disabled={request.status === 'loading'}
+                    disabled={isBusy}
                     style={{ marginRight: '8px' }}
                   >
-                    {request.status === 'loading' ? 'Restoring...' : '读取检测到的存档'}
+                    {isRestoring ? 'Restoring...' : '读取检测到的存档'}
+                  </button>
+                  <button type="button" onClick={() => void dispatch(startGame())} disabled={isBusy}>
+                    {isStarting ? 'Starting...' : '新游戏'}
                   </button>
                 </div>
-              ) : null}
-              <button type="button" onClick={() => void dispatch(startGame())} disabled={request.status === 'loading'}>
-                {request.status === 'loading' ? 'Starting...' : '开始游戏'}
-              </button>
+              ) : (
+                <button type="button" onClick={() => void dispatch(startGame())} disabled={isBusy}>
+                  {isStarting ? 'Starting...' : '开始游戏'}
+                </button>
+              )}
             </section>
           )}
         </section>

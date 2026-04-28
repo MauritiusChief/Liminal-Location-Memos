@@ -2,6 +2,20 @@ interface ErrorResponse {
   error: string;
 }
 
+export class HttpError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'HttpError';
+    this.status = status;
+  }
+}
+
+export function isHttpError(error: unknown): error is HttpError {
+  return error instanceof HttpError;
+}
+
 async function parseError(response: Response): Promise<string> {
   const errorPayload = (await response.json().catch(() => ({ error: 'Request failed.' }))) as ErrorResponse;
   return errorPayload.error || 'Request failed.';
@@ -11,7 +25,7 @@ export async function getJson<T>(input: RequestInfo | URL, init?: RequestInit): 
   const response = await fetch(input, init);
 
   if (!response.ok) {
-    throw new Error(await parseError(response));
+    throw new HttpError(await parseError(response), response.status);
   }
 
   return response.json() as Promise<T>;
@@ -40,7 +54,7 @@ export async function streamNdjson<T>(
   const response = await fetch(input, init);
 
   if (!response.ok) {
-    throw new Error(await parseError(response));
+    throw new HttpError(await parseError(response), response.status);
   }
 
   if (!response.body) {

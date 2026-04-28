@@ -1,15 +1,23 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { isHttpError } from '../../api/http';
 import { fetchGameSession, streamGameStart, streamGameTurn } from '../../api/gameApi';
 import type { GameSessionSnapshot, GameStreamEvent } from '../../api/gameTypes';
 import type { AppDispatch, RootState } from '../../app/store';
-import { readStoredSessionId, writeStoredSessionId } from './sessionStorage';
+import { clearStoredSessionId, readStoredSessionId, writeStoredSessionId } from './sessionStorage';
 
 type RequestStatus = 'idle' | 'loading' | 'succeeded' | 'failed';
+type ChatRequestAction = 'start' | 'restore' | 'turn' | null;
 
 interface ChatRequestState {
   status: RequestStatus;
   error: string | null;
   activeBookStream: boolean;
+  activeAction: ChatRequestAction;
+}
+
+interface RestoreStoredSessionFailure {
+  message: string;
+  isMissingStoredSession: boolean;
 }
 
 interface ChatState {
@@ -33,6 +41,7 @@ const initialState: ChatState = {
     status: 'idle',
     error: null,
     activeBookStream: false,
+    activeAction: null,
   },
 };
 
@@ -41,20 +50,33 @@ export const hydrateStoredSessionId = createAsyncThunk<string | null>(
   async () => readStoredSessionId(),
 );
 
-export const restoreStoredSession = createAsyncThunk<GameSessionSnapshot, void, { state: RootState; rejectValue: string }>(
+export const restoreStoredSession = createAsyncThunk<
+  GameSessionSnapshot,
+  void,
+  { state: RootState; rejectValue: RestoreStoredSessionFailure }
+>(
   'chat/restoreStoredSession',
   async (_unused, { getState, rejectWithValue }) => {
     const { chat } = getState();
     const sessionId = chat.detectedStoredSessionId;
 
     if (!sessionId) {
-      return rejectWithValue('No stored session detected.');
+      return rejectWithValue({
+        message: 'No stored session detected.',
+        isMissingStoredSession: true,
+      });
     }
 
     try {
       return await fetchGameSession(sessionId);
     } catch (error) {
-      return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
+      const message = error instanceof Error ? error.message : 'Unknown error.';
+      return rejectWithValue({
+        message,
+        isMissingStoredSession: isHttpError(error)
+          ? error.status === 404
+          : message === 'Session not found.',
+      });
     }
   },
 );
@@ -73,10 +95,11 @@ const chatSlice = createSlice({
     setMessage(state, action: PayloadAction<string>) {
       state.message = action.payload;
     },
-    streamStarted(state) {
+    streamStarted(state, action: PayloadAction<Exclude<ChatRequestAction, null>>) {
       state.request.status = 'loading';
       state.request.error = null;
       state.request.activeBookStream = true;
+      state.request.activeAction = action.payload;
       state.streamingBookMessage = null;
     },
     playerMessageAccepted(state, action: PayloadAction<string>) {
@@ -96,34 +119,40 @@ const chatSlice = createSlice({
     bookStreamFinished(state) {
       state.request.activeBookStream = false;
       state.request.status = 'succeeded';
+      state.request.activeAction = null;
     },
     sessionCommitted(state, action: PayloadAction<GameSessionSnapshot>) {
       applyLoadedSession(state, action.payload);
       state.request.status = 'succeeded';
       state.request.activeBookStream = false;
+      state.request.activeAction = null;
       state.streamingBookMessage = null;
       state.message = '';
     },
     visualDescriptionUpdated(state, action: PayloadAction<GameSessionSnapshot>) {
       applyLoadedSession(state, action.payload);
       state.request.status = 'succeeded';
+      state.request.activeAction = null;
     },
     queuedNextTurn(state, action: PayloadAction<{ queuedMessage: string; session: GameSessionSnapshot }>) {
       applyLoadedSession(state, action.payload.session);
       state.message = '';
       state.request.status = 'succeeded';
       state.request.activeBookStream = false;
+      state.request.activeAction = null;
     },
     queueRejected(state, action: PayloadAction<{ message: string; session: GameSessionSnapshot }>) {
       applyLoadedSession(state, action.payload.session);
       state.request.status = 'failed';
       state.request.error = action.payload.message;
       state.request.activeBookStream = false;
+      state.request.activeAction = null;
     },
     streamFailed(state, action: PayloadAction<string>) {
       state.request.status = 'failed';
       state.request.error = action.payload;
       state.request.activeBookStream = false;
+      state.request.activeAction = null;
       state.streamingBookMessage = null;
     },
   },
@@ -136,14 +165,24 @@ const chatSlice = createSlice({
       .addCase(restoreStoredSession.pending, (state) => {
         state.request.status = 'loading';
         state.request.error = null;
+        state.request.activeAction = 'restore';
       })
       .addCase(restoreStoredSession.fulfilled, (state, action) => {
         state.request.status = 'succeeded';
+        state.request.activeAction = null;
         applyLoadedSession(state, action.payload);
       })
       .addCase(restoreStoredSession.rejected, (state, action) => {
         state.request.status = 'failed';
-        state.request.error = action.payload || 'Unknown error.';
+        state.request.activeAction = null;
+        if (action.payload?.isMissingStoredSession) {
+          state.detectedStoredSessionId = null;
+          clearStoredSessionId();
+          state.request.error = '读取存档失败，可能已被删除。';
+          return;
+        }
+
+        state.request.error = action.payload?.message || 'Unknown error.';
       });
   },
 });
@@ -185,7 +224,7 @@ export function startGame() {
       return;
     }
 
-    dispatch(streamStarted());
+    dispatch(streamStarted('start'));
 
     try {
       await streamGameStart((event) => {
@@ -222,7 +261,7 @@ export function submitChatMessage() {
       return;
     }
 
-    dispatch(streamStarted());
+    dispatch(streamStarted('turn'));
 
     try {
       await streamGameTurn({
