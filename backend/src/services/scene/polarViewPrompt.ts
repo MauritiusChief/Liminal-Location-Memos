@@ -2,6 +2,7 @@ import { AREA_TAG_KEYS, BUILDING_TAG_KEYS, POI_TAG_KEYS, ROAD_TAG_KEYS } from ".
 import { PolarView, PolarViewCluster, PolarViewLevel } from "./polarViewLabeled.js";
 import { trimTagValue } from "../utils.js";
 import { normalizeBearingDegrees } from "../geometry.js";
+import { isSignificantPoi } from "./polarViewOcclusion.js";
 
 type PolarFeatureCategory = "building" | "area" | "poi" | "line";
 type MarkedPolarViewFeature = PolarViewCluster["features"][number];
@@ -127,15 +128,25 @@ function buildPolarGroupBlock(
   }
 
   if (cluster.features.length === 1) {
+    const lines = buildPolarFeatureLines(level, firstFeature, playerOrientation);
+    if (lines.length === 0) {
+      return;
+    }
+
     return {
       title: firstFeature.baseLabel,
-      lines: buildPolarFeatureLines(level, firstFeature, playerOrientation),
+      lines,
     };
+  }
+
+  const lines = buildPolarClusterSummaryLines(level, cluster, playerOrientation);
+  if (lines.length === 0) {
+    return;
   }
 
   return {
     title: firstFeature.baseLabel,
-    lines: buildPolarClusterSummaryLines(level, cluster, playerOrientation),
+    lines,
   };
 }
 
@@ -166,13 +177,18 @@ function buildPolarClusterSummaryLines(
   const hint = shouldShowOmissionSummary
     ? `，共${cluster.memberCount}个要素，展示${resolvedRepresentativeFeatures.length}个代表要素，其余${omittedCount}个仅保留数量`
     : "";
-  const lines = [`* 群中心方向${formatRelativeDirection(cluster.centerBearingDegrees, playerOrientation)}${hint}`];
+  const renderedFeatureLines = resolvedRepresentativeFeatures.flatMap((anchor) =>
+    buildPolarFeatureLines(level, anchor, playerOrientation),
+  );
 
-  for (const anchor of resolvedRepresentativeFeatures) {
-    lines.push(...buildPolarFeatureLines(level, anchor, playerOrientation));
+  if (renderedFeatureLines.length === 0) {
+    return [];
   }
 
-  return lines;
+  return [
+    `* 群中心方向${formatRelativeDirection(cluster.centerBearingDegrees, playerOrientation)}${hint}`,
+    ...renderedFeatureLines,
+  ];
 }
 
 function buildPolarFeatureLines(
@@ -199,7 +215,10 @@ function buildPolarFeatureLines(
     ];
   }
   if (feature.category === 'poi') {
-    if ( level === 3) return [] // 在此处应用 level 3 的 POI 完全不显示的限制
+    if (level === 3 && !isSignificantPoi(feature.featureDetail.tags)) {
+      return []; // 在此处应用 level 3 的非显著 POI 完全不显示的限制
+    }
+
     return [
       ...baseLines,
       `  * 坐标${formatPolarSample(feature.centerPoint, playerOrientation)}`,
@@ -220,7 +239,7 @@ function buildPolarFeatureLines(
  * （上次是在 label 系统）
  * 1. level 1: 特定细节一览无余
  * 2. level 2: 对建筑来说，name brand height-level, 其余（POI、线、区域）仅基本信息
- * 3. level 3: 对建筑来说，height-level，其余（线、区域）仅基本信息（POI会被自动过滤）
+ * 3. level 3: 对建筑来说，height-level，其余（线、区域、显著POI）仅基本信息（不显著POI会被自动过滤）
  * @param feature
  * @returns
  */

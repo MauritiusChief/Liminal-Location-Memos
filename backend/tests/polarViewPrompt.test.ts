@@ -284,6 +284,96 @@ describe("buildPolarViewPrompt", () => {
     expect(prompt).toContain("最近点距离60m / 左(270°)");
   });
 
+  it("renders concise details for level 3 significant POIs", () => {
+    const polarView = buildPolarView({
+      3: [
+        buildCluster("cluster/antenna", 292, [
+          buildFeature({
+            featureId: "node/100",
+            osmId: 100,
+            category: "poi",
+            levelMarker: 3,
+            distanceMeters: 489,
+            bearingDegrees: 292,
+            baseLabel: "man_made:antenna",
+            tags: { man_made: "antenna" },
+          }),
+        ]),
+      ],
+    });
+
+    const prompt = buildPolarViewPrompt(polarView, 0);
+
+    expect(prompt).toContain("man_made:antenna:");
+    expect(prompt).toContain("* (id=node/100)");
+    expect(prompt).toContain("  * 坐标距离489m / 左偏前(292°)");
+    expect(prompt).not.toContain("  * man_made: antenna");
+  });
+
+  it("does not render ordinary level 3 POIs", () => {
+    const polarView = buildPolarView({
+      3: [
+        buildCluster("cluster/shop", 292, [
+          buildFeature({
+            featureId: "node/101",
+            osmId: 101,
+            category: "poi",
+            levelMarker: 3,
+            distanceMeters: 489,
+            bearingDegrees: 292,
+            baseLabel: "shop:convenience",
+            tags: { shop: "convenience" },
+          }),
+        ]),
+      ],
+    });
+
+    const prompt = buildPolarViewPrompt(polarView, 0);
+
+    expect(prompt).not.toContain("shop:convenience:");
+    expect(prompt).not.toContain("* (id=node/101)");
+    expect(prompt).not.toContain("  * 坐标距离489m / 左偏前(292°)");
+    expect(prompt).toContain("#### 等级3(300m~1km)：\n信息不足，未生成极坐标摘要");
+  });
+
+  it("renders multiple level 3 significant POI clusters without empty bodies", () => {
+    const polarView = buildPolarView({
+      3: [
+        buildCluster("cluster/antenna-a", 291, [
+          buildFeature({
+            featureId: "node/201",
+            osmId: 201,
+            category: "poi",
+            levelMarker: 3,
+            distanceMeters: 410,
+            bearingDegrees: 291,
+            baseLabel: "man_made:antenna",
+            tags: { man_made: "antenna" },
+          }),
+        ]),
+        buildCluster("cluster/antenna-b", 294, [
+          buildFeature({
+            featureId: "node/202",
+            osmId: 202,
+            category: "poi",
+            levelMarker: 3,
+            distanceMeters: 450,
+            bearingDegrees: 294,
+            baseLabel: "man_made:antenna",
+            tags: { man_made: "antenna" },
+          }),
+        ]),
+      ],
+    });
+
+    const prompt = buildPolarViewPrompt(polarView, 0);
+
+    expect(prompt.match(/man_made:antenna:/g)).toHaveLength(2);
+    expect(prompt).toContain("* (id=node/201)");
+    expect(prompt).toContain("* (id=node/202)");
+    expect(prompt).not.toMatch(/man_made:antenna:\n\n\n/);
+  });
+
   it("renders information-insufficient blocks when a level/category has no content", () => {
     const prompt = buildPolarViewPrompt(buildPolarView({}), 0);
 
