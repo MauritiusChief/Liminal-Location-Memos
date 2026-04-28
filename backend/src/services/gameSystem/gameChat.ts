@@ -7,17 +7,15 @@ import {
   GameSession,
   GameState,
   getRuntimeSession,
-  PlayerIndoorLocation,
   toClientGameSessionSnapshot,
   updateRuntimeSession,
 } from './gameSessionStore.js';
-import {chooseRandomIndoorLocation, listSectorIndoorRoomContexts} from './toolIndoorPosition.js';
+import {chooseRandomIndoorLocation} from './toolIndoorPosition.js';
 import { streamInitialBookMessage, streamRegularBookMessage } from './agentBookComposer.js';
 import { updateActiveVisualDescriptionRefs, upsertVisualDescriptions } from './agentVisualDescriber.js';
 import { fillBasicActiveIndoorLocations } from './toolActiveIndoorLocations.js';
 import { applyGameStateToolCalls, gameStateManager } from './agentStateManager.js';
-import { BuildingRecord, ensureBuildingRecord, findContainingBuildingFeatureId } from './buildingRecord.js';
-import { pickRandom } from '../utils.js';
+import { ensureBuildingRecord, findContainingBuildingFeatureId } from './buildingRecord.js';
 
 export type GameStreamEvent =
   | { type: 'player_message_accepted'; text: string }

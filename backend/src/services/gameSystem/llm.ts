@@ -137,7 +137,7 @@ export async function generateReplyFullMessages(
 }
 
 /**
- * 组装 generateReplyFullMessages() 所用的传统 messages 数组以及插入虚拟 refresh_world_state 函数的 call/return
+ * 组装 streamReplyFullMessages() 所用的传统 messages 数组以及插入虚拟 refresh_world_state 函数的 call/return
  * @param systemPrompt
  * @param gameMessages 被用于构造的 GameMessage 列，不一定是全部 message
  * @param statePrompt
@@ -184,6 +184,8 @@ function pushPlayerMessageWithStateChange(
   index: number,
 ): void {
   messages.push({ role: 'user', content: message.content });
+  // // MOCK
+  // message.stateChange = [{name: "move_player", arguments: {bearingDegrees: 3, distanceMeters: 5}}]
 
   if (!message.stateChange?.length) {
     return;

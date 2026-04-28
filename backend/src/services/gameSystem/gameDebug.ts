@@ -151,10 +151,10 @@ function formatDebugMessageSection(
 ): string {
   const title = `## ${index + 1}. ${message.role}`;
 
-  if (message.role === 'tool') {
+  if (message.role === 'tool' && message.tool_call_id === "synthetic_get_game_state") {
     const maskedToolMessage = {
       ...message,
-      content: '（已移除）',
+      content: '【synthetic_get_game_state 内容因可读性原因迁移到下方】',
     };
 
     return [

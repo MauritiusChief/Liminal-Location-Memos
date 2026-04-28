@@ -151,6 +151,8 @@ export async function gameStateManager(state: GameState): Promise<GameStateToolC
   try {
     // 获取 LLM 返回
     const response = await generateJsonReplySingleMessage(systemPrompt, message);
+    // // MOCK
+    // const response = {reply: '[]', reasoning: ''}
     // 解析返回
     const unparsedToolCall: any = JSON.parse(response.reply);
     let parsedToolCall: GameStateToolCall[]
