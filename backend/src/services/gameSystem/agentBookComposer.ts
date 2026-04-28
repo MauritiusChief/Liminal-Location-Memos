@@ -3,7 +3,7 @@ import { formatRelativeDirection } from "../scene/polarViewPrompt.js";
 import { buildSceneFromRequest, SceneObject } from "../scene/sceneObject.js";
 import { buildScenePrompt } from "../scene/scenePrompt.js";
 import { WorldState } from "./agentStateManager.js";
-import { BuildingRecord } from "./buildingRecord.js";
+import type { BuildingRecord } from "../buildingGeneration/buildingRecord.js";
 import { EmitGameEvent } from "./gameChat.js";
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
 import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, SectorVisualDescriptionRecord } from "./gameSessionStore.js";

@@ -20,7 +20,7 @@ import { buildScenePrompt } from '@/services/scene/scenePrompt.js';
 import { getRuntimeSession, toClientGameSessionSnapshot } from '@/services/gameSystem/gameSessionStore.js';
 import { streamGameStart, streamGameTurn, type GameStreamEvent } from '@/services/gameSystem/gameChat.js';
 import type { Response } from 'express';
-import { buildColocatedDebugBuildingSchemas, generateBuildingSchema } from '@/services/gameSystem/buildingSchema.js';
+import { buildColocatedDebugBuildingSchemas, generateBuildingSchema } from '@/services/buildingGeneration/buildingSchema.js';
 
 interface DebugLlmRequestBody {
   systemPrompt?: string;

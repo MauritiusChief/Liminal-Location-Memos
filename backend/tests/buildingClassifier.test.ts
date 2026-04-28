@@ -17,19 +17,19 @@ import {
   generateBuildingSchema,
   type PatternDistribution,
   type SectorDistributionSchem,
-} from "../src/services/gameSystem/buildingClassifier";
+} from "../src/services/buildingGeneration/buildingSchema";
 import {
   buildApartmentCategorySchemaFromDistribution,
   finishApartmentBuildingSchema,
-} from "../src/services/gameSystem/buildingApartment";
+} from "../src/services/buildingGeneration/buildingApartment";
 import {
   buildHouseCategorySchemaFromDistribution,
   finishHouseBuildingSchema,
-} from "../src/services/gameSystem/buildingHouse";
+} from "../src/services/buildingGeneration/buildingHouse";
 import {
   buildResidentialAccessoryCategorySchemaFromDistribution,
   finishResidentialAccessoryBuildingSchema,
-} from "../src/services/gameSystem/buildingHouseAccessory";
+} from "../src/services/buildingGeneration/buildingHouseAccessory";
 import type { DbBuildingFeatureDetailRow } from "../src/services/featureDetail";
 
 const mockedQuery = jest.mocked(query);

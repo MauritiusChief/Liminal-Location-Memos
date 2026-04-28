@@ -2,7 +2,7 @@ import { distanceBetweenCoordinates } from "../geometry.js";
 import { buildSceneFromRequest, SceneObject } from "../scene/sceneObject.js";
 import { buildScenePrompt } from "../scene/scenePrompt.js";
 import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatVisibleLocationPrompt } from "./agentBookComposer.js";
-import { BuildingRecord } from "./buildingRecord.js";
+import type { BuildingRecord } from "../buildingGeneration/buildingRecord.js";
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
 import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, SectorVisualDescriptionRecord } from "./gameSessionStore.js";
 import { generateJsonReplySingleMessage } from "./llm.js";

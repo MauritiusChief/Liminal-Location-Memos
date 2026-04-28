@@ -1,5 +1,5 @@
 import { degreesToRadians, EARTH_RADIUS_METERS, normalizeBearingDegrees, normalizeLongitude, radiansToDegrees } from "../geometry.js";
-import { findContainingBuildingFeatureId } from "./buildingRecord.js";
+import { findContainingBuildingFeatureId } from "../buildingGeneration/buildingRecord.js";
 import { GameState, Position } from "./gameSessionStore.js";
 
 /**

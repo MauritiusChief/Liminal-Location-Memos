@@ -73,7 +73,7 @@ jest.mock("../src/services/gameSystem/llm", () => ({
   streamReplySingleMessage: jest.fn(),
 }));
 
-jest.mock("../src/services/gameSystem/buildingClassifier", () => ({
+jest.mock("../src/services/buildingGeneration/buildingSchema", () => ({
   buildColocatedDebugBuildingSchemas: jest.fn(),
   generateBuildingSchema: jest.fn(),
 }));
@@ -82,7 +82,7 @@ import { createApp } from "../src/app";
 import {
   buildColocatedDebugBuildingSchemas,
   generateBuildingSchema,
-} from "../src/services/gameSystem/buildingClassifier";
+} from "../src/services/buildingGeneration/buildingSchema";
 import { streamReplySingleMessage } from "../src/services/gameSystem/llm";
 
 describe("/api/debug/llm stream route", () => {

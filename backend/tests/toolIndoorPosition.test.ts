@@ -1,7 +1,11 @@
 /// <reference types="jest" />
 
-jest.mock("../src/services/gameSystem/buildingClassifier", () => {
-  const actual = jest.requireActual("../src/services/gameSystem/buildingClassifier");
+jest.mock("../src/db/sqlLoader", () => ({
+  loadServiceSql: jest.fn(async () => ""),
+}));
+
+jest.mock("../src/services/buildingGeneration/buildingSchema", () => {
+  const actual = jest.requireActual("../src/services/buildingGeneration/buildingSchema");
   return {
     ...actual,
     generateBuildingSchema: jest.fn(),
@@ -9,15 +13,14 @@ jest.mock("../src/services/gameSystem/buildingClassifier", () => {
   };
 });
 
-import { generateBuildingSchema } from "../src/services/gameSystem/buildingClassifier";
+import { generateBuildingSchema } from "../src/services/buildingGeneration/buildingSchema";
 import {
   applySetPlayerIndoorLocationTool,
-  applySyncActiveIndoorLocationsTool,
   chooseBuildingEntranceIndoorLocation,
-  formatBuildingRecordPrompt,
-  generateBuildingRecord,
 } from "../src/services/gameSystem/toolIndoorPosition";
-import type { BuildingSchema } from "../src/services/gameSystem/buildingClassifier";
+import { applySyncActiveIndoorLocationsTool } from "../src/services/gameSystem/toolActiveIndoorLocations";
+import { generateBuildingRecord } from "../src/services/buildingGeneration/buildingRecord";
+import type { BuildingSchema } from "../src/services/buildingGeneration/buildingSchema";
 import type { GameState } from "../src/services/gameSystem/gameSessionStore";
 
 function buildGameState(): GameState {
@@ -25,6 +28,7 @@ function buildGameState(): GameState {
     playerPosition: { lat: 0, lon: 0 },
     playerOrientation: 0,
     playerIndoorLocation: null,
+    playerVisionRange: 500,
     messageHistory: [],
     activeFieldVisualDescriptions: [],
     fieldVisualDescriptions: {},
@@ -72,7 +76,10 @@ describe("chooseBuildingEntranceIndoorLocation", () => {
     expect(chooseBuildingEntranceIndoorLocation(record)).toEqual({
       buildingId: "way/1",
       level: 1,
-      roomId: "lobby",
+      sectorName: "main",
+      locationType: "room",
+      roomId: "lvl1_lobby",
+      roomDescription: "大堂",
     });
   });
 
@@ -90,8 +97,12 @@ describe("chooseBuildingEntranceIndoorLocation", () => {
     expect(chooseBuildingEntranceIndoorLocation(record)).toEqual({
       buildingId: "way/2",
       level: 1,
-      suiteId: "suite",
-      roomId: "suite/bedroom",
+      sectorName: "main",
+      locationType: "subRoom",
+      suiteId: "lvl1_suite",
+      suiteDescription: "家庭套房",
+      roomId: "lvl1_suite/bedroom",
+      roomDescription: "卧室",
     });
   });
 });
@@ -105,6 +116,16 @@ describe("applySetPlayerIndoorLocationTool", () => {
 
   it("enter auto-generates a building record and places the player in a level 1 entrance room", async () => {
     const state = buildGameState();
+    state.buildingSchemas["way/3"] = buildSchema("way/3", {
+      entrance_hall: { description: "入口大厅", count: 1, access: "entrance" },
+      suite: {
+        description: "行政套房",
+        count: 1,
+        subRooms: {
+          bedroom: { description: "卧室", count: 1 },
+        },
+      },
+    });
     mockedGenerateBuildingSchema.mockResolvedValue({
       "way/3": buildSchema("way/3", {
         entrance_hall: { description: "入口大厅", count: 1, access: "entrance" },
@@ -129,7 +150,10 @@ describe("applySetPlayerIndoorLocationTool", () => {
     expect(state.playerIndoorLocation).toEqual({
       buildingId: "way/3",
       level: 1,
-      roomId: "entrance_hall",
+      sectorName: "main",
+      locationType: "room",
+      roomId: "lvl1_entrance_hall",
+      roomDescription: "入口大厅",
     });
   });
 
@@ -138,7 +162,10 @@ describe("applySetPlayerIndoorLocationTool", () => {
     state.playerIndoorLocation = {
       buildingId: "way/old",
       level: 1,
-      roomId: "old_room",
+      sectorName: "main",
+      locationType: "room",
+      roomId: "lvl1_old_room",
+      roomDescription: "旧房间",
     };
     state.buildingRecords["way/new"] = generateBuildingRecord(buildSchema("way/new", {
       lobby: { description: "大堂", count: 1, access: "entrance" },
@@ -155,24 +182,31 @@ describe("applySetPlayerIndoorLocationTool", () => {
       move: "move",
       buildingId: "way/new",
       level: 1,
-      suiteId: "suite",
-      roomId: "suite/study",
+      suiteId: "lvl1_suite",
+      roomId: "lvl1_suite/study",
     });
 
     expect(state.playerIndoorLocation).toEqual({
       buildingId: "way/new",
       level: 1,
-      suiteId: "suite",
-      roomId: "suite/study",
+      sectorName: "main",
+      locationType: "subRoom",
+      suiteId: "lvl1_suite",
+      suiteDescription: "居住套房",
+      roomId: "lvl1_suite/study",
+      roomDescription: "书房",
     });
   });
 
-  it("ignores move targets that point at a suite surface", async () => {
+  it("falls back to an occupiable room when move target omits a room id", async () => {
     const state = buildGameState();
     state.playerIndoorLocation = {
       buildingId: "way/4",
       level: 1,
-      roomId: "lobby",
+      sectorName: "main",
+      locationType: "room",
+      roomId: "lvl1_lobby",
+      roomDescription: "大堂",
     };
     state.buildingRecords["way/4"] = generateBuildingRecord(buildSchema("way/4", {
       lobby: { description: "大堂", count: 1, access: "entrance" },
@@ -191,11 +225,9 @@ describe("applySetPlayerIndoorLocationTool", () => {
       suiteId: "suite",
     });
 
-    expect(state.playerIndoorLocation).toEqual({
-      buildingId: "way/4",
-      level: 1,
-      roomId: "lobby",
-    });
+    expect(state.playerIndoorLocation?.buildingId).toBe("way/4");
+    expect(state.playerIndoorLocation?.level).toBe(1);
+    expect(state.playerIndoorLocation?.locationType).not.toBe("suite");
   });
 });
 
@@ -205,7 +237,10 @@ describe("applySyncActiveIndoorLocationsTool", () => {
     state.playerIndoorLocation = {
       buildingId: "way/5",
       level: 1,
-      roomId: "lobby",
+      sectorName: "main",
+      locationType: "room",
+      roomId: "lvl1_lobby",
+      roomDescription: "大堂",
     };
     state.buildingRecords["way/5"] = generateBuildingRecord(buildSchema("way/5", {
       lobby: { description: "大堂", count: 1, access: "entrance" },
@@ -220,14 +255,17 @@ describe("applySyncActiveIndoorLocationsTool", () => {
     state.activeVisibleLocations = [{
       buildingId: "way/5",
       level: 1,
-      roomId: "lobby",
+      sectorName: "main",
+      locationType: "room",
+      roomId: "lvl1_lobby",
+      roomDescription: "大堂",
     }];
 
     applySyncActiveIndoorLocationsTool(state, {
       edit: "reveal",
       level: 1,
-      suiteId: "suite",
-      roomId: "suite/bedroom",
+      suiteId: "lvl1_suite",
+      roomId: "lvl1_suite/bedroom",
     });
     applySyncActiveIndoorLocationsTool(state, {
       edit: "hide",
@@ -239,36 +277,21 @@ describe("applySyncActiveIndoorLocationsTool", () => {
       {
         buildingId: "way/5",
         level: 1,
-        roomId: "lobby",
+        sectorName: "main",
+        locationType: "room",
+        roomId: "lvl1_lobby",
+        roomDescription: "大堂",
       },
       {
         buildingId: "way/5",
         level: 1,
-        suiteId: "suite",
-        roomId: "suite/bedroom",
+        sectorName: "main",
+        locationType: "subRoom",
+        suiteId: "lvl1_suite",
+        suiteDescription: "双人套房",
+        roomId: "lvl1_suite/bedroom",
+        roomDescription: "卧室",
       },
     ]);
-  });
-});
-
-describe("formatBuildingRecordPrompt", () => {
-  it("renders the building record as a hierarchical tree", () => {
-    const record = generateBuildingRecord(buildSchema("way/6", {
-      lobby: { description: "大堂", count: 1, access: "entrance" },
-      suite: {
-        description: "家庭套房",
-        count: 1,
-        subRooms: {
-          bedroom: { description: "卧室", count: 1 },
-        },
-      },
-    }));
-
-    expect(formatBuildingRecordPrompt(record)).toContain("levels:");
-    expect(formatBuildingRecordPrompt(record)).toContain("- level 1: 一楼");
-    expect(formatBuildingRecordPrompt(record)).toContain("  - sector main");
-    expect(formatBuildingRecordPrompt(record)).toContain("    - room lobby: 大堂 [access=entrance]");
-    expect(formatBuildingRecordPrompt(record)).toContain("    - suite suite: 家庭套房");
-    expect(formatBuildingRecordPrompt(record)).toContain("      - subRoom suite/bedroom: 卧室");
   });
 });

@@ -1,5 +1,5 @@
 import { FeatureId } from "../featureDetail.js";
-import { BuildingSector } from "./buildingRecord.js";
+import type { BuildingSector } from "../buildingGeneration/buildingRecord.js";
 import { GameState, PlayerVisibleLocation } from "./gameSessionStore.js";
 import { dedupeVisibleLocations, findLocationContext, listSectorVisibleLocations } from "./toolIndoorPosition.js";
 
