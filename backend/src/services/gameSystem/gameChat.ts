@@ -51,7 +51,6 @@ export async function streamGameStart(emit: EmitGameEvent): Promise<GameSession>
   const workingState = cloneGameState(session.gameState);
   await initializeOpeningIndoorState(workingState);
   fillBasicActiveIndoorLocations(workingState);
-  // updateActiveVisualDescriptionRefs(workingState);
 
   const openingMessage = await streamInitialBookMessage(workingState, emit);
 
@@ -164,8 +163,11 @@ async function executeTurnStream(
     // 先让专门的 agent 决定“这句玩家输入会触发哪些状态操作”。
     const toolCalls = await gameStateManager(workingState);
     await applyGameStateToolCalls(workingState, toolCalls);
-    // 在生成当前回合 Book 之前，刷新 prompt 依赖的派生状态
+    // 在生成当前回合 Book 之前，刷新 prompt 依赖的指向 Xxx Visual Description 的索引
     updateActiveVisualDescriptionRefs(workingState);
+    // 把 toolCalls 作为玩家输入的附带信息写入
+    const lastMessage = workingState.messageHistory[workingState.messageHistory.length - 1]
+    if (lastMessage.role === "player" && toolCalls.length > 0) lastMessage.stateChange = toolCalls
 
     const bookMessage = await streamRegularBookMessage(workingState, emit);
     workingState.messageHistory.push({

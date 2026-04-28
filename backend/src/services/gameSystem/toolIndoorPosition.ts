@@ -46,6 +46,7 @@ export async function applySetPlayerIndoorLocationTool(
     // 自动选取一楼入口
     const record = await ensureBuildingRecord(args.buildingId, state);
     state.playerIndoorLocation = chooseBuildingEntranceIndoorLocation(record);
+    console.log(`[${new Date().toISOString()}] 位置工具尝试抵达一楼入口，实际位置${state.playerIndoorLocation}`);
     return;
   }
 
@@ -64,12 +65,13 @@ export async function applySetPlayerIndoorLocationTool(
   if (!Number.isFinite(level) || !roomId) {
     // 自动选择 level 此楼层的垂直通道
     state.playerIndoorLocation = chooseLevelVirtialAccessIndoorLocation(args.buildingId, record.levels[level])
+    console.log(`[${new Date().toISOString()}] 位置工具尝试抵达${level}楼，实际位置${state.playerIndoorLocation}`);
     return;
   }
 
   const targetLocation = findLocationContext(record, level, suiteId, roomId)
   if (!targetLocation) return
-
+  console.log(`[${new Date().toISOString()}] 尝试使用位置工具，实际位置${state.playerIndoorLocation}`);
   state.playerIndoorLocation = targetLocation;
 }
 

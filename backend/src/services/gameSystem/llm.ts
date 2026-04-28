@@ -11,6 +11,8 @@ import {
 } from "./llmTypes.js";
 import { GameMessage } from "./gameSessionStore.js";
 
+type PlayerGameMessage = Extract<GameMessage, { role: 'player' }>;
+
 type ResponseWithReasoning = {
   reply: string;
   reasoning?: string;
@@ -147,10 +149,13 @@ export function buildFullMessagesRequestMessages(
   statePrompt: string,
 ): ChatMessage {
   const messages: DeepSeekMessage[] | OpenRouterMessage[] = [{ role: 'system', content: systemPrompt }];
-  gameMessages.forEach((message) => {
-    message.role === 'book'
-      ? messages.push({ role: 'assistant', content: message.content })
-      : messages.push({ role: 'user', content: message.content });
+  gameMessages.forEach((message, index) => {
+    if (message.role === 'book') {
+      messages.push({ role: 'assistant', content: message.content });
+      return;
+    }
+
+    pushPlayerMessageWithStateChange(messages, message, index);
   });
 
   const syntheticToolId = 'synthetic_get_game_state';
@@ -171,6 +176,33 @@ export function buildFullMessagesRequestMessages(
   });
 
   return messages;
+}
+
+function pushPlayerMessageWithStateChange(
+  messages: DeepSeekMessage[] | OpenRouterMessage[],
+  message: PlayerGameMessage,
+  index: number,
+): void {
+  messages.push({ role: 'user', content: message.content });
+
+  if (!message.stateChange?.length) {
+    return;
+  }
+
+  const syntheticToolId = `synthetic_player_state_change_${index}`;
+  messages.push({
+    role: 'assistant',
+    content: '',
+    reasoning_content: '',
+    tool_calls: [{
+      id: syntheticToolId, type: "function", function: { name: "apply_player_state_changes", arguments: "{}" }
+    }]
+  });
+  messages.push({
+    role: 'tool',
+    tool_call_id: syntheticToolId,
+    content: JSON.stringify(message.stateChange, null, 2),
+  });
 }
 
 //#region Provider 分支

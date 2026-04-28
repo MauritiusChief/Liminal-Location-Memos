@@ -135,26 +135,9 @@ export async function gameStateManager(state: GameState): Promise<GameStateToolC
     `> ${latestPlayerMessage?.content ?? ''}\n`,
     '---',
     '近期对话历史：',
-    messageHistory
-      .slice(Math.max(0, messageHistory.length - 6), messageHistory.length - 1)
-      .map((messageEntry) => {
-        const contentLines = messageEntry.content.split('\n')
-        if (messageEntry.role === 'book') {
-          return `> **游戏输出**：\n${contentLines.map(line => `> ${line}`).join('\n')}\n>`;
-        } else {
-          const toolCall = messageEntry.stateChange
-          const toolCallLines = toolCall
-            ? JSON.stringify(toolCall, null, 2).split('\n')
-            : ['（无游戏状态变化）']
-          return [
-            `> **玩家输入**：\n${contentLines.map(line => `> ${line}`).join('\n')}`,
-            '>',
-            `> **游戏状态变化：**：\n${toolCallLines.map(line => `> ${line}`).join('\n')}`,
-            '>',
-          ].join('\n');
-        }
-      })
-      .join('\n'),
+    formatGameStateManagerRecentMessageHistory(
+      messageHistory.slice(Math.max(0, messageHistory.length - 6), messageHistory.length - 1),
+    ),
     '---',
     worldStatePrompt,
   ].join('\n');
@@ -222,6 +205,33 @@ export async function applyGameStateToolCalls(state: GameState, toolCalls: GameS
 }
 
 //#region 内部逻辑
+
+export function formatGameStateManagerRecentMessageHistory(messageHistory: GameMessage[]): string {
+  return messageHistory
+    .map((messageEntry) => {
+      const contentLines = messageEntry.content.split('\n')
+      if (messageEntry.role === 'book') {
+        return `> **游戏输出**：\n${contentLines.map(line => `> ${line}`).join('\n')}\n>`;
+      }
+
+      const playerLines = [
+        `> **玩家输入**：\n${contentLines.map(line => `> ${line}`).join('\n')}`,
+        '>',
+      ];
+
+      if (!messageEntry.stateChange?.length) {
+        return playerLines.join('\n');
+      }
+
+      const toolCallLines = JSON.stringify(messageEntry.stateChange, null, 2).split('\n')
+      return [
+        ...playerLines,
+        `> **游戏状态变化**：\n${toolCallLines.map(line => `> ${line}`).join('\n')}`,
+        '>',
+      ].join('\n');
+    })
+    .join('\n');
+}
 
 export function pickWorldState(state: GameState): WorldState {
   const {playerPosition, playerOrientation, playerIndoorLocation, playerVisionRange, activeVisibleLocations} = state
