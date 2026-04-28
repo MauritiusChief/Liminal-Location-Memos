@@ -3,16 +3,18 @@
 ## 重构计划
 
 * backend/routes/api.ts 拆分为小的文件，不要全挤在一起
-* 拆分 gameChat 到 Visual Description、Game State
 
 ## 近期计划
 
-* World State 需存储 Game State Tool 运行记录
 * 前端继续游戏、重开游戏时的UI bug
 * 添加通过海拔高度 API 与 ele 标签计算建筑实际高度的功能
 
 * Game State Manager 无法得知建筑的具体范围，如果无意将经纬度移动到了建筑内/建筑外，需要结合本意来调整经纬度
   * 暂定为沿着移动方向往前往后探索若干次，如果无意出错则选出最合适的探索结果作为替代的新经纬度
+
+* Book Composer 提示不需要重复对话历史里和 Visual Description 里已有的信息
+
+* 添加物品与容器生成功能后，记得提醒 Visual Describer 不要把物品信息也当做细节信息了
 
 * 添加建筑生成功能，具体在 gameSystem/_note 中
   * 公寓添加公寓设施的配套生成逻辑
@@ -35,6 +37,7 @@
   * 画的图仅有点和线，点的话放一个图标表示建筑
 
 * 添加渐进式披露或者路由者，减缓单次对话负担
+* 用简单路由者决定是否启用哪个 Visual Describer，而不是全凭自觉
 
 * gameChat 当中把 Scene Object 也加入流转，避免反复 sql 消耗性能
 
