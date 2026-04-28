@@ -47,12 +47,12 @@ export async function streamInitialBookMessage(
   const {playerVisionRange, playerOrientation, playerIndoorLocation} = playerState
 
   // TODO 目前暂时做成根据是否有室内位置返回布尔值，以后情况复杂了再改
-  const openingRouteer = Boolean(playerIndoorLocation);
-  const sceneObject = openingRouteer
+  const openingRouter = Boolean(playerIndoorLocation);
+  const sceneObject = openingRouter
     ? undefined
     : await buildSceneFromRequest({ lat, lon, radius: playerVisionRange }, playerOrientation);
   const playerStatePrompt = toPlayerStatePrompt(playerState, sceneObject);
-  const systemPrompt = openingRouteer
+  const systemPrompt = openingRouter
     ? INDOOR_INITIAL_BOOK_MESSAGE_SYSTEM
     : OUTDOOR_INITIAL_BOOK_MESSAGE_SYSTEM;
   await writeGameDebugRequest({

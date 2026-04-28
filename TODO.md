@@ -6,6 +6,7 @@
 
 ## 近期计划
 
+* Scene Prompt 中为什么 man_made:antenna 没有内容？
 * 前端继续游戏、重开游戏时的UI bug
 * 添加通过海拔高度 API 与 ele 标签计算建筑实际高度的功能
 

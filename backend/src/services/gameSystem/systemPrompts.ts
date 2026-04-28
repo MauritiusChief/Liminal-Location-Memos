@@ -94,7 +94,7 @@ export const FIELD_VISUAL_DESCRIPTION_SYSTEM = `
 - 细节记录2
 ...
 或者仅输出固定字符串：
-\`__NO_UPDATE__\`
+__NO_UPDATE__
 `
 
 export const EXTERIOR_VISUAL_DESCRIPTION_SYSTEM = `
@@ -135,7 +135,7 @@ export const SECTOR_VISUAL_DESCRIPTION_SYSTEM = `
 判断要求：
 - 只记录显著的、明确的事实性细节，不要记录游戏内部标记信息。
 - 只记录室内摘要数据摘要不能体现的细节。
-- 只记录可以明确对应到当前楼层区域的细节，不能确定的内容不要写入最终输出。
+- 只记录可以明确对应到当前楼层区域的细节，不要记录明确属于室外的细节。
 - 有时候玩家会对周遭环境做出改变，导致事实性细节记录过时，则需要更新过时的记录，同时保留尚未过时的记录在输出中。
 - 若旧记录中包含与当前文本或者数据摘要无关的记录，这些记录应当保留在最后的输出中。
 
@@ -144,7 +144,7 @@ export const SECTOR_VISUAL_DESCRIPTION_SYSTEM = `
 - 细节记录2
 ...
 或者仅输出固定字符串：
-\`__NO_UPDATE__\`
+__NO_UPDATE__
 `
 
 export const REGULAR_BOOK_MESSAGE_SYSTEM = `

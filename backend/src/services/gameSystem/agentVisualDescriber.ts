@@ -45,28 +45,54 @@ export async function upsertVisualDescriptions(state: GameState, bookMessage: st
   const {playerVisionRange, playerOrientation} = playerState
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: playerVisionRange}, playerOrientation);
 
-  // TODO 一次性生成所有 VD 可能不稳定
-  const [
-    fieldVD,
-    exteriorVD,
-    sectorVD,
-  ] = await Promise.all([
-    extractFieldVisualDescriptions(
-      playerState,
-      bookMessage,
-      sceneObject,
-    ),
-    extractExteriorVisualDescriptions(
-      playerState,
-      bookMessage,
-      sceneObject,
-    ),
-    extractSectorVisualDescriptions(
-      playerState,
-      bookMessage,
-    ),
-  ])
-  const extracted = {field: fieldVD, exterior: exteriorVD, sector: sectorVD}
+  // TODO 目前暂时做成根据是否有室内位置返回布尔值，以后情况复杂了再改
+  const visualDescribeRouter = Boolean(state.playerIndoorLocation);
+  const extracted: Record<string, any> = {}
+  // 只在室内分支需要 sector VD
+  if (visualDescribeRouter) {
+    const [
+      fieldVD,
+      exteriorVD,
+      sectorVD,
+    ] = await Promise.all([
+      extractFieldVisualDescriptions(
+        playerState,
+        bookMessage,
+        sceneObject,
+      ),
+      extractExteriorVisualDescriptions(
+        playerState,
+        bookMessage,
+        sceneObject,
+      ),
+      extractSectorVisualDescriptions(
+        playerState,
+        bookMessage,
+      ),
+    ])
+    extracted.field = fieldVD
+    extracted.exterior = exteriorVD
+    extracted.sector = sectorVD
+  } else { // 否则默认不需要 sector VD
+    const [
+      fieldVD,
+      exteriorVD,
+    ] = await Promise.all([
+      extractFieldVisualDescriptions(
+        playerState,
+        bookMessage,
+        sceneObject,
+      ),
+      extractExteriorVisualDescriptions(
+        playerState,
+        bookMessage,
+        sceneObject,
+      ),
+    ])
+    extracted.field = fieldVD
+    extracted.exterior = exteriorVD
+    extracted.sector = NO_VISUAL_DESCRIPTION_UPDATE
+  }
 
   const now = new Date().toISOString();
 
