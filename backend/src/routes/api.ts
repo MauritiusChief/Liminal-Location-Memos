@@ -12,7 +12,11 @@ import {
   buildPolarView,
   type PolarView,
 } from '@/services/scene/polarViewLabeled.js';
-import { applyVisualFilter } from '@/services/scene/polarViewFilter.js';
+import {
+  applyVisualFilter,
+  DEFAULT_POLAR_VIEW_FILTER_ID,
+  type PolarViewFilterId,
+} from '@/services/scene/polarViewFilter.js';
 import { buildLeveledPolarView, applyOcclusion } from '@/services/scene/polarViewOcclusion.js';
 import { buildSceneFromRequest } from '@/services/scene/sceneObject.js';
 import { streamReplySingleMessage } from '@/services/gameSystem/llm.js';
@@ -44,6 +48,7 @@ interface DebugBuildingSchemaRequestBody {
 
 interface OrientedDebugRequestBody extends Partial<RangedPosition> {
   playerOrientation?: number;
+  filterId?: unknown;
 }
 
 const DEBUG_LLM_SYSTEM_PROMPT_PLACEHOLDER = '[debug system prompt placeholder]';
@@ -98,7 +103,7 @@ function buildDebugPolarView(
   const occluded = applyOcclusion(levelMarked)
   const clusterMarked = applyClusterMarkder(occluded);
   const clustered = buildPolarView(clusterMarked);
-  return applyVisualFilter('naked_eye', clustered);
+  return applyVisualFilter(DEFAULT_POLAR_VIEW_FILTER_ID, clustered);
   // return clustered
 }
 
@@ -171,6 +176,19 @@ function parseOptionalOrientation(body: { playerOrientation?: unknown }): { valu
   }
 
   return { value: playerOrientation };
+}
+
+function parseOptionalFilterId(body: { filterId?: unknown }): { value: PolarViewFilterId } | { error: string } {
+  const { filterId } = body;
+  if (typeof filterId === 'undefined') {
+    return { value: DEFAULT_POLAR_VIEW_FILTER_ID };
+  }
+
+  if (filterId === 'glance' || filterId === 'stare') {
+    return { value: filterId };
+  }
+
+  return { error: 'filterId must be one of: glance, stare.' };
 }
 
 function parsePosition(body: Partial<RangedPosition>) {
@@ -511,6 +529,7 @@ apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
 
   const {value, error} = parsePosition(body);
   const orientationParsed = parseOptionalOrientation(body);
+  const filterParsed = parseOptionalFilterId(body);
   const radius = body.radius;
 
   if (error) {
@@ -519,6 +538,10 @@ apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
   }
   if ('error' in orientationParsed) {
     response.status(400).json({ error: orientationParsed.error });
+    return;
+  }
+  if ('error' in filterParsed) {
+    response.status(400).json({ error: filterParsed.error });
     return;
   }
 
@@ -531,8 +554,9 @@ apiRouter.post('/debug/db/scene-prompt-preview', async (request, response) => {
     const {lat, lon} = value
     const rangedPosition: RangedPosition = {lat, lon, radius}
     const playerOrientation = orientationParsed.value;
+    const filterId = filterParsed.value;
     // console.log(rangedPosition);
-    const sceneObject = await buildSceneFromRequest(rangedPosition, playerOrientation)
+    const sceneObject = await buildSceneFromRequest(rangedPosition, playerOrientation, filterId)
     // TODO 测试分类函数
     const {microGrid, polarView} = sceneObject
     const featureIds = [

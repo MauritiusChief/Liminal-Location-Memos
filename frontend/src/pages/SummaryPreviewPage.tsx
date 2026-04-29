@@ -4,6 +4,7 @@ import {
   fetchSummaryPreview,
   selectSummaryPreviewState,
   setCoordinates,
+  setFilterId,
   setOrientation,
   setRadius,
 } from '../features/summaryPreview/summaryPreviewSlice';
@@ -59,6 +60,17 @@ export function SummaryPreviewPage() {
         onChange={(event) => dispatch(setOrientation(event.target.value))}
       />
       <br />
+      <label htmlFor="summaryPreviewFilter">Polar filter</label>
+      <br />
+      <select
+        id="summaryPreviewFilter"
+        value={form.filterId}
+        onChange={(event) => dispatch(setFilterId(event.target.value as 'glance' | 'stare'))}
+      >
+        <option value="glance">glance</option>
+        <option value="stare">stare</option>
+      </select>
+      <br />
       <br />
       <button type="button" onClick={() => void handleRequest()} disabled={request.status === 'loading'}>
         {request.status === 'loading' ? 'Loading...' : 'Generate Summary'}
@@ -67,6 +79,9 @@ export function SummaryPreviewPage() {
       <h3>Result</h3>
       <p>
         Current radius: {(request.result?.radius ?? form.radius) || 'n/a'}m
+      </p>
+      <p>
+        Current filter: {form.filterId}
       </p>
       <button type="button" onClick={() => void handleCopy()} disabled={!request.result?.scenePrompt}>
         {copyStatus === 'copied' ? 'Copied' : 'Copy Summary'}

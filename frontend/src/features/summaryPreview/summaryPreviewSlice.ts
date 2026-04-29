@@ -1,5 +1,9 @@
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { debugScenePromptResponse, loadScenePromptPreview } from '../../api/sceneDebugApi';
+import {
+  debugScenePromptResponse,
+  loadScenePromptPreview,
+  type ScenePromptPreviewFilterId,
+} from '../../api/sceneDebugApi';
 import type { RootState } from '../../app/store';
 
 /**
@@ -12,6 +16,7 @@ interface SummaryPreviewFormState {
   coordinates: string;
   radius: string;
   orientation: string;
+  filterId: ScenePromptPreviewFilterId;
 }
 
 interface AsyncRequestState<T> {
@@ -30,6 +35,7 @@ const initialState: SummaryPreviewState = {
     coordinates: '39.99952202640245, -83.01270469750418',
     radius: '',
     orientation: '0',
+    filterId: 'glance',
   },
   request: {
     status: 'idle',
@@ -60,7 +66,7 @@ function parseCoordinates(coordinates: string): { lat: number; lon: number } | {
 
 export const fetchSummaryPreview = createAsyncThunk<debugScenePromptResponse, SummaryPreviewFormState, { rejectValue: string }>(
   'summaryPreview/fetchSummaryPreview',
-  async ({ coordinates, radius, orientation }, { rejectWithValue }) => {
+  async ({ coordinates, radius, orientation, filterId }, { rejectWithValue }) => {
     const parsed = parseCoordinates(coordinates);
     if ('error' in parsed) {
       return rejectWithValue(parsed.error);
@@ -85,6 +91,7 @@ export const fetchSummaryPreview = createAsyncThunk<debugScenePromptResponse, Su
         ...parsed,
         radius: parsedRadius,
         playerOrientation: normalizeOrientationDegrees(parsedOrientation),
+        filterId,
       });
     } catch (error) {
       return rejectWithValue(error instanceof Error ? error.message : 'Unknown error.');
@@ -104,6 +111,9 @@ const summaryPreviewSlice = createSlice({
     },
     setOrientation(state, action: PayloadAction<string>) {
       state.form.orientation = action.payload;
+    },
+    setFilterId(state, action: PayloadAction<ScenePromptPreviewFilterId>) {
+      state.form.filterId = action.payload;
     },
   },
   extraReducers: (builder) => {
@@ -125,7 +135,7 @@ const summaryPreviewSlice = createSlice({
 
 export const selectSummaryPreviewState = (state: RootState) => state.summaryPreview;
 
-export const { setCoordinates, setRadius, setOrientation } = summaryPreviewSlice.actions;
+export const { setCoordinates, setRadius, setOrientation, setFilterId } = summaryPreviewSlice.actions;
 export default summaryPreviewSlice.reducer;
 
 function normalizeOrientationDegrees(degrees: number): number {

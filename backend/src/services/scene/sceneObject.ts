@@ -5,7 +5,7 @@ import { fetchFeatureDetailsFromDb } from "../featureDetail.js";
 import { buildMicroGrid, fetchMicroGridFromDb } from "./microGridObject.js";
 import { buildPolarViewFeature, fetchScenePolarFeaturesFromDb } from "./polarViewObject.js";
 import { applyOcclusion, buildLeveledPolarView } from "./polarViewOcclusion.js";
-import { applyVisualFilter } from "./polarViewFilter.js";
+import { applyVisualFilter, DEFAULT_POLAR_VIEW_FILTER_ID, PolarViewFilterId } from "./polarViewFilter.js";
 import { ensureOsmCoverageForRequest } from "../osmNormalization/osmGate.js";
 
 /**
@@ -24,7 +24,11 @@ export interface SceneObject {
  * @param request
  * @returns
  */
-export async function buildSceneFromRequest(request: RangedPosition, playerOrientation: number = 0): Promise<SceneObject> {
+export async function buildSceneFromRequest(
+  request: RangedPosition,
+  playerOrientation: number = 0,
+  filterId: PolarViewFilterId = DEFAULT_POLAR_VIEW_FILTER_ID,
+): Promise<SceneObject> {
   await ensureOsmCoverageForRequest(request);
 
   const [featureDetails, microGridRecords, polarRecords] = await Promise.all([
@@ -45,8 +49,7 @@ export async function buildSceneFromRequest(request: RangedPosition, playerOrien
   const occluded = applyOcclusion(levelMarked)
   const clusterMarked = applyClusterMarkder(occluded);
   const clustered = buildPolarView(clusterMarked);
-  // TODO 硬编码应用 naked_eye 过滤，以后再添加可调的过滤
-  const polarView = applyVisualFilter('naked_eye', clustered);
+  const polarView = applyVisualFilter(filterId, clustered);
 
   return {
     largestLevel: polarView ? getLargestLevel(polarView) : 0,
