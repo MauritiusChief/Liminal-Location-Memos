@@ -51,7 +51,7 @@ jest.mock("../src/services/osmNormalization/osmGate", () => {
   };
 });
 
-jest.mock("../src/services/gameSystem/buildingRecord", () => {
+jest.mock("../src/services/buildingGeneration/buildingRecord", () => {
   return {
     ensureBuildingRecord: jest.fn(),
     findContainingBuildingFeatureId: jest.fn(),
@@ -59,7 +59,7 @@ jest.mock("../src/services/gameSystem/buildingRecord", () => {
 });
 
 import { buildSceneFromRequest } from "../src/services/scene/sceneObject";
-import { findContainingBuildingFeatureId } from "../src/services/gameSystem/buildingRecord";
+import { findContainingBuildingFeatureId } from "../src/services/buildingGeneration/buildingRecord";
 import {
   generateJsonReplySingleMessage,
   generateReplySingleMessage,
@@ -259,8 +259,8 @@ describe("streamGameTurn", () => {
       "visual_description_done",
     ]);
     expect(mockedUpdateRuntimeSession).toHaveBeenCalledTimes(2);
-    expect(mockedWriteGameDebugRequest).toHaveBeenCalledTimes(5);
-    expect(mockedWriteGameDebugResult).toHaveBeenCalledTimes(5);
+    expect(mockedWriteGameDebugRequest).toHaveBeenCalledTimes(4);
+    expect(mockedWriteGameDebugResult).toHaveBeenCalledTimes(4);
     expect(mockedWriteGameDebugRequest.mock.invocationCallOrder[0]).toBeLessThan(
       mockedGenerateJsonReplySingleMessage.mock.invocationCallOrder[0],
     );

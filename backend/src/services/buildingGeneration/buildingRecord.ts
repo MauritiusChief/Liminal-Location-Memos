@@ -1,7 +1,7 @@
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { pickRandom } from "../utils.js";
 import { BuildingSchema, ensureBuildingSchema, generateBuildingSchema, RoomSchema, SuiteSchema } from "./buildingSchema.js";
-import { GameState, Position } from "./gameSessionStore.js";
+import { GameState, Position } from "../gameSystem/gameSessionStore.js";
 import { query } from "@/db/client.js";
 import { DbBuildingFeatureDetailRow, FeatureId, mapBuildingDetailRowToFeatureDetail } from "../featureDetail.js";
 
@@ -92,7 +92,7 @@ export function generateBuildingRecord(schema: BuildingSchema): BuildingRecord {
   };
 }
 
-const fetchBuildingTagsByPositionSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingTagsByPosition.sql");
+const fetchBuildingTagsByPositionSqlPromise = loadServiceSql("buildingGeneration/sql/fetchBuildingTagsByPosition.sql");
 
 /**
  * 根据玩家坐标查找所处建筑。

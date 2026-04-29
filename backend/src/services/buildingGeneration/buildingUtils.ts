@@ -212,7 +212,7 @@ function computeResidentialDistrictWeights(
   return { residential, nonResidential };
 }
 
-const fetchHouseDetermingFactorSqlPromise = loadServiceSql("gameSystem/sql/fetchHouseDetermingFactor.sql");
+const fetchHouseDetermingFactorSqlPromise = loadServiceSql("buildingGeneration/sql/fetchHouseDetermingFactor.sql");
 
 /**
  * 获取判断住宅细分类型所需的周遭建筑数据与建筑本身数据。
@@ -244,7 +244,7 @@ export async function fetchHouseDetermingFactor(candidate: BuildingCandidate): P
   };
 }
 
-const fetchNearbyParkingSignalSqlPromise = loadServiceSql("gameSystem/sql/fetchNearbyParkingSignal.sql");
+const fetchNearbyParkingSignalSqlPromise = loadServiceSql("buildingGeneration/sql/fetchNearbyParkingSignal.sql");
 
 /**
  * 决定某一已确定是住宅区的地物周遭是否有停车场所

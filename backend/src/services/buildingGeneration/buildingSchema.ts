@@ -1,7 +1,7 @@
 import { query } from "@/db/client.js";
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { DbBuildingFeatureDetailRow, FeatureDetail, FeatureId, mapBuildingDetailRowToFeatureDetail } from "@/services/featureDetail.js";
-import { GameState, Position } from "./gameSessionStore.js";
+import { GameState, Position } from "../gameSystem/gameSessionStore.js";
 import { pickRandom, trimTagValue } from "../utils.js";
 import { APARTMENT_CATEGORY, buildApartmentCategorySchemaFromDistribution, finishApartmentBuildingSchema, isAmbiguousApartmentCategory, selectApartmentPatternKey } from "./buildingApartment.js";
 import { APARTMENT_UTILITY_CATEGORY } from "./buildingApartmentUtility.js";
@@ -580,10 +580,10 @@ function finishBuildingSchema(
 
 //#region 共用逻辑函数
 
-const fetchBuildingFeatureDetailByIdSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingFeatureDetailById.sql");
-const fetchBuildingRelationMemberDetailsSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingRelationMemberDetails.sql");
-const fetchBuildingRoadKindsSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingRoadKinds.sql");
-const fetchBuildingCoveringAreasSqlPromise = loadServiceSql("gameSystem/sql/fetchBuildingCoveringAreas.sql");
+const fetchBuildingFeatureDetailByIdSqlPromise = loadServiceSql("buildingGeneration/sql/fetchBuildingFeatureDetailById.sql");
+const fetchBuildingRelationMemberDetailsSqlPromise = loadServiceSql("buildingGeneration/sql/fetchBuildingRelationMemberDetails.sql");
+const fetchBuildingRoadKindsSqlPromise = loadServiceSql("buildingGeneration/sql/fetchBuildingRoadKinds.sql");
+const fetchBuildingCoveringAreasSqlPromise = loadServiceSql("buildingGeneration/sql/fetchBuildingCoveringAreas.sql");
 
 const FETCH_ROAD_RADIUS_METERS = 90;
 

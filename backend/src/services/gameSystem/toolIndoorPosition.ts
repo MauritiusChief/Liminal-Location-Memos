@@ -1,6 +1,6 @@
 import { FeatureId } from "../featureDetail.js";
 import { GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position } from "./gameSessionStore.js";
-import { BuildingLevel, BuildingRecord, BuildingRoom, BuildingSector, ensureBuildingRecord } from "./buildingRecord.js";
+import { BuildingLevel, BuildingRecord, BuildingRoom, BuildingSector, ensureBuildingRecord } from "../buildingGeneration/buildingRecord.js";
 import { pickRandom } from "../utils.js";
 
 /**
@@ -64,7 +64,7 @@ export async function applySetPlayerIndoorLocationTool(
   const suiteId = typeof args?.suiteId === "string" && args.suiteId ? args.suiteId : undefined;
   if (!Number.isFinite(level) || !roomId) {
     // 自动选择 level 此楼层的垂直通道
-    state.playerIndoorLocation = chooseLevelVirtialAccessIndoorLocation(args.buildingId, record.levels[level])
+    state.playerIndoorLocation = chooseLevelVirtialAccessIndoorLocation(targetBuildingId, record.levels[level])
     console.log(`[${new Date().toISOString()}] 位置工具尝试抵达${level}楼，实际位置${state.playerIndoorLocation}`);
     return;
   }
@@ -155,7 +155,8 @@ export function chooseBuildingEntranceIndoorLocation(record: BuildingRecord): Pl
  * @returns
  */
 export function chooseLevelVirtialAccessIndoorLocation(featureId: FeatureId, level: BuildingLevel): PlayerIndoorLocation {
-  const accessRooms = Object.values(level)
+  const accessRooms = Object.values(level.sectors)
+    .flatMap((sector) => listSectorIndoorRoomContexts(level.level, sector))
     .filter((entry): entry is IndoorRoomContext & { roomId: string} => (
       entry.locationType === "room"
       && Boolean(entry.roomId)
@@ -165,7 +166,7 @@ export function chooseLevelVirtialAccessIndoorLocation(featureId: FeatureId, lev
     const chosen = pickRandom(accessRooms);
     return {
       buildingId: featureId,
-      level: 1,
+      level: level.level,
       sectorName: chosen.sectorName,
       locationType: chosen.locationType,
       roomId: chosen.roomId,

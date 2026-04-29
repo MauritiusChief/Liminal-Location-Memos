@@ -1,10 +1,10 @@
 /// <reference types="jest" />
 
-jest.mock("../src/services/gameSystem/buildingRecord", () => ({
+jest.mock("../src/services/buildingGeneration/buildingRecord", () => ({
   findContainingBuildingFeatureId: jest.fn(),
 }));
 
-import { findContainingBuildingFeatureId } from "../src/services/gameSystem/buildingRecord";
+import { findContainingBuildingFeatureId } from "../src/services/buildingGeneration/buildingRecord";
 import {
   applyMovePlayerTool,
   listIndoorAdjustmentCandidates,

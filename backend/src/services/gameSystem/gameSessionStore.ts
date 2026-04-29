@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { BuildingSchema } from './buildingSchema.js';
+import type { BuildingSchema } from '../buildingGeneration/buildingSchema.js';
 import { FeatureId } from '../featureDetail.js';
-import { BuildingRecord } from './buildingRecord.js';
+import type { BuildingRecord } from '../buildingGeneration/buildingRecord.js';
 import { GameStateToolCall } from './agentStateManager.js';
 
 export interface Position {
