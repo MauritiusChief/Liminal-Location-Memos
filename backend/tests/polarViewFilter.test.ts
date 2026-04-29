@@ -12,11 +12,13 @@ jest.mock("@/routes/apiTypes.js", () => ({}), { virtual: true });
 
 import type { FeatureDetail } from "../src/services/featureDetail";
 import type { PolarView } from "../src/services/scene/polarViewLabeled";
+import type { ContainedPoiReference } from "../src/services/osmNormalization/osmNormalizer";
 import { applyVisualFilter } from "../src/services/scene/polarViewFilter";
 
 function buildDetail(
   category: FeatureDetail["category"],
   tags: Record<string, string> = {},
+  containedPoisReferences?: ContainedPoiReference[],
 ): FeatureDetail {
   return {
     featureId: `${category}/detail`,
@@ -24,6 +26,7 @@ function buildDetail(
     category,
     geometryType: category === "line" ? "LineString" : "Polygon",
     tags,
+    containedPoisReferences,
   };
 }
 
@@ -37,6 +40,7 @@ function buildFeature(input: {
   clockwiseEarlyDegree?: number;
   angleWidthDegrees?: number;
   tags?: Record<string, string>;
+  containedPoisReferences?: ContainedPoiReference[];
 }): PolarView["levels"][number]["clusters"][number]["features"][number] {
   const levelMarker = input.levelMarker || 1;
   const bearingDegrees = input.bearingDegrees ?? 15;
@@ -54,7 +58,7 @@ function buildFeature(input: {
     osmId: input.osmId,
     category: input.category,
     geometryType: input.category === "line" ? "LineString" : "Polygon",
-    featureDetail: buildDetail(input.category, input.tags),
+    featureDetail: buildDetail(input.category, input.tags, input.containedPoisReferences),
     centerPoint: sample,
     nearestPoint: sample,
     farthestPoint: { ...sample, distanceMeters: distanceMeters + 20 },
@@ -108,17 +112,16 @@ describe("applyVisualFilter", () => {
     jest.restoreAllMocks();
   });
 
-  it("falls back to naked_eye when filter id is unknown", () => {
+  it("falls back to glance when filter id is unknown", () => {
     const polarView = buildPolarView({
       1: [buildCluster("cluster/building/include", [
-        buildFeature({ featureId: "building/include", osmId: 1, category: "building", angleWidthDegrees: 12 }),
+        buildFeature({ featureId: "building/include", osmId: 1, category: "building", angleWidthDegrees: 7 }),
       ])],
     });
 
     const filtered = applyVisualFilter("missing_filter", polarView);
 
-    expect(getLevelClusters(filtered, 1)).toHaveLength(1);
-    expect(getLevelClusters(filtered, 1)[0]?.features[0]?.featureId).toBe("building/include");
+    expect(getLevelClusters(filtered, 1)).toHaveLength(0);
   });
 
   it("keeps significant buildings even when angle and cluster count are small", () => {
@@ -134,7 +137,7 @@ describe("applyVisualFilter", () => {
       ])],
     });
 
-    const filtered = applyVisualFilter("naked_eye", polarView);
+    const filtered = applyVisualFilter("stare", polarView);
 
     expect(getLevelClusters(filtered, 1)).toHaveLength(1);
     expect(getLevelClusters(filtered, 1)[0]?.features[0]?.featureId).toBe("building/significant");
@@ -153,7 +156,7 @@ describe("applyVisualFilter", () => {
       ])],
     });
 
-    const filtered = applyVisualFilter("naked_eye", polarView);
+    const filtered = applyVisualFilter("stare", polarView);
 
     expect(getLevelClusters(filtered, 1)).toHaveLength(1);
     expect(getLevelClusters(filtered, 1)[0]?.features[0]?.featureId).toBe("poi/significant");
@@ -166,7 +169,7 @@ describe("applyVisualFilter", () => {
       ])],
     });
 
-    const filtered = applyVisualFilter("naked_eye", polarView);
+    const filtered = applyVisualFilter("stare", polarView);
 
     expect(getLevelClusters(filtered, 1)).toHaveLength(1);
     expect(getLevelClusters(filtered, 1)[0]?.features[0]?.featureId).toBe("area/include");
@@ -180,7 +183,7 @@ describe("applyVisualFilter", () => {
       ])],
     });
 
-    const filtered = applyVisualFilter("naked_eye", polarView);
+    const filtered = applyVisualFilter("stare", polarView);
 
     expect(getLevelClusters(filtered, 1)).toHaveLength(1);
     expect(getLevelClusters(filtered, 1)[0]?.memberCount).toBe(2);
@@ -196,7 +199,7 @@ describe("applyVisualFilter", () => {
     );
     const polarView = buildPolarView({ 1: [poiCluster] });
 
-    const filtered = applyVisualFilter("naked_eye", polarView);
+    const filtered = applyVisualFilter("stare", polarView);
 
     expect(getLevelClusters(filtered, 1)).toHaveLength(1);
     expect(getLevelClusters(filtered, 1)[0]?.memberCount).toBe(10);
@@ -211,7 +214,7 @@ describe("applyVisualFilter", () => {
       ])],
     });
 
-    const filtered = applyVisualFilter("naked_eye", polarView);
+    const filtered = applyVisualFilter("stare", polarView);
 
     expect(getLevelClusters(filtered, 1)).toHaveLength(0);
   });
@@ -231,7 +234,7 @@ describe("applyVisualFilter", () => {
       ))],
     });
 
-    const filtered = applyVisualFilter("naked_eye", polarView);
+    const filtered = applyVisualFilter("stare", polarView);
 
     expect(getLevelClusters(filtered, 2)).toHaveLength(0);
   });
@@ -249,7 +252,7 @@ describe("applyVisualFilter", () => {
       ),
     );
 
-    const filtered = applyVisualFilter("naked_eye", buildPolarView({ 1: [poiCluster] }));
+    const filtered = applyVisualFilter("stare", buildPolarView({ 1: [poiCluster] }));
 
     expect(getLevelClusters(filtered, 1)).toHaveLength(1);
     expect(getLevelClusters(filtered, 1)[0]?.memberCount).toBe(10);
@@ -264,7 +267,7 @@ describe("applyVisualFilter", () => {
       ])],
     });
 
-    const filtered = applyVisualFilter("naked_eye", polarView);
+    const filtered = applyVisualFilter("stare", polarView);
 
     expect(getLevelClusters(filtered, 1)).toHaveLength(1);
     expect(getLevelClusters(filtered, 1)[0]?.memberCount).toBe(1);
@@ -282,17 +285,17 @@ describe("applyVisualFilter", () => {
     ));
 
     jest.spyOn(Math, "random").mockReturnValue(0.1);
-    const hidden = applyVisualFilter("naked_eye", buildPolarView({ 2: [sourceCluster] }));
+    const hidden = applyVisualFilter("stare", buildPolarView({ 2: [sourceCluster] }));
     expect(getLevelClusters(hidden, 2)).toHaveLength(0);
 
     jest.spyOn(Math, "random").mockReturnValue(0.95);
-    const kept = applyVisualFilter("naked_eye", buildPolarView({ 2: [sourceCluster] }));
+    const kept = applyVisualFilter("stare", buildPolarView({ 2: [sourceCluster] }));
     expect(getLevelClusters(kept, 2)).toHaveLength(1);
     expect(getLevelClusters(kept, 2)[0]?.memberCount).toBe(getLevelClusters(kept, 2)[0]?.features.length);
   });
 
   it("keeps significant buildings even when they are occluded", () => {
-    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+    const filtered = applyVisualFilter("stare", buildPolarView({
       1: [buildCluster("cluster/l1/occluder", [
         buildFeature({
           featureId: "building/l1/occluder",
@@ -319,7 +322,7 @@ describe("applyVisualFilter", () => {
   });
 
   it("keeps significant tower POIs even when they are occluded", () => {
-    const filtered = applyVisualFilter("naked_eye", buildPolarView({
+    const filtered = applyVisualFilter("stare", buildPolarView({
       1: [buildCluster("cluster/l1/occluder", [
         buildFeature({
           featureId: "building/l1/occluder",
@@ -342,6 +345,139 @@ describe("applyVisualFilter", () => {
     }));
 
     expect(getLevelFeatureIds(filtered, 2)).toEqual(["poi/l2/significant"]);
+  });
+
+  it("keeps a high-value single named feature deterministically once it clears the lower angle floor", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.1);
+
+    const filtered = applyVisualFilter("stare", buildPolarView({
+      1: [buildCluster("cluster/building/high-value", [
+        buildFeature({
+          featureId: "building/high-value",
+          osmId: 1400,
+          category: "building",
+          angleWidthDegrees: 6,
+          tags: { name: "Named Building" },
+        }),
+      ])],
+    }));
+
+    expect(getLevelFeatureIds(filtered, 1)).toEqual(["building/high-value"]);
+  });
+
+  it("drops a high-value single named feature when it does not clear the lower angle floor", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.99);
+
+    const filtered = applyVisualFilter("stare", buildPolarView({
+      1: [buildCluster("cluster/building/high-value-too-small", [
+        buildFeature({
+          featureId: "building/high-value-too-small",
+          osmId: 1401,
+          category: "building",
+          angleWidthDegrees: 4,
+          tags: { name: "Tiny Named Building" },
+        }),
+      ])],
+    }));
+
+    expect(getLevelFeatureIds(filtered, 1)).toEqual([]);
+  });
+
+  it("keeps a high-value cluster when one named member clears the lower angle floor", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.1);
+
+    const filtered = applyVisualFilter("stare", buildPolarView({
+      2: [buildCluster("cluster/line/high-value", [
+        buildFeature({
+          featureId: "line/high-value/a",
+          osmId: 1500,
+          category: "line",
+          levelMarker: 2,
+          angleWidthDegrees: 12,
+          tags: { name: "Named Road" },
+        }),
+        buildFeature({
+          featureId: "line/high-value/b",
+          osmId: 1501,
+          category: "line",
+          levelMarker: 2,
+          angleWidthDegrees: 1,
+        }),
+      ])],
+    }));
+
+    expect(getLevelFeatureIds(filtered, 2)).toEqual(["line/high-value/a", "line/high-value/b"]);
+  });
+
+  it("drops a high-value cluster when no named member clears the lower angle floor", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.1);
+
+    const filtered = applyVisualFilter("stare", buildPolarView({
+      2: [buildCluster("cluster/line/high-value-too-small", [
+        buildFeature({
+          featureId: "line/high-value-too-small/a",
+          osmId: 1502,
+          category: "line",
+          levelMarker: 2,
+          angleWidthDegrees: 9,
+          tags: { name: "Small Named Road" },
+        }),
+        buildFeature({
+          featureId: "line/high-value-too-small/b",
+          osmId: 1503,
+          category: "line",
+          levelMarker: 2,
+          angleWidthDegrees: 1,
+        }),
+      ])],
+    }));
+
+    expect(getLevelFeatureIds(filtered, 2)).toEqual([]);
+  });
+
+  it("treats POI brand as high-value for deterministic cluster retention", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.1);
+
+    const filtered = applyVisualFilter("stare", buildPolarView({
+      2: [buildCluster("cluster/poi/high-value-brand", Array.from({ length: 6 }, (_, index) =>
+        buildFeature({
+          featureId: `poi/high-value-brand/${index + 1}`,
+          osmId: 1600 + index,
+          category: "poi",
+          levelMarker: 2,
+          tags: index === 0 ? { brand: "Brand Only POI" } : {},
+        }),
+      ))],
+    }));
+
+    expect(getLevelClusters(filtered, 2)).toHaveLength(1);
+    expect(getLevelClusters(filtered, 2)[0]?.memberCount).toBe(6);
+  });
+
+  it("treats buildings with a displayable contained named POI as high-value", () => {
+    jest.spyOn(Math, "random").mockReturnValue(0.1);
+
+    const filtered = applyVisualFilter("stare", buildPolarView({
+      1: [buildCluster("cluster/building/contained-poi", [
+        buildFeature({
+          featureId: "building/contained-poi",
+          osmId: 1700,
+          category: "building",
+          angleWidthDegrees: 6,
+          containedPoisReferences: [{
+            osmType: "node",
+            osmId: 1701,
+            tags: { brand: "Contained Brand" },
+            meta: {},
+            tainted: false,
+            coordinate: [0, 0],
+            sourceFeatureId: "poi/contained",
+          }],
+        }),
+      ])],
+    }));
+
+    expect(getLevelFeatureIds(filtered, 1)).toEqual(["building/contained-poi"]);
   });
 
 });

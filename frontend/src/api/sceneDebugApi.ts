@@ -6,11 +6,14 @@ import type {
   SceneSyncResponse,
 } from './sceneTypes';
 
+export type ScenePromptPreviewFilterId = 'glance' | 'stare';
+
 export interface debugScenePromptRequest {
   lat: number;
   lon: number;
   radius: number;
   playerOrientation?: number;
+  filterId: ScenePromptPreviewFilterId;
 }
 
 export interface debugScenePromptResponse {

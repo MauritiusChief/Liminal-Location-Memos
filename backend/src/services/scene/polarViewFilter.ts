@@ -1,6 +1,7 @@
-import { normalizeBearingDegrees } from "../geometry.js";
 import { PolarView } from "./polarViewLabeled.js";
 import { isSignificantBuilding, isSignificantPoi } from "./polarViewOcclusion.js";
+import { getDisplayableContainedPois } from "./sceneUtilLabel.js";
+import { trimTagValue } from "../utils.js";
 
 interface AngularSpan {
   clockwiseEarlyDegree: number;
@@ -37,8 +38,12 @@ interface PolarViewPoiLevelFilter {
   excludeCountThreshold: number,
 }
 
-const nakedEyeFilter: PolarViewFilter = {
-  id: "naked_eye",
+export type PolarViewFilterId = "glance" | "stare";
+
+export const DEFAULT_POLAR_VIEW_FILTER_ID: PolarViewFilterId = "glance";
+
+const stareFilter: PolarViewFilter = {
+  id: "stare",
   visibleSpan: {clockwiseEarlyDegree: 0, clockwiseLateDegree: 360, angleWidthDegrees: 360},
   buildingFilters: {
     1: {
@@ -110,8 +115,82 @@ const nakedEyeFilter: PolarViewFilter = {
   }
 }
 
-const POLAR_VIEW_FILTERS: Record<string, PolarViewFilter> = {
-  [nakedEyeFilter.id]: nakedEyeFilter,
+const glanceFilter: PolarViewFilter = {
+  id: "glance",
+  visibleSpan: {clockwiseEarlyDegree: 0, clockwiseLateDegree: 360, angleWidthDegrees: 360},
+  buildingFilters: {
+    1: {
+      includeDegreeThreshold: 15, includeCountThreshold: 12,
+      randomHideRate: 0.4,
+      excludeDegreeThreshold: 8, excludeCountThreshold: 2,
+    },
+    2: {
+      includeDegreeThreshold: 20, includeCountThreshold: 18,
+      randomHideRate: 0.6,
+      excludeDegreeThreshold: 12, excludeCountThreshold: 8,
+    },
+    3: {
+      includeDegreeThreshold: 25, includeCountThreshold: 24,
+      randomHideRate: 0.8,
+      excludeDegreeThreshold: 18, excludeCountThreshold: 12,
+    }
+  },
+  poiFilters: {
+    1: {
+      includeCountThreshold: 8,
+      randomHideRate: 0.4,
+      excludeCountThreshold: 2,
+    },
+    2: {
+      includeCountThreshold: 12,
+      randomHideRate: 0.6,
+      excludeCountThreshold: 6,
+    },
+    3: {
+      includeCountThreshold: 18,
+      randomHideRate: 0.8,
+      excludeCountThreshold: 12,
+    }
+  },
+  lineFilters: {
+    1: {
+      includeDegreeThreshold: 25, includeCountThreshold: 15,
+      randomHideRate: 0.7,
+      excludeDegreeThreshold: 10, excludeCountThreshold: 2,
+    },
+    2: {
+      includeDegreeThreshold: 35, includeCountThreshold: 18,
+      randomHideRate: 0.8,
+      excludeDegreeThreshold: 15, excludeCountThreshold: 8,
+    },
+    3: {
+      includeDegreeThreshold: 50, includeCountThreshold: 24,
+      randomHideRate: 0.9,
+      excludeDegreeThreshold: 30, excludeCountThreshold: 12,
+    }
+  },
+  areaFilters: {
+    1: {
+      includeDegreeThreshold: 25, includeCountThreshold: 15,
+      randomHideRate: 0.7,
+      excludeDegreeThreshold: 10, excludeCountThreshold: 2,
+    },
+    2: {
+      includeDegreeThreshold: 35, includeCountThreshold: 18,
+      randomHideRate: 0.8,
+      excludeDegreeThreshold: 18, excludeCountThreshold: 8,
+    },
+    3: {
+      includeDegreeThreshold: 50, includeCountThreshold: 24,
+      randomHideRate: 0.9,
+      excludeDegreeThreshold: 35, excludeCountThreshold: 12,
+    }
+  }
+}
+
+const POLAR_VIEW_FILTERS: Record<PolarViewFilterId, PolarViewFilter> = {
+  glance: glanceFilter,
+  stare: stareFilter,
 };
 
 type PolarViewCluster = PolarView["levels"][number]["clusters"][number];
@@ -129,8 +208,8 @@ interface TransferState {
  * @param polarView
  * @returns 已经移除了内容的 Polar View
  */
-export function applyVisualFilter(id: string = "naked_eye", polarView: PolarView): PolarView {
-  const selectedFilter = POLAR_VIEW_FILTERS[id] || nakedEyeFilter;
+export function applyVisualFilter(id: string = DEFAULT_POLAR_VIEW_FILTER_ID, polarView: PolarView): PolarView {
+  const selectedFilter = getPolarViewFilter(id);
   const levelByMarker = new Map(polarView.levels.map((level) => [level.level, level]));
   // console.log('level2VisibleIntervals',level2VisibleIntervals);
   let transferState: TransferState = {
@@ -218,12 +297,20 @@ function applyLevelTransfers(
     cluster.features.length > 1 && isClusterIncludedByCount(cluster, filter)
   );
 
-  // 5. 再按概率转移单个地物，单个地物看其视角宽度，达不到下限则放弃，否则概率转移。
+  // 5. 高价值地物优先保留：只要达到最低下限就直接保留，不走随机概率。
+  nextState = transferMatchingFeatures(sourceClusters, nextState, targetClusters, (feature, cluster) =>
+    cluster.features.length === 1 && isHighValueSingleFeature(feature, filter)
+  );
+  nextState = transferMatchingClusters(sourceClusters, nextState, targetClusters, (cluster) =>
+    cluster.features.length > 1 && isHighValueCluster(cluster, filter)
+  );
+
+  // 6. 再按概率转移单个地物，单个地物看其视角宽度，达不到下限则放弃，否则概率转移。
   nextState = transferMatchingFeatures(sourceClusters, nextState, targetClusters, (feature, cluster) =>
     cluster.features.length === 1 && shouldKeepSingleFeatureByChance(feature, filter)
   );
 
-  // 6. 最后按概率转移地物簇，不看其中最宽地物的宽度，只看这个簇的数量，达不到下限则放弃，否则概率转移。
+  // 7. 最后按概率转移地物簇，不看其中最宽地物的宽度，只看这个簇的数量，达不到下限则放弃，否则概率转移。
   return transferMatchingClusters(sourceClusters, nextState, targetClusters, (cluster) =>
     cluster.features.length > 1 && shouldKeepClusterByChance(cluster, filter)
   );
@@ -374,6 +461,40 @@ function shouldKeepSingleFeatureByChance(feature: MarkedPolarViewFeature, filter
   return Math.random() >= levelFilter.randomHideRate;
 }
 
+function isHighValueSingleFeature(feature: MarkedPolarViewFeature, filter: PolarViewFilter): boolean {
+  if (feature.category === "poi") {
+    return false;
+  }
+
+  if (!isHighValueFeature(feature)) {
+    return false;
+  }
+
+  const levelFilter = getLevelFilter(feature, filter);
+  return feature.widestSpan.angleWidthDegrees >= levelFilter.excludeDegreeThreshold;
+}
+
+function isHighValueCluster(cluster: PolarViewCluster, filter: PolarViewFilter): boolean {
+  const firstFeature = cluster.features[0];
+  if (!firstFeature) {
+    return false;
+  }
+
+  if (!cluster.features.some((feature) => isHighValueFeature(feature))) {
+    return false;
+  }
+
+  if (firstFeature.category === "poi") {
+    const levelFilter = filter.poiFilters[firstFeature.levelMarker];
+    return cluster.memberCount > levelFilter.excludeCountThreshold;
+  }
+
+  return cluster.features.some((feature) => {
+    const levelFilter = getLevelFilter(feature, filter);
+    return feature.widestSpan.angleWidthDegrees >= levelFilter.excludeDegreeThreshold;
+  });
+}
+
 /**
  * 判断 cluster 是否应按概率保留。
  * @param cluster 待判断 cluster
@@ -403,6 +524,34 @@ function shouldKeepClusterByChance(cluster: PolarViewCluster, filter: PolarViewF
 }
 
 //#region 帮助函数
+
+function getPolarViewFilter(id: string): PolarViewFilter {
+  return POLAR_VIEW_FILTERS[id as PolarViewFilterId] || glanceFilter;
+}
+
+function isHighValueFeature(feature: MarkedPolarViewFeature): boolean {
+  switch (feature.category) {
+    case "building": {
+      if (hasName(feature.featureDetail.tags.name)) {
+        return true;
+      }
+      const containedPoi = getDisplayableContainedPois(feature.featureDetail.containedPoisReferences);
+      return Boolean(
+        containedPoi &&
+        (hasName(containedPoi.tags.name) || hasName(containedPoi.tags.brand))
+      );
+    }
+    case "poi":
+      return hasName(feature.featureDetail.tags.name) || hasName(feature.featureDetail.tags.brand);
+    case "line":
+    case "area":
+      return hasName(feature.featureDetail.tags.name);
+  }
+}
+
+function hasName(value: string | undefined): boolean {
+  return Boolean(trimTagValue(value));
+}
 
 /**
  * 将两种 span 结构统一转换为本文件使用的 AngularSpan。
