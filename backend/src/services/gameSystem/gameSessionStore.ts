@@ -91,6 +91,7 @@ export interface GameState {
   playerOrientation: number;
   playerIndoorLocation: PlayerIndoorLocation | null;
   playerVisionRange: number;
+  playerStatus: PlayerStatus;
   messageHistory: GameMessage[];
   activeFieldVisualDescriptions: string[];
   fieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
@@ -138,6 +139,19 @@ export interface GameClientSessionSnapshot extends GameState {
   llmProvider?: string;
   pendingVisualDescription: boolean;
   hasQueuedPlayerMessage: boolean;
+}
+
+interface PlayerStatus {
+  health: number; // 笼统的健康条，由100减去会致死的四条（blood_loss/infection/poisonous/nerv_loss）中的最大值得到
+  blood_loss: number; // 字面意义的血量，特指外伤/内伤出血，涨满表示失血过多而死
+  infection: number; // 特指病毒/细菌感染，涨满表示败血症引发多器官衰竭而死
+  poisonous: number; // 特指中毒，涨满表示肝衰竭/肾衰竭而死
+  nerv_loss: number; // 神经系统功能损失，涨满表示心跳骤停/呼吸麻痹等神经失去功能导致的死亡
+  hydration: number; // 饮水值，归零代表失水过多，将增加 poisonous（血流不足引起肾衰竭）
+  calorie: number; // 卡路里，归零代表糖原、脂肪消耗均殆尽，将开始消耗 protein
+  protein: number; // 蛋白质量，归零代表体内蛋白质跌破正常生存所需量，将增加 infection（低蛋白质引起免疫系统崩溃）
+  exceeded_heat: number; // 特指人体正常生活以外的热量，涨满会消耗 hydration 为代价抵消其额外增长（出汗）；如果 hydration 归零或者某种原因无法出汗，会减少 protein 值（蛋白质高温失活）
+  essential_heat: number; // 特指人体所需的必要热量，归零会消耗 calorie 为代价抵消其额外下降（发抖）；如果 calorie 归零，会减少 nerv_loss 值（中枢神经抑制）
 }
 
 //#region 常量
