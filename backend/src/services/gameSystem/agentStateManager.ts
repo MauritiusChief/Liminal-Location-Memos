@@ -2,7 +2,7 @@ import { distanceBetweenCoordinates } from "../geometry.js";
 import { buildSceneFromRequest, SceneObject } from "../scene/sceneObject.js";
 import { buildScenePrompt } from "../scene/scenePrompt.js";
 import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatVisibleLocationPrompt } from "./agentBookComposer.js";
-import type { BuildingRecord } from "../buildingGeneration/buildingRecord.js";
+import type { BuildingLevel, BuildingRecord, BuildingRoom, BuildingSector } from "../buildingGeneration/buildingRecord.js";
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
 import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, SectorVisualDescriptionRecord } from "./gameSessionStore.js";
 import { generateJsonReplySingleMessage } from "./llm.js";
@@ -315,7 +315,7 @@ export async function toWorldStatePrompt(state: WorldState, scene?: SceneObject)
     ? state.activeVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
     : null;
   const buildingRecordPrompt = Object.values(state.activeBuildingRecords)
-    .map(record => formatBuildingRecordPrompt(record))
+    .map(record => formatBuildingRecordPrompt(record, state.playerIndoorLocation))
     .join('\n\n')
 
   const sections = [
@@ -331,7 +331,7 @@ export async function toWorldStatePrompt(state: WorldState, scene?: SceneObject)
     '玩家所处房间：',
     indoorLocationPrompt || '（当前未提供室内位置）',
     '---',
-    '相关建筑完整结构：',
+    '相关建筑结构：',
     buildingRecordPrompt || '（暂无）',
     '---',
     '玩家可见室内场景摘要：',
@@ -366,39 +366,35 @@ function toToolPrompt(toolDef: GameStateToolDef): string {
   ].join('\n');
 }
 
+//#region 建筑细节函数
+
 /**
  * 描述某一建筑完整的细节
  * @param record
  * @returns
  */
-function formatBuildingRecordPrompt(record: BuildingRecord): string {
+function formatBuildingRecordPrompt(record: BuildingRecord, location: PlayerIndoorLocation | null): string {
+  const isCurrentBuilding = location?.buildingId === record.featureId;
   const levelLines = Object.values(record.levels)
     .sort((left, right) => left.level - right.level)
     .flatMap((level) => {
-      const sectorLines = Object.values(level.sectors).flatMap((sector) => {
-        const roomLines = Object.values(sector.rooms).flatMap((room) => {
-          if ("subRooms" in room) {
-            const subRoomLines = Object.values(room.subRooms)
-              .map((subRoom) => `      - 子房间 ${subRoom.roomId}: ${subRoom.description}`);
-            return [
-              `    - 套房 ${room.suiteId}: ${room.description}`,
-              ...subRoomLines,
-            ];
-          }
+      if (!isCurrentBuilding) {
+        return renderLevelWithAccessRooms(level, (access) => access === "entrance" || access === "internal");
+      }
 
-          const access = room.access ? ` [通道类型：${room.access}]` : "";
-          return [`    - 房间 ${room.roomId}: ${room.description}${access}`];
-        });
-
-        return [
-          `  - 区域 ${sector.name} [面积：${sector.area}, 几何中心：(${sector.centerPosition.lat}, ${sector.centerPosition.lon})]`,
-          ...roomLines,
-        ];
-      });
+      if (level.level !== location?.level) {
+        return renderLevelWithAccessRooms(level, () => true);
+      }
 
       return [
         `- 楼层 ${level.level}: ${level.description}`,
-        ...sectorLines,
+        ...Object.values(level.sectors).flatMap((sector) => {
+          if (sector.name === location.sectorName) {
+            return renderFullSector(sector);
+          }
+
+          return renderSectorWithAccessRooms(sector, () => true);
+        }),
       ];
     });
 
@@ -410,4 +406,76 @@ function formatBuildingRecordPrompt(record: BuildingRecord): string {
     "楼层：",
     ...levelLines,
   ].join("\n");
+}
+
+function renderFullSector(sector: BuildingSector): string[] {
+  const roomLines = Object.values(sector.rooms).flatMap((room) => {
+    if ("subRooms" in room) {
+      const subRoomLines = Object.values(room.subRooms)
+        .map((subRoom) => `      - 子房间 ${subRoom.roomId}: ${subRoom.description}`);
+      return [
+        `    - 套房 ${room.suiteId}: ${room.description}`,
+        ...subRoomLines,
+      ];
+    }
+
+    return [renderRoomLine(room, "    ")];
+  });
+
+  return [
+    formatSectorHeader(sector),
+    ...roomLines,
+  ];
+}
+
+function renderSectorWithAccessRooms(
+  sector: BuildingSector,
+  accessFilter: (access: BuildingRoom["access"]) => boolean,
+): string[] {
+  const roomLines = listSectorAccessRoomLines(sector, accessFilter).map((line) => `    - ${line}`);
+  return [
+    formatSectorHeader(sector),
+    ...roomLines,
+  ];
+}
+
+function renderLevelWithAccessRooms(
+  level: BuildingLevel,
+  accessFilter: (access: BuildingRoom["access"]) => boolean,
+): string[] {
+  return [
+    `- 楼层 ${level.level}: ${level.description}`,
+    ...listLevelAccessRoomLines(level, accessFilter).map((line) => `  - ${line}`),
+  ];
+}
+
+function listSectorAccessRoomLines(
+  sector: BuildingSector,
+  accessFilter: (access: BuildingRoom["access"]) => boolean,
+): string[] {
+  return Object.values(sector.rooms)
+    .flatMap((room) => {
+      if ("subRooms" in room || !room.access || !accessFilter(room.access)) {
+        return [];
+      }
+
+      return [`房间 ${room.roomId}: ${room.description} [通道类型：${room.access}]`];
+    });
+}
+
+function listLevelAccessRoomLines(
+  level: BuildingLevel,
+  accessFilter: (access: BuildingRoom["access"]) => boolean,
+): string[] {
+  return Object.values(level.sectors)
+    .flatMap((sector) => listSectorAccessRoomLines(sector, accessFilter).map((line) => `区域 ${sector.name} - ${line}`));
+}
+
+function formatSectorHeader(sector: BuildingSector): string {
+  return `  - 区域 ${sector.name} [面积：${sector.area}, 几何中心：(${sector.centerPosition.lat}, ${sector.centerPosition.lon})]`;
+}
+
+function renderRoomLine(room: BuildingRoom, indent: string): string {
+  const access = room.access ? ` [通道类型：${room.access}]` : "";
+  return `${indent}- 房间 ${room.roomId}: ${room.description}${access}`;
 }
