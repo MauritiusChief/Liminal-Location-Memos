@@ -6,6 +6,8 @@
 
 ## 近期计划
 
+* Game State Manager 的建筑结构细节不要那么详细，只透露各层基本信息和 access
+
 * 添加物品与容器生成功能后，记得提醒 Visual Describer 不要把物品信息也当做细节信息了
 
 * 添加建筑生成功能，具体在 buildingGeneration/_note 中
