@@ -107,6 +107,8 @@ const SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL: GameStateToolDef = {
   }
 }
 
+//#region 渐进式披露工具
+
 //#region 主函数
 
 /**
