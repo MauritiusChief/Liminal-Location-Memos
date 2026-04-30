@@ -5,7 +5,7 @@ import { dedupeVisibleLocations, findLocationContext, listSectorVisibleLocations
 
 
 /**
- * 更新玩家可见范围的函数
+ * 在基板的 Active Indoor Locations 基础上更新玩家可见范围的函数，刻意不去考虑基板重算之后的情况
  * @param state
  * @param args
  * @returns

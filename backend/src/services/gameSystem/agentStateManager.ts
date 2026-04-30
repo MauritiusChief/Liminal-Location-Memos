@@ -11,6 +11,7 @@ import { applySetPlayerIndoorLocationTool } from "./toolIndoorPosition.js";
 import { applyMovePlayerTool } from "./toolMovePlayer.js";
 import type { AgentStateRouteCandidate } from "./agentStateRouter.js";
 import { buildPlayerActionContextPrompt } from "./agentUtils.js";
+import { applySyncActiveIndoorLocationsTool } from "./toolActiveIndoorLocations.js";
 
 export interface GameStateToolCall {
   name: string;
@@ -109,6 +110,8 @@ const SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL: GameStateToolDef = {
 //#region 主函数
 
 /**
+ * TODO 做成可反复对话的形式，然后添加渐进式披露
+ *
  * 先让 Router 基于对话做行为类型初筛，再让 Manager 结合 worldState 决定最终工具调用。
  *
  * 它的职责只是“决定要做什么以及参数是什么”，而不直接改状态。
@@ -125,7 +128,7 @@ export async function gameStateManager(
   const toolDefs = [
     MOVE_PLAYER_TOOL,
     SET_PLAYER_INDOOR_LOCATION_TOOL,
-    // SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL,
+    SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL,
   ].map((def) => toToolPrompt(def));
   const systemPrompt = BUILD_GAME_STATE_MANAGER_SYSTEM(toolDefs);
   const { lat, lon } = state.playerPosition;
@@ -200,9 +203,9 @@ export async function applyGameStateToolCalls(state: GameState, toolCalls: GameS
       case SET_PLAYER_INDOOR_LOCATION_TOOL.name:
         await applySetPlayerIndoorLocationTool(state, args);
         break;
-      // case SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL.name:
-      //   applySyncActiveIndoorLocationsTool(state, args);
-      //   break;
+      case SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL.name:
+        applySyncActiveIndoorLocationsTool(state, args);
+        break;
     }
 
   }
