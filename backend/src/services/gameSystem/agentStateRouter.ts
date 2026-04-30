@@ -51,19 +51,43 @@ const ROUTE_ACTIONS: AgentStateRouteActionDef[] = [
   {
     action: "acquire_item",
     description: [
-      "玩家明确或隐含意图获取物品或者抵近观察某物品。",
+      "玩家明确或隐含意图从环境拿起或者获取物品。",
     ],
   },
   {
     action: "use_item",
     description: [
-      "",
+      "玩家明确或隐含使用已获取的物品，令物品发挥其设计或非设计功能。",
+    ],
+  },
+  {
+    action: "move_item",
+    description: [
+      "玩家明确或隐含从不同位置或容器转移、丢弃物品。",
+    ],
+  },
+  {
+    action: "inspect_container",
+    description: [
+      "玩家明确或隐含要求知晓某不知其内部状况的容器的内部情况。",
+    ],
+  },
+  {
+    action: "surrounding_interact",
+    description: [
+      "玩家明确或隐含要求与周遭场景进行简单、可重复的互动。",
+    ],
+  },
+  {
+    action: "surrounding_transform",
+    description: [
+      "玩家明确或隐含要求对周遭场景进行复杂的，或者破坏性、难以恢复的改造。",
     ],
   },
   {
     action: "no_state_change",
     description: [
-      "玩家只是观察、询问、思考，或者没有表达会改变游戏状态的位置行动。",
+      "玩家没有表达会改变游戏状态的行动。",
     ],
   },
 ];
