@@ -18,9 +18,9 @@ type ResponseWithReasoning = {
   reasoning?: string;
 }
 
-type ReplyFormat = 'text' | 'json';
-type ChatRequestBody = DeepSeekChatRequest | OpenRouterChatRequest;
-type ChatMessage = DeepSeekMessage[] | OpenRouterMessage[];
+export type ReplyFormat = 'text' | 'json';
+export type ChatRequestBody = DeepSeekChatRequest | OpenRouterChatRequest;
+export type ChatMessage = DeepSeekMessage[] | OpenRouterMessage[];
 
 type RawStreamChunk = {
   choices?: Array<{
@@ -53,17 +53,66 @@ export async function generateReplySingleMessage(
   return extractResponseWithReasoning(payload);
 }
 
+export async function generateJsonReplyMessages(
+  messages: ChatMessage,
+  fast = false,
+): Promise<ResponseWithReasoning> {
+  const payload = await chatCompletion(
+    fast
+      ? buildChatRequest(messages, 'json')
+      : buildReasoningRequest(messages, 'json'),
+  );
+  return extractResponseWithReasoning(payload);
+}
+
 export async function generateJsonReplySingleMessage(
   systemPrompt: string,
   message: string,
+  fast = false,
 ): Promise<ResponseWithReasoning> {
-  const payload = await chatCompletion(buildSingleMessageRequest(
+  const messages = buildSingleMessageRequestMessages(
     systemPrompt,
     message,
-    'json',
-  ));
+  );
+  const payload = await chatCompletion(
+    fast
+      ? buildChatRequest(messages, 'json')
+      : buildReasoningRequest(messages, 'json'),
+  );
   return extractResponseWithReasoning(payload);
 }
+
+export function buildChatRequest(
+  messages: ChatMessage,
+  replyFormat: ReplyFormat,
+): ChatRequestBody {
+  if (config.llmProvider === 'deepseek') {
+    const requestBody: DeepSeekChatRequest = {
+      model: config.llmModel,
+      messages: messages as DeepSeekMessage[],
+      thinking: { type: 'disabled' },
+    };
+
+    if (replyFormat === 'json') {
+      requestBody.response_format = { type: 'json_object' };
+    }
+
+    return requestBody;
+  }
+
+  const requestBody: OpenRouterChatRequest = {
+    model: config.llmModel,
+    messages: messages as OpenRouterMessage[],
+  };
+
+  if (replyFormat === 'json') {
+    requestBody.response_format = { type: 'json_object' };
+  }
+
+  return requestBody;
+}
+
+
 
 /**
  * 组装单个 request，必定是 Reasoning Request

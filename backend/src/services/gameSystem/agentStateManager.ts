@@ -9,6 +9,8 @@ import { generateJsonReplySingleMessage } from "./llm.js";
 import { BUILD_GAME_STATE_MANAGER_SYSTEM } from "./systemPrompts.js";
 import { applySetPlayerIndoorLocationTool } from "./toolIndoorPosition.js";
 import { applyMovePlayerTool } from "./toolMovePlayer.js";
+import type { AgentStateRouteCandidate } from "./agentStateRouter.js";
+import { buildPlayerActionContextPrompt } from "./agentUtils.js";
 
 export interface GameStateToolCall {
   name: string;
@@ -107,14 +109,17 @@ const SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL: GameStateToolDef = {
 //#region 主函数
 
 /**
- * 从 Game State 获取所需信息，尤其是玩家最新的消息，然后单独给一个 agent，令其返回该玩家行为将导致的游戏状态变化
+ * 先让 Router 基于对话做行为类型初筛，再让 Manager 结合 worldState 决定最终工具调用。
  *
- * 它的职责只是“决定要做什么”，而不直接改状态。
+ * 它的职责只是“决定要做什么以及参数是什么”，而不直接改状态。
  * 真正执行这些变化的是 applyGameStateToolCalls()。
  * @param state 保证 messageHistory 最新一条为 player Message 的 GameState
  * @returns 需要改变的游戏状态，各自需要改变的值等等，如果出错则返回空列表
  */
-export async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> {
+export async function gameStateManager(
+  state: GameState,
+  routeCandidates: AgentStateRouteCandidate[],
+): Promise<GameStateToolCall[]> {
   console.log(`[${new Date().toISOString()}] gameStateManager() 触发`);
 
   const toolDefs = [
@@ -123,21 +128,16 @@ export async function gameStateManager(state: GameState): Promise<GameStateToolC
     // SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL,
   ].map((def) => toToolPrompt(def));
   const systemPrompt = BUILD_GAME_STATE_MANAGER_SYSTEM(toolDefs);
-  const messageHistory = state.messageHistory;
-  const latestPlayerMessage = messageHistory[messageHistory.length - 1];
   const { lat, lon } = state.playerPosition;
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: WORLD_STATE_RADIUS_METERS}, state.playerOrientation);
   const worldState = pickWorldState(state)
   const worldStatePrompt = await toWorldStatePrompt(worldState, sceneObject);
-  // 组装背景消息提示词
+  // Manager 使用 Router 的初筛结果缩小判断范围，但最终仍以完整 worldState 为准。
   const message = [
-    '玩家发送的消息：',
-    `> ${latestPlayerMessage?.content ?? ''}\n`,
+    buildPlayerActionContextPrompt(state),
     '---',
-    '近期对话历史：',
-    formatGameStateManagerRecentMessageHistory(
-      messageHistory.slice(Math.max(0, messageHistory.length - 6), messageHistory.length - 1),
-    ),
+    '行为类型初筛候选：',
+    formatRouteCandidatesPrompt(routeCandidates),
     '---',
     worldStatePrompt,
   ].join('\n');
@@ -228,31 +228,12 @@ export function isIntendedIndoor(toolCalls: GameStateToolCall[]): boolean | unde
   return undefined;
 }
 
-export function formatGameStateManagerRecentMessageHistory(messageHistory: GameMessage[]): string {
-  return messageHistory
-    .map((messageEntry) => {
-      const contentLines = messageEntry.content.split('\n')
-      if (messageEntry.role === 'book') {
-        return `> **游戏输出**：\n${contentLines.map(line => `> ${line}`).join('\n')}\n>`;
-      }
+function formatRouteCandidatesPrompt(routeCandidates: AgentStateRouteCandidate[]): string {
+  if (!routeCandidates.length) {
+    return '[]（初筛为空；可能代表无状态变化，也可能代表初筛失败，请仍结合完整游戏状态判断。）';
+  }
 
-      const playerLines = [
-        `> **玩家输入**：\n${contentLines.map(line => `> ${line}`).join('\n')}`,
-        '>',
-      ];
-
-      if (!messageEntry.stateChange?.length) {
-        return playerLines.join('\n');
-      }
-
-      const toolCallLines = JSON.stringify(messageEntry.stateChange, null, 2).split('\n')
-      return [
-        ...playerLines,
-        `> **游戏状态变化**：\n${toolCallLines.map(line => `> ${line}`).join('\n')}`,
-        '>',
-      ].join('\n');
-    })
-    .join('\n');
+  return JSON.stringify(routeCandidates, null, 2);
 }
 
 export function pickWorldState(state: GameState): WorldState {
