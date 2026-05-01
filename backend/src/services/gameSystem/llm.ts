@@ -3,13 +3,18 @@ import {
   DeepSeekChatRequest,
   DeepSeekChatResponse,
   DeepSeekMessage,
+  DeepSeekTool,
+  DeepSeekToolCall,
   NormalizedLlmResponse,
   NormalizedLlmStreamEvent,
   OpenRouterChatRequest,
   OpenRouterChatResponse,
   OpenRouterMessage,
+  OpenRouterTool,
+  OpenRouterToolCall,
 } from "./llmTypes.js";
 import { GameMessage } from "./gameSessionStore.js";
+import { LlmToolDef } from "./agentStateManager.js";
 
 type PlayerGameMessage = Extract<GameMessage, { role: 'player' }>;
 
@@ -17,6 +22,19 @@ type ResponseWithReasoning = {
   reply: string;
   reasoning?: string;
 }
+
+export type JsonReplyWithToolsResponse =
+  | {
+      type: 'tool_call';
+      reply: string;
+      toolCalls: DeepSeekToolCall[] | OpenRouterToolCall[];
+      reasoning?: string;
+    }
+  | {
+      type: 'final_response';
+      reply: string;
+      reasoning?: string;
+    };
 
 export type ReplyFormat = 'text' | 'json';
 export type ChatRequestBody = DeepSeekChatRequest | OpenRouterChatRequest;
@@ -80,14 +98,104 @@ export async function generateJsonReplySingleMessage(
 
 /**
  * 要求：
- * - 完整的允许 tool call 的 messages 输入
- * - 输出 JSON 或者 tool call
+ * - 单个 user prompt + 工具调用能力
+ * - 循环处理工具调用，工具返回内容为 source（占位）
+ * - 输出最终 JSON 答案
  * - 默认开启 reasoning
+ * @param systemPrompt
+ * @param message 单个用户消息
+ * @param tools
+ * @param source 工具返回的内容的来源（目前是占位）
+ * @returns
  */
-export function generateJsonReplyWithTools(
+export async function generateJsonReplyWithTools(
   systemPrompt: string,
-  messages: string,
-) {}
+  message: string,
+  tools: LlmToolDef[],
+  source: string,
+): Promise<ResponseWithReasoning> {
+  // 单消息模式初始化
+  const messages = buildSingleMessageRequestMessages(systemPrompt, message);
+
+  // 循环处理工具调用
+  while (true) {
+    const response = await respondReplyOrTool(messages, tools);
+
+    if (response.type === 'final_response') {
+      return {
+        reply: response.reply,
+        reasoning: response.reasoning,
+      };
+    }
+
+    // 处理工具调用：真实记录 tool_calls，虚假返回 source
+    if (response.toolCalls?.length) {
+      messages.push({
+        role: 'assistant',
+        content: response.reply,
+        reasoning_content: response.reasoning,
+        tool_calls: response.toolCalls,
+      });
+      response.toolCalls.forEach( toolCall => {
+        messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: source,
+        });
+      })
+
+    }
+  }
+}
+
+/**
+ * 内部函数：单次 LLM 调用，可能返回工具调用或最终答案
+ * @param messages
+ * @param tools
+ * @returns
+ */
+async function respondReplyOrTool(
+  messages: ChatMessage,
+  tools: LlmToolDef[],
+): Promise<JsonReplyWithToolsResponse> {
+  const requestBody = buildReasoningRequest(messages, 'json');
+
+  if (config.llmProvider === 'deepseek') {
+    const deepSeekTools: DeepSeekTool[] = tools.map(tool => ({
+      type: "function",
+      function: tool
+    }));
+    (requestBody as DeepSeekChatRequest).tools = deepSeekTools;
+    (requestBody as DeepSeekChatRequest).tool_choice = 'auto';
+  } else {
+    const openRouterTools: OpenRouterTool[] = tools.map(tool => ({
+      type: "function",
+      function: tool
+    }));
+    (requestBody as OpenRouterChatRequest).tools = openRouterTools;
+    (requestBody as OpenRouterChatRequest).tool_choice = 'auto';
+  }
+
+  const payload = await chatCompletion(requestBody);
+  const message = payload.choices[0]?.message;
+  const reply = message?.content ?? '[错误] 模型返回空内容！';
+  const reasoning = message?.reasoning_content;
+
+  if (message?.tool_calls?.length) {
+    return {
+      type: 'tool_call',
+      reply,
+      reasoning,
+      toolCalls: message.tool_calls,
+    };
+  }
+
+  return {
+    type: 'final_response',
+    reply,
+    reasoning,
+  };
+}
 
 /**
  * 组装单个 request，必定是 Reasoning Request
@@ -137,14 +245,14 @@ export async function* streamReplySingleMessage(
  * - 默认开启 reasoning
  * @param systemPrompt
  * @param gameMessages
- * @param worldState
+ * @param playerState
  */
 export async function* streamReplyFullMessages(
   systemPrompt: string,
   gameMessages: GameMessage[],
-  worldState: string,
+  playerState: string,
 ): AsyncGenerator<NormalizedLlmStreamEvent> {
-  const messages = buildFullMessagesRequestMessages(systemPrompt, gameMessages, worldState);
+  const messages = buildFullMessagesRequestMessages(systemPrompt, gameMessages, playerState);
   const requestBody = buildReasoningRequest(messages, 'text');
   yield* streamChatCompletion(requestBody);
 }
@@ -171,14 +279,14 @@ export function buildFullMessagesRequestMessages(
     pushPlayerMessageWithStateChange(messages, message, index);
   });
 
-  const syntheticToolId = 'synthetic_get_game_state';
+  const syntheticToolId = 'synthetic_get_world_state';
   // 填充虚假 tool call
   messages.push({
     role: 'assistant',
     content: '',
     reasoning_content: '',
     tool_calls: [{
-      id: syntheticToolId, type: "function", function: { name: "refresh_game_state", arguments: "{}" }
+      id: syntheticToolId, type: "function", function: { name: "refresh_world_state", arguments: "{}" }
     }]
   });
   // 填充虚假 tool return

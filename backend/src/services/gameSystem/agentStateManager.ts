@@ -5,7 +5,7 @@ import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatV
 import type { BuildingLevel, BuildingRecord, BuildingRoom, BuildingSector } from "../buildingGeneration/buildingRecord.js";
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
 import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, SectorVisualDescriptionRecord } from "./gameSessionStore.js";
-import { generateJsonReplySingleMessage } from "./llm.js";
+import { generateJsonReplyWithTools } from "./llm.js";
 import { BUILD_GAME_STATE_MANAGER_SYSTEM } from "./systemPrompts.js";
 import { applySetPlayerIndoorLocationTool } from "./toolIndoorPosition.js";
 import { applyMovePlayerTool } from "./toolMovePlayer.js";
@@ -28,6 +28,16 @@ interface GameStateToolDef {
       description: string;
     };
   };
+}
+
+export interface LlmToolDef {
+  name: string
+  description?: string
+  parameters: {
+    type: "object"
+    properties: Record<string, any>
+    required?: string[]
+  }
 }
 
 /**
@@ -114,7 +124,7 @@ const ADJUST_PLAYER_VISIBLE_LOCATION_TOOL: GameStateToolDef = {
 const DRAFT_FURNITURE_TOOL: GameStateToolDef = {
   name: "draft_furniture_tool",
   description: [
-    '`Furniture`解释：在此游戏中，不只是家具，大型机器、固定装置等等带功能的固定物体也都算作`Furniture`，可通过TODO函数获取例子来理解。',
+    '`Furniture`解释：在此游戏中，不只是家具，大型机器、固定装置等等带功能的固定物体也都算作`Furniture`，可通过`list_template`函数获取例子来理解有哪些东西算作`Furniture`。',
     '如果用户的行动需要与`Furniture`互动，但现有游戏状态机没有可供互动的对象，或者互动对象仅存在于细节记录中，则使用此工具在游戏状态机中创建可互动的对象。',
   ],
   arguments: {
@@ -125,6 +135,34 @@ const DRAFT_FURNITURE_TOOL: GameStateToolDef = {
 }
 
 //#region 渐进式披露工具
+
+const LIST_TEMPLATE_LLM_TOOL: LlmToolDef = {
+  name: "list_template",
+  description: "列举某个大类的或者全部的，创建供用户行动用的对象的模板。",
+  parameters: {
+    type: "object",
+    properties: {
+      "kind": {
+        type: "string",
+        description: "需要列举模板的大类（目前仅`Furniture`可用），留空以列举所有大类的模板。",
+      }
+    },
+  }
+}
+
+const QUERY_TEMPLATE_LLM_TOOL: LlmToolDef = {
+  name: "query_template",
+  description: "输入中文关键字，查找匹配的创建供用户行动用的对象的模板。",
+  parameters: {
+    type: "object",
+    properties: {
+      "query": {
+        type: "string",
+        description: "简略中文关键字，无需附加'模板'等冗余字段。",
+      }
+    },
+  }
+}
 
 //#region 主函数
 
@@ -170,9 +208,19 @@ export async function gameStateManager(
     userMessage: message,
   });
 
+  const tools = [
+    QUERY_TEMPLATE_LLM_TOOL,
+    LIST_TEMPLATE_LLM_TOOL,
+  ]
+
   try {
-    // 获取 LLM 返回
-    const response = await generateJsonReplySingleMessage(systemPrompt, message);
+    // 获取 LLM 返回（支持工具调用循环）
+    const response = await generateJsonReplyWithTools(
+      systemPrompt,
+      message,
+      tools,
+      "目前尚在测试阶段，模板只有冰箱模板可用，id是`fridge`且没有变种"
+    );
     // // MOCK
     // const response = {reply: '[]', reasoning: ''}
     // 解析返回
