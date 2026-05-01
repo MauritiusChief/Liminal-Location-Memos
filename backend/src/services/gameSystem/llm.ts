@@ -36,7 +36,10 @@ type RawStreamChunk = {
 //#region 主函数
 
 /**
- * 仅输入 system prompt 和单个 use message 的单一回合 LLM call
+ * 要求：
+ * - 单个 user prompt
+ * - 输出字符串
+ * - 默认开启 reasoning
  * @param systemPrompt
  * @param message
  * @returns
@@ -45,35 +48,28 @@ export async function generateReplySingleMessage(
   systemPrompt: string,
   message: string,
 ): Promise<ResponseWithReasoning> {
-  const payload = await chatCompletion(buildSingleMessageRequest(
-    systemPrompt,
-    message,
-    'text',
-  ));
+  const messages = buildSingleMessageRequestMessages(systemPrompt, message)
+  const requestBody = buildSingleMessageRequest(messages, 'text')
+  const payload = await chatCompletion(requestBody);
   return extractResponseWithReasoning(payload);
 }
 
-export async function generateJsonReplyMessages(
-  messages: ChatMessage,
-  fast = false,
-): Promise<ResponseWithReasoning> {
-  const payload = await chatCompletion(
-    fast
-      ? buildChatRequest(messages, 'json')
-      : buildReasoningRequest(messages, 'json'),
-  );
-  return extractResponseWithReasoning(payload);
-}
-
+/**
+ * 要求：
+ * - 单个 user prompt
+ * - 输出 JSON
+ * - 可选是否开启 reasoning (是否用 chat)
+ * @param systemPrompt
+ * @param message
+ * @param fast 是否改用 chat 来加速过程
+ * @returns
+ */
 export async function generateJsonReplySingleMessage(
   systemPrompt: string,
   message: string,
   fast = false,
 ): Promise<ResponseWithReasoning> {
-  const messages = buildSingleMessageRequestMessages(
-    systemPrompt,
-    message,
-  );
+  const messages = buildSingleMessageRequestMessages(systemPrompt, message);
   const payload = await chatCompletion(
     fast
       ? buildChatRequest(messages, 'json')
@@ -82,37 +78,16 @@ export async function generateJsonReplySingleMessage(
   return extractResponseWithReasoning(payload);
 }
 
-export function buildChatRequest(
-  messages: ChatMessage,
-  replyFormat: ReplyFormat,
-): ChatRequestBody {
-  if (config.llmProvider === 'deepseek') {
-    const requestBody: DeepSeekChatRequest = {
-      model: config.llmModel,
-      messages: messages as DeepSeekMessage[],
-      thinking: { type: 'disabled' },
-    };
-
-    if (replyFormat === 'json') {
-      requestBody.response_format = { type: 'json_object' };
-    }
-
-    return requestBody;
-  }
-
-  const requestBody: OpenRouterChatRequest = {
-    model: config.llmModel,
-    messages: messages as OpenRouterMessage[],
-  };
-
-  if (replyFormat === 'json') {
-    requestBody.response_format = { type: 'json_object' };
-  }
-
-  return requestBody;
-}
-
-
+/**
+ * 要求：
+ * - 完整的允许 tool call 的 messages 输入
+ * - 输出 JSON 或者 tool call
+ * - 默认开启 reasoning
+ */
+export function generateJsonReplyWithTools(
+  systemPrompt: string,
+  messages: string,
+) {}
 
 /**
  * 组装单个 request，必定是 Reasoning Request
@@ -132,29 +107,38 @@ export function buildSingleMessageRequestMessages(
 }
 
 function buildSingleMessageRequest(
-  systemPrompt: string,
-  message: string,
+  messages: ChatMessage,
   replyFormat: ReplyFormat,
 ): ChatRequestBody {
-  return buildReasoningRequest(
-    buildSingleMessageRequestMessages(systemPrompt, message),
-    replyFormat,
-  );
+  return buildReasoningRequest(messages, replyFormat);
 }
 
 /**
- * LLM DEBUG 以及未来 game turn stream 会共用这个出口。
- * 这里故意只暴露 reply / reasoning 两路文本增量，而不把 provider 原始事件暴露出去，
- * 这样 route 层与前端都只依赖项目自己的稳定接口，后续切换供应商时影响范围才会最小。
+ * 要求：
+ * - 单个 user prompt
+ * - 流式输出字符串
+ * - 默认开启 reasoning
+ * @param systemPrompt
+ * @param message
  */
 export async function* streamReplySingleMessage(
   systemPrompt: string,
   message: string,
 ): AsyncGenerator<NormalizedLlmStreamEvent> {
-  const requestBody = buildSingleMessageRequest(systemPrompt, message, 'text');
+  const messages = buildSingleMessageRequestMessages(systemPrompt, message)
+  const requestBody = buildSingleMessageRequest(messages, 'text');
   yield* streamChatCompletion(requestBody);
 }
 
+/**
+ * 要求：
+ * - 完整的允许 tool call 的 messages 输入
+ * - 流式输出字符串
+ * - 默认开启 reasoning
+ * @param systemPrompt
+ * @param gameMessages
+ * @param worldState
+ */
 export async function* streamReplyFullMessages(
   systemPrompt: string,
   gameMessages: GameMessage[],
@@ -163,26 +147,6 @@ export async function* streamReplyFullMessages(
   const messages = buildFullMessagesRequestMessages(systemPrompt, gameMessages, worldState);
   const requestBody = buildReasoningRequest(messages, 'text');
   yield* streamChatCompletion(requestBody);
-}
-
-/**
- * 专门给 generateBookMessage() 用的，生成常规回合 Book Message 的函数。
- * 构造传统 messages 数组，并把 Game State 以虚拟 tool call/return 的方式插入。
- * @param systemPrompt
- * @param gameMessages
- * @param worldState
- * @returns
- */
-export async function generateReplyFullMessages(
-  systemPrompt: string,
-  gameMessages: GameMessage[],
-  worldState: string,
-): Promise<ResponseWithReasoning> {
-  const messages = buildFullMessagesRequestMessages(systemPrompt, gameMessages, worldState);
-  const requestBody = buildReasoningRequest(messages, 'text');
-  const payload = await chatCompletion(requestBody);
-
-  return extractResponseWithReasoning(payload);
 }
 
 /**
@@ -510,6 +474,42 @@ function buildReasoningRequest(
     messages: messages as OpenRouterMessage[],
     reasoning: { enabled: true },
     include_reasoning: true
+  };
+
+  if (replyFormat === 'json') {
+    requestBody.response_format = { type: 'json_object' };
+  }
+
+  return requestBody;
+}
+
+/**
+ * 组装 chat request
+ * @param messages
+ * @param replyFormat 生成纯文本或者 json
+ * @returns
+ */
+function buildChatRequest(
+  messages: ChatMessage,
+  replyFormat: ReplyFormat,
+): ChatRequestBody {
+  if (config.llmProvider === 'deepseek') {
+    const requestBody: DeepSeekChatRequest = {
+      model: config.llmModel,
+      messages: messages as DeepSeekMessage[],
+      thinking: { type: 'disabled' },
+    };
+
+    if (replyFormat === 'json') {
+      requestBody.response_format = { type: 'json_object' };
+    }
+
+    return requestBody;
+  }
+
+  const requestBody: OpenRouterChatRequest = {
+    model: config.llmModel,
+    messages: messages as OpenRouterMessage[],
   };
 
   if (replyFormat === 'json') {
