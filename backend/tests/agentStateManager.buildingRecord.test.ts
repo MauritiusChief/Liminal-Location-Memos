@@ -44,7 +44,7 @@ function createWorldState(overrides: Partial<WorldState>): WorldState {
     playerIndoorLocation: null,
     playerVisionRange: 500,
     recentMessageHistory: [],
-    activeBuildingRecords: {},
+    playerBuildingRecords: {},
     activeVisibleLocations: [],
     activeFieldVisualDescriptions: {},
     activeExteriorVisualDescriptions: {},
@@ -64,7 +64,7 @@ describe("toWorldStatePrompt building record focus", () => {
         roomId: "lvl1_lobby",
         roomDescription: "门厅",
       },
-      activeBuildingRecords: {
+      playerBuildingRecords: {
         "way/current": {
           featureId: "way/current",
           category: "house",
@@ -175,7 +175,7 @@ describe("toWorldStatePrompt building record focus", () => {
         roomId: "suite_lvl3_1/bedroom",
         roomDescription: "卧室",
       },
-      activeBuildingRecords: {
+      playerBuildingRecords: {
         "way/suite": {
           featureId: "way/suite",
           category: "apartment",
@@ -218,7 +218,7 @@ describe("toWorldStatePrompt building record focus", () => {
   it("treats all buildings as external when player is not indoors", async () => {
     const prompt = await toWorldStatePrompt(createWorldState({
       playerIndoorLocation: null,
-      activeBuildingRecords: {
+      playerBuildingRecords: {
         "way/outdoor": {
           featureId: "way/outdoor",
           category: "house",

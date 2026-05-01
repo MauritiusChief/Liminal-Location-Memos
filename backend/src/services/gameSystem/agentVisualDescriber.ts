@@ -277,7 +277,7 @@ async function extractExteriorVisualDescriptions(
   const oldExteriorVisualDescriptionPrompt =  Object.values(state.activeExteriorVisualDescriptions)
     .map(record => [`buildingId=${record.buildingId}:`, record.content].join('\n'))
     .join('\n\n')
-  const visibleBuildingIds = Object.keys(state.activeBuildingRecords)
+  const visibleBuildingIds = Object.keys(state.playerBuildingRecords)
   const message = [
     '玩家周遭室外环境摘要：',
     scenePrompt,

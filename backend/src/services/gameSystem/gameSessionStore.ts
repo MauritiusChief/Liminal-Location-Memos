@@ -5,7 +5,7 @@ import type { BuildingSchema } from '../buildingGeneration/buildingSchema.js';
 import { FeatureId } from '../featureDetail.js';
 import type { BuildingRecord } from '../buildingGeneration/buildingRecord.js';
 import { GameStateToolCall } from './agentStateManager.js';
-import { ItemRecord } from '../objectGeneration/itemTemplates.js';
+import { CardboardItemRecord, ItemRecord } from '../objectGeneration/itemTemplates.js';
 
 export interface Position {
   lat: number;
@@ -186,6 +186,9 @@ interface FieldItemRecord extends ItemRecord {
   position: Position;
 }
 
+interface FieldCardboardItemRecord extends CardboardItemRecord {
+  position: Position;
+}
 
 
 //#region 常量

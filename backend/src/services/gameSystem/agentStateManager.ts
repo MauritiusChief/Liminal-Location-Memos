@@ -42,7 +42,7 @@ export interface WorldState {
   playerVisionRange: number;
   recentMessageHistory: GameMessage[];
   // 下列内容经过筛选，只包含玩家可见部分
-  activeBuildingRecords: Record<string, BuildingRecord>;
+  playerBuildingRecords: Record<string, BuildingRecord>;
   playerVisibleLocations: PlayerVisibleLocation[];
   // 只包含玩家可见的 Visual Description
   activeFieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
@@ -97,13 +97,30 @@ const ADJUST_PLAYER_VISIBLE_LOCATION_TOOL: GameStateToolDef = {
   name: 'adjust_player_visible_location',
   description: [
     '结合玩家所在建筑的信息、玩家当前的可视建筑位置以及玩家的行动，判断是否需要更新现有的可视建筑位置列表。',
-    '如果需要更新，则使用此工具将需要添加或者删除的可视建筑位置写入游戏状态机。'
+    '如果需要更新，则使用此工具将需要添加或者删除的可视建筑位置写入游戏状态机。此工具一次只能更新一处位置，如需更新多处则需使用多次。'
   ],
   arguments: {
     edit: { type: 'string', optional: false, description: '更新的类型，必须为`reveal`(揭露可视位置), `hide`(隐藏可视位置)二者之一。'},
     level: { type: 'number', optional: false, description: '被揭露或者隐藏的建筑位置的楼层层号数。'},
     suiteId: { type: 'string', optional: true, description: '若操作的目标是某个套房表层或套房内部子房间，则填写该套房 id。'},
     roomId: { type: 'string', optional: true, description: '被揭露或者隐藏的具体房间 id；若只操作 suite 表层则留空。'},
+  }
+}
+
+/**
+ * 创建 Cardboard Furniture 的游戏工具
+ * 暴露给 Book Composer 时不能说是草稿/Cardboard, 就说是 xxx info 好了
+ */
+const DRAFT_FURNITURE_TOOL: GameStateToolDef = {
+  name: "draft_furniture_tool",
+  description: [
+    '`Furniture`解释：在此游戏中，不只是家具，大型机器、固定装置等等带功能的固定物体也都算作`Furniture`，可通过TODO函数获取例子来理解。',
+    '如果用户的行动需要与`Furniture`互动，但现有游戏状态机没有可供互动的对象，或者互动对象仅存在于细节记录中，则使用此工具在游戏状态机中创建可互动的对象。',
+  ],
+  arguments: {
+    template: { type: 'string', optional: false, description: '创建时所使用的模板, 可通过TODO函数输入中文关键字查询可使用的模板(以及变种)。'},
+    varient: { type: 'string', optional: true, description: '创建时使用模板的哪种变种，可通过TODO函数输入中文关键字查询可使用的(模板以及)变种。'},
+    note: { type: 'string', optional: true, description: '创建此可互动对象时需注意的地方。'},
   }
 }
 
@@ -244,7 +261,7 @@ function formatRouteCandidatesPrompt(routeCandidates: AgentStateRouteCandidate[]
 export function pickWorldState(state: GameState): WorldState {
   const {playerPosition, playerOrientation, playerIndoorLocation, playerVisionRange, playerVisibleLocations} = state
   // TODO 也许需要动用数据库，判断建筑的最近点而非建筑的中心
-  const activeBuildingRecords = Object.fromEntries(Object.entries(state.buildingRecords).filter(
+  const playerBuildingRecords = Object.fromEntries(Object.entries(state.buildingRecords).filter(
     ([featureId, record]) => {
       const {lon: recordLon, lat: recordLat} = record.centerPosition
       const {lon: playerLon, lat: playerLat} = state.playerPosition
@@ -268,7 +285,7 @@ export function pickWorldState(state: GameState): WorldState {
     playerVisionRange,
     recentMessageHistory: state.messageHistory.slice(-12),
     playerVisibleLocations,
-    activeBuildingRecords,
+    playerBuildingRecords,
     activeFieldVisualDescriptions,
     activeExteriorVisualDescriptions,
     activeSectorVisualDescriptions,
@@ -300,7 +317,7 @@ export async function toWorldStatePrompt(state: WorldState, scene?: SceneObject)
   const visibleLocationPrompt = state.playerIndoorLocation
     ? state.playerVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
     : null;
-  const buildingRecordPrompt = Object.values(state.activeBuildingRecords)
+  const buildingRecordPrompt = Object.values(state.playerBuildingRecords)
     .map(record => formatBuildingRecordPrompt(record, state.playerIndoorLocation))
     .join('\n\n')
 
