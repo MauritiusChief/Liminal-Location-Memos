@@ -33,8 +33,8 @@ export function applySyncActiveIndoorLocationsTool(state: GameState, args: any):
   if (!targetLocation) return
 
   if (edit === "reveal") {
-    state.activeVisibleLocations = dedupeVisibleLocations([
-      ...state.activeVisibleLocations,
+    state.playerVisibleLocations = dedupeVisibleLocations([
+      ...state.playerVisibleLocations,
       targetLocation,
     ]);
     return;
@@ -46,12 +46,12 @@ export function applySyncActiveIndoorLocationsTool(state: GameState, args: any):
     return;
   }
 
-  state.activeVisibleLocations = state.activeVisibleLocations
+  state.playerVisibleLocations = state.playerVisibleLocations
     .filter((entry) => toVisibleLocationKey(entry) !== targetKey);
 }
 
 /**
- * 根据当前玩家室内位置生成基板 active visible locations。
+ * 根据当前玩家室内位置生成基板 player visible locations。
  * 在普通房间时只可见所在 sector 内的普通房间与 suite 外部，在 suite 时则只有子房间可见。
  * @param state
  */
@@ -65,10 +65,10 @@ export function fillBasicActiveIndoorLocations(state: GameState): void {
 
   if (location.locationType === "subRoom" && location.suiteId) { // 套房内则只可见内部子房间
     const locatedSuiteSubRooms = listSuiteSubRoomVisibleLocations(location.buildingId, location.level, sector, location.suiteId);
-    state.activeVisibleLocations = dedupeVisibleLocations(locatedSuiteSubRooms);
-  } else { // 否则是默认生成的基板 activePlayerVisibleLocations
+    state.playerVisibleLocations = dedupeVisibleLocations(locatedSuiteSubRooms);
+  } else { // 否则是默认生成的基板 playerVisibleLocations
     const basicVisibleLocations = listSectorVisibleLocations(location.buildingId, location.level, sector);
-    state.activeVisibleLocations = dedupeVisibleLocations(basicVisibleLocations);
+    state.playerVisibleLocations = dedupeVisibleLocations(basicVisibleLocations);
   }
 }
 

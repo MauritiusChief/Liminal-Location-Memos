@@ -43,7 +43,7 @@ export interface WorldState {
   recentMessageHistory: GameMessage[];
   // 下列内容经过筛选，只包含玩家可见部分
   activeBuildingRecords: Record<string, BuildingRecord>;
-  activeVisibleLocations: PlayerVisibleLocation[];
+  playerVisibleLocations: PlayerVisibleLocation[];
   // 只包含玩家可见的 Visual Description
   activeFieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>
@@ -89,12 +89,12 @@ const SET_PLAYER_INDOOR_LOCATION_TOOL: GameStateToolDef = {
   }
 }
 /**
- * 注意：只负责单个 indoor location 更新。
- * 玩家进入建筑、跨越楼层时，基板 active visible locations 会由程序生成。
+ * 注意：只负责单个 indoor location 微调。
+ * 玩家进入建筑、跨越楼层时，基板 player visible locations 会由程序生成。刻意在新基板生成时不保留旧的微调结果。
  * 默认只暴露当前 Sector 内的普通房间与 suite 表层，不自动暴露 suite 内 subRoom。
  */
-const SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL: GameStateToolDef = {
-  name: 'sync_active_indoor_locations',
+const ADJUST_PLAYER_VISIBLE_LOCATION_TOOL: GameStateToolDef = {
+  name: 'adjust_player_visible_location',
   description: [
     '结合玩家所在建筑的信息、玩家当前的可视建筑位置以及玩家的行动，判断是否需要更新现有的可视建筑位置列表。',
     '如果需要更新，则使用此工具将需要添加或者删除的可视建筑位置写入游戏状态机。'
@@ -130,7 +130,7 @@ export async function gameStateManager(
   const toolDefs = [
     MOVE_PLAYER_TOOL,
     SET_PLAYER_INDOOR_LOCATION_TOOL,
-    SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL,
+    ADJUST_PLAYER_VISIBLE_LOCATION_TOOL,
   ].map((def) => toToolPrompt(def));
   const systemPrompt = BUILD_GAME_STATE_MANAGER_SYSTEM(toolDefs);
   const { lat, lon } = state.playerPosition;
@@ -205,7 +205,7 @@ export async function applyGameStateToolCalls(state: GameState, toolCalls: GameS
       case SET_PLAYER_INDOOR_LOCATION_TOOL.name:
         await applySetPlayerIndoorLocationTool(state, args);
         break;
-      case SYNC_ACTIVE_INDOOR_LOCATIONS_TOOL.name:
+      case ADJUST_PLAYER_VISIBLE_LOCATION_TOOL.name:
         applySyncActiveIndoorLocationsTool(state, args);
         break;
     }
@@ -242,7 +242,7 @@ function formatRouteCandidatesPrompt(routeCandidates: AgentStateRouteCandidate[]
 }
 
 export function pickWorldState(state: GameState): WorldState {
-  const {playerPosition, playerOrientation, playerIndoorLocation, playerVisionRange, activeVisibleLocations} = state
+  const {playerPosition, playerOrientation, playerIndoorLocation, playerVisionRange, playerVisibleLocations} = state
   // TODO 也许需要动用数据库，判断建筑的最近点而非建筑的中心
   const activeBuildingRecords = Object.fromEntries(Object.entries(state.buildingRecords).filter(
     ([featureId, record]) => {
@@ -267,7 +267,7 @@ export function pickWorldState(state: GameState): WorldState {
     playerIndoorLocation,
     playerVisionRange,
     recentMessageHistory: state.messageHistory.slice(-12),
-    activeVisibleLocations,
+    playerVisibleLocations,
     activeBuildingRecords,
     activeFieldVisualDescriptions,
     activeExteriorVisualDescriptions,
@@ -298,7 +298,7 @@ export async function toWorldStatePrompt(state: WorldState, scene?: SceneObject)
     .map((record) => [`建筑ID：${record.buildingId}`, `区域：level ${record.level} - ${record.sectorName}`, record.content].join('\n'))
     .join('\n\n');
   const visibleLocationPrompt = state.playerIndoorLocation
-    ? state.activeVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
+    ? state.playerVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
     : null;
   const buildingRecordPrompt = Object.values(state.activeBuildingRecords)
     .map(record => formatBuildingRecordPrompt(record, state.playerIndoorLocation))

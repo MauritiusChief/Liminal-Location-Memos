@@ -89,7 +89,7 @@ export interface GameSessionSnapshot {
   activeSectorVisualDescriptions: string[];
   buildingSchemas: Record<string, BuildingSchema>;
   buildingRecords: Record<string, unknown>;
-  activeVisibleLocations: PlayerVisibleLocation[];
+  playerVisibleLocations: PlayerVisibleLocation[];
   llmProvider?: string;
   pendingVisualDescription: boolean;
   hasQueuedPlayerMessage: boolean;

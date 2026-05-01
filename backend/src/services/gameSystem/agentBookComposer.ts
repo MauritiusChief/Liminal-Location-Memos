@@ -21,7 +21,7 @@ export interface PlayerState {
   recentMessageHistory: GameMessage[];
   // 下列内容经过筛选，只包含玩家可见部分
   activeBuildingRecords: Record<string, BuildingRecord>;
-  activeVisibleLocations: PlayerVisibleLocation[];
+  playerVisibleLocations: PlayerVisibleLocation[];
   // 只包含玩家可见的 Visual Description
   activeFieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>
@@ -162,7 +162,7 @@ const PLAYER_STATE_BUILDING_RECORD_RANGE = 300
 //#region 内部逻辑
 
 export function pickPlayerState(state: GameState): PlayerState {
-  const {playerPosition, playerOrientation, playerIndoorLocation, playerVisionRange, activeVisibleLocations} = state
+  const {playerPosition, playerOrientation, playerIndoorLocation, playerVisionRange, playerVisibleLocations} = state
   // TODO 也许需要动用数据库，判断建筑的最近点而非建筑的中心
   const activeBuildingRecords = Object.fromEntries(Object.entries(state.buildingRecords).filter(
     ([featureId, record]) => {
@@ -187,7 +187,7 @@ export function pickPlayerState(state: GameState): PlayerState {
     playerIndoorLocation,
     playerVisionRange,
     recentMessageHistory: state.messageHistory.slice(-12),
-    activeVisibleLocations,
+    playerVisibleLocations,
     activeBuildingRecords,
     activeFieldVisualDescriptions,
     activeExteriorVisualDescriptions,
@@ -210,7 +210,7 @@ export function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): st
     .map((record) => [`建筑ID：${record.buildingId}`, record.content].join('\n'))
     .join('\n');
   const visibleLocationPrompt = state.playerIndoorLocation
-    ? state.activeVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
+    ? state.playerVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
     : null;
 
   const indoorLocationPrompt = formatIndoorLocationPrompt(state)

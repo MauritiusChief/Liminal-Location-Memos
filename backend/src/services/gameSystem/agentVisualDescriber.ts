@@ -347,7 +347,7 @@ async function extractSectorVisualDescriptions(
   const indoorLocationPrompt = formatIndoorLocationPrompt(state)
 
   const visibleLocationPrompt = state.playerIndoorLocation
-      ? state.activeVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
+      ? state.playerVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
       : null;
   const oldSectorVisualDescriptionPrompt =  Object.values(state.activeSectorVisualDescriptions)
     .map((record) => [`buildingId=${record.buildingId}`, `区域：level ${record.level} - ${record.sectorName}`, record.content].join('\n'))
@@ -396,8 +396,8 @@ async function extractSectorVisualDescriptions(
 
 /**
  * 只激活玩家当前所处 building + level + sector 对应的 Sector VD。
- * 这和 activeVisibleLocations 的 suite 内外可见范围是两套职责：
- * - activeVisibleLocations 控制玩家当前能看到哪些室内位置；
+ * 这和 playerVisibleLocations 的 suite 内外可见范围是两套职责：
+ * - playerVisibleLocations 控制玩家当前能看到哪些室内位置；
  * - activeSectorVisualDescriptions 控制整条 sector 级事实记录是否注入 prompt。
  * @param state
  */

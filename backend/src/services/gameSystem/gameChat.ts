@@ -261,7 +261,7 @@ async function initializeOpeningIndoorState(state: GameState): Promise<void> {
   const containingBuilding = await findContainingBuildingFeatureId(state.playerPosition);
   if (!containingBuilding) {
     state.playerIndoorLocation = null;
-    state.activeVisibleLocations = [];
+    state.playerVisibleLocations = [];
     return;
   }
 

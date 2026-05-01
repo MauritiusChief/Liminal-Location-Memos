@@ -87,19 +87,23 @@ export interface PlayerVisibleLocation {
  * 不包含流式请求、后台任务、排队消息等运行时字段。
  */
 export interface GameState {
+  // 玩家信息
   playerPosition: Position;
   playerOrientation: number;
   playerIndoorLocation: PlayerIndoorLocation | null;
   playerVisionRange: number;
   playerStatus: PlayerStatus;
+  playerVisibleLocations: PlayerVisibleLocation[];
+  // 完整聊天信息
   messageHistory: GameMessage[];
+  // 建筑、载具（未完成）、物品（未完成）信息
+  buildingSchemas: Record<string, BuildingSchema>;
+  buildingRecords: Record<string, BuildingRecord>; // 建筑的长期信息存储（包括未来可能会有的物品信息）
+  // 视觉
   activeFieldVisualDescriptions: string[];
   fieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: string[];
   exteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
-  buildingSchemas: Record<string, BuildingSchema>;
-  buildingRecords: Record<string, BuildingRecord>; // 建筑的长期信息存储（包括未来可能会有的物品信息）
-  activeVisibleLocations: PlayerVisibleLocation[];
   sectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
   activeSectorVisualDescriptions: string[];
 }
@@ -328,7 +332,7 @@ function createDefaultGameState(): GameState {
     exteriorVisualDescriptions: {},
     buildingSchemas: {},
     buildingRecords: {},
-    activeVisibleLocations: [],
+    playerVisibleLocations: [],
     sectorVisualDescriptions: {},
     activeSectorVisualDescriptions: [],
   };

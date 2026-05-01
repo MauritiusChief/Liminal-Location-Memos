@@ -35,7 +35,7 @@ export async function applySetPlayerIndoorLocationTool(
 
   if (move === "leave") {
     state.playerIndoorLocation = null;
-    state.activeVisibleLocations = [];
+    state.playerVisibleLocations = [];
     return;
   }
 
