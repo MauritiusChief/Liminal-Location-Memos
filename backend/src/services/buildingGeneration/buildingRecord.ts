@@ -1,10 +1,13 @@
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { pickRandom } from "../utils.js";
-import { BuildingSchema, ensureBuildingSchema, generateBuildingSchema, RoomSchema, SuiteSchema } from "./buildingSchema.js";
+import { BuildingSchema, ensureBuildingSchema, RoomSchema, SuiteSchema } from "./buildingSchema.js";
 import { GameState, Position } from "../gameSystem/gameSessionStore.js";
 import { query } from "@/db/client.js";
 import { DbBuildingFeatureDetailRow, FeatureId, mapBuildingDetailRowToFeatureDetail } from "../featureDetail.js";
 
+/**
+ * 内部（指 BuildingRoom/BuildingSubRoom）兼做物品/家具/载具在建筑内的存储地
+ */
 export interface BuildingRecord {
   featureId: string;
   category: string;
@@ -26,6 +29,9 @@ export interface BuildingSector {
   rooms: Record<string, BuildingRoom | BuildingSuite>; // key 为普通房间或套房容器的 id
 }
 
+/**
+ * 兼做物品/家具/载具在建筑内的存储地。
+ */
 export interface BuildingRoom {
   roomId: string;
   description: string;
@@ -45,6 +51,7 @@ export interface BuildingSuite {
 /**
  * 特意无 access。
  * subRoom 才是套房内部可实际落脚的位置，因此保留 roomId。
+ * 兼做物品/家具/载具在建筑内的存储地。
  */
 export interface BuildingSubRoom {
   roomId: string;

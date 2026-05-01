@@ -5,6 +5,7 @@ import type { BuildingSchema } from '../buildingGeneration/buildingSchema.js';
 import { FeatureId } from '../featureDetail.js';
 import type { BuildingRecord } from '../buildingGeneration/buildingRecord.js';
 import { GameStateToolCall } from './agentStateManager.js';
+import { ItemRecord } from '../objectGeneration/itemTemplates.js';
 
 export interface Position {
   lat: number;
@@ -99,13 +100,15 @@ export interface GameState {
   // 建筑、载具（未完成）、物品（未完成）信息
   buildingSchemas: Record<string, BuildingSchema>;
   buildingRecords: Record<string, BuildingRecord>; // 建筑的长期信息存储（包括未来可能会有的物品信息）
-  // 视觉
+  weatherAnchors: WeatherAnchor[];
+  chunckRecords: ChunckRecord[];
+  // 来自LLM的视觉事实信息落盘
   activeFieldVisualDescriptions: string[];
   fieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: string[];
   exteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
-  sectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
   activeSectorVisualDescriptions: string[];
+  sectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
 }
 
 /**
@@ -162,6 +165,28 @@ interface PlayerStatus {
   fatigue: number; // 疲劳值，任何行动都会增加疲劳，且只有睡觉可以恢复
   endurance: number; // 体力值，任何行动都需要体力值允许
 }
+
+/**
+ * 每 10km 创建一个新的天气锚定参数
+ */
+interface WeatherAnchor {
+  center: Position;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 把载具/物品...经纬度按 0.01° 取整，得到的就是所处的 chunck id
+ */
+interface ChunckRecord {
+  id: Position;
+}
+
+interface FieldItemRecord extends ItemRecord {
+  position: Position;
+}
+
+
 
 //#region 常量
 
@@ -325,16 +350,21 @@ function createDefaultGameState(): GameState {
     playerIndoorLocation: null,
     playerVisionRange: 500,
     playerStatus: INITIAL_PLAYER_STATUS,
+    playerVisibleLocations: [],
+
     messageHistory: [],
+
+    buildingSchemas: {},
+    buildingRecords: {},
+    weatherAnchors: [],
+    chunckRecords: [],
+
     activeFieldVisualDescriptions: [],
     fieldVisualDescriptions: {},
     activeExteriorVisualDescriptions: [],
     exteriorVisualDescriptions: {},
-    buildingSchemas: {},
-    buildingRecords: {},
-    playerVisibleLocations: [],
-    sectorVisualDescriptions: {},
     activeSectorVisualDescriptions: [],
+    sectorVisualDescriptions: {},
   };
 }
 
