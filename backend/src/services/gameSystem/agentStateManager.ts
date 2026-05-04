@@ -9,7 +9,6 @@ import { generateJsonReplyWithTools } from "./llm.js";
 import { BUILD_GAME_STATE_MANAGER_SYSTEM } from "./systemPrompts.js";
 import { applySetPlayerIndoorLocationTool } from "./toolIndoorPosition.js";
 import { applyMovePlayerTool } from "./toolMovePlayer.js";
-import type { AgentStateRouteCandidate } from "./agentStateRouter.js";
 import { buildPlayerActionContextPrompt } from "./agentUtils.js";
 import { applySyncActiveIndoorLocationsTool } from "./toolActiveIndoorLocations.js";
 
@@ -176,10 +175,7 @@ const QUERY_TEMPLATE_LLM_TOOL: LlmToolDef = {
  * @param state 保证 messageHistory 最新一条为 player Message 的 GameState
  * @returns 需要改变的游戏状态，各自需要改变的值等等，如果出错则返回空列表
  */
-export async function gameStateManager(
-  state: GameState,
-  routeCandidates: AgentStateRouteCandidate[],
-): Promise<GameStateToolCall[]> {
+export async function gameStateManager(state: GameState): Promise<GameStateToolCall[]> {
   console.log(`[${new Date().toISOString()}] gameStateManager() 触发`);
 
   const toolDefs = [
@@ -192,12 +188,9 @@ export async function gameStateManager(
   const sceneObject = await buildSceneFromRequest({ lat, lon, radius: WORLD_STATE_RADIUS_METERS}, state.playerOrientation);
   const worldState = pickWorldState(state)
   const worldStatePrompt = await toWorldStatePrompt(worldState, sceneObject);
-  // Manager 使用 Router 的初筛结果缩小判断范围，但最终仍以完整 worldState 为准。
+
   const message = [
     buildPlayerActionContextPrompt(state),
-    '---',
-    '行为类型初筛候选：',
-    formatRouteCandidatesPrompt(routeCandidates),
     '---',
     worldStatePrompt,
   ].join('\n');
@@ -296,14 +289,6 @@ export function isIntendedIndoor(toolCalls: GameStateToolCall[]): boolean | unde
   if (move === "leave") return false
 
   return undefined;
-}
-
-function formatRouteCandidatesPrompt(routeCandidates: AgentStateRouteCandidate[]): string {
-  if (!routeCandidates.length) {
-    return '[]（初筛为空；可能代表无状态变化，也可能代表初筛失败，请仍结合完整游戏状态判断。）';
-  }
-
-  return JSON.stringify(routeCandidates, null, 2);
 }
 
 export function pickWorldState(state: GameState): WorldState {

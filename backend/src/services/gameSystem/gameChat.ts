@@ -16,7 +16,6 @@ import { updateActiveVisualDescriptionRefs, upsertVisualDescriptions } from './a
 import { fillBasicActiveIndoorLocations } from './toolActiveIndoorLocations.js';
 import { applyGameStateToolCalls, gameStateManager } from './agentStateManager.js';
 import { ensureBuildingRecord, findContainingBuildingFeatureId } from '../buildingGeneration/buildingRecord.js';
-import { gameStateRouter } from './agentStateRouter.js';
 
 export type GameStreamEvent =
   | { type: 'player_message_accepted'; text: string }
@@ -161,8 +160,7 @@ async function executeTurnStream(
     });
 
     // Router 只做快速意图初筛；Manager 再结合完整 worldState 决定最终工具与参数。
-    const routeCandidates = await gameStateRouter(workingState);
-    const toolCalls = await gameStateManager(workingState, routeCandidates);
+    const toolCalls = await gameStateManager(workingState);
     await applyGameStateToolCalls(workingState, toolCalls);
     // 在生成当前回合 Book 之前，刷新 prompt 依赖的指向 Xxx Visual Description 的索引
     updateActiveVisualDescriptionRefs(workingState);

@@ -118,6 +118,7 @@ export async function generateJsonReplyWithTools(
   const messages = buildSingleMessageRequestMessages(systemPrompt, message);
 
   // 循环处理工具调用
+  // TODO 添加循环次数限制
   while (true) {
     const response = await respondReplyOrTool(messages, tools);
 
@@ -140,7 +141,7 @@ export async function generateJsonReplyWithTools(
         messages.push({
           role: 'tool',
           tool_call_id: toolCall.id,
-          content: source,
+          content: source, // 无脑填充 source
         });
       })
 

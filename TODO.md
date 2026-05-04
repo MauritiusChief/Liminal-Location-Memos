@@ -6,7 +6,6 @@
 
 ## 近期计划
 
-* 允许 Game State Manager 渐进披露工具信息、已有的物品定义信息等，需要添加真正的多轮对话功能了
 * 添加物品与容器生成功能后，记得提醒 Visual Describer 不要把物品信息也当做细节信息了
 
 * 添加建筑生成功能，具体在 buildingGeneration/_note 中
