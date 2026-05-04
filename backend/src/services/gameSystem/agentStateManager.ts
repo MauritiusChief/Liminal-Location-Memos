@@ -118,7 +118,7 @@ const ADJUST_PLAYER_VISIBLE_LOCATION_TOOL: GameStateToolDef = {
 }
 
 /**
- * 创建 Cardboard Furniture 的游戏工具
+ * 创建 Cardboard Furniture 的游戏工具，来源必须是完全可见的信息（不能创建看不到的家具）
  * 暴露给 Book Composer 时不能说是草稿/Cardboard, 就说是 xxx info 好了
  */
 const DRAFT_FURNITURE_TOOL: GameStateToolDef = {
@@ -128,17 +128,25 @@ const DRAFT_FURNITURE_TOOL: GameStateToolDef = {
     '如果用户的行动需要与`Furniture`互动，但现有游戏状态机没有可供互动的对象，或者互动对象仅存在于细节记录中，则使用此工具在游戏状态机中创建可互动的对象。',
   ],
   arguments: {
-    template: { type: 'string', optional: false, description: '创建时所使用的模板, 可通过TODO函数输入中文关键字查询可使用的模板(以及变种)。'},
-    varient: { type: 'string', optional: true, description: '创建时使用模板的哪种变种，可通过TODO函数输入中文关键字查询可使用的(模板以及)变种。'},
+    template: { type: 'string', optional: false, description: '创建时所使用的模板, 可通过`query_template`函数输入中文关键字查询可使用的模板(以及变种)。'},
+    varient: { type: 'string', optional: true, description: '创建时使用模板的哪种变种，`query_template`函数查询模板时会附上其所有可用变种。'},
+    content: { type: 'string' },
     note: { type: 'string', optional: true, description: '创建此可互动对象时需注意的地方。'},
   }
+}
+
+/**
+ * 创建 Cardboard Item 的游戏工具，来源必须是完全可见的信息（不能创建看不到的物品）
+ */
+const DRAFT_ITEM_TOOL: GameStateToolDef = {
+
 }
 
 //#region 渐进式披露工具
 
 const LIST_TEMPLATE_LLM_TOOL: LlmToolDef = {
   name: "list_template",
-  description: "列举某个大类的或者全部的，创建供用户行动用的对象的模板。",
+  description: "列举某个大类的或者全部的，创建‘供用户行动用的对象’的模板。",
   parameters: {
     type: "object",
     properties: {
@@ -152,7 +160,7 @@ const LIST_TEMPLATE_LLM_TOOL: LlmToolDef = {
 
 const QUERY_TEMPLATE_LLM_TOOL: LlmToolDef = {
   name: "query_template",
-  description: "输入中文关键字，查找匹配的创建供用户行动用的对象的模板。",
+  description: "输入中文关键字，查找匹配的创建‘供用户行动用的对象’的模板。",
   parameters: {
     type: "object",
     properties: {
