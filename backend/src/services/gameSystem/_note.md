@@ -30,13 +30,13 @@ Game State 术语：
   - **Sector Visual Description**
     - 内容与 Field Visual Description 类似，但记录的 index 是某建筑某楼层某 Sector，且一次性涵盖整个 Sector
     - 只有所在 Sector 的 Visual Description 才会激活
-- **Visual Location**：在 Game State 的 activeVisualLocations 中用来记载当前玩家可看到的范围。
-  - activeVisualLocations 决定关系如下：默认情况下只能看到所在 Sector 的普通房间与套房表层。特殊情况下：
+- **Visible Location**：在 Game State 的 playerVisibleLocations 中用来记载当前玩家可看到的范围。
+  - playerVisibleLocations 决定关系如下：默认情况下只能看到所在 Sector 的普通房间与套房表层。特殊情况下：
     - 处在楼梯口等，可以看见相邻楼层的垂直连接处，比如楼梯间或者阁楼
     - 破坏了视觉遮挡的情况下，可以看到套房内部的子房间
     - 破坏了视觉遮挡的情况下，可以看到 internal access 相连的另一栋建筑的 internal access 另一端房间
-  - activeVisualLocations 在玩家每次转移 Sector 时，都会重新计算并由 Game State Manager 指定特殊情况
-  - activeVisualLocations 不决定可互动关系，玩家总是只能和所在的 Indoor Location 互动
+  - playerVisibleLocations 在玩家每次转移 Sector 时，都会重新计算并由 Game State Manager 指定特殊情况
+  - playerVisibleLocations 不决定可互动关系，玩家总是只能和所在的 Indoor Location 互动
 
 ## 游戏流程
 
@@ -46,7 +46,7 @@ Game State 术语：
 2. 生成初始 Book Message 时，会先以 stream 的形式把文本增量发给前端
 3. Book Message stream 完成后，先立即提交本轮 Game Save，再由 Visual Describer (Agent) 根据 Book Message 和已有的世界状态撰写/更新 Visual Description
   - 为了更短的互动前静止时间，Visual Description 不再阻塞 Book Message 的送达
-  - 在 Visual Description 工作完成之前，只允许暂存 1 条下一回合的 User Message；若队列已占满，则拒绝新的消息
+  - 在 Visual Description 工作完成之前，只允许暂存 1 条下一回合的 User Message，（TODO）界面形式与发送消息后等待回复一模一样
   - 当 Visual Description 准备完毕后，排队中的下一条消息才会进入下一回合
 
 ### 常规回合
