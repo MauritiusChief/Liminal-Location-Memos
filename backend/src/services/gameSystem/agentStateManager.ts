@@ -130,8 +130,8 @@ const DRAFT_FURNITURE_TOOL: GameStateToolDef = {
   arguments: {
     template: { type: 'string', optional: false, description: '创建时所使用的模板, 可通过`query_template`函数输入中文关键字查询可使用的模板(以及变种)。'},
     varient: { type: 'string', optional: true, description: '创建时使用模板的哪种变种，`query_template`函数查询模板时会附上其所有可用变种。'},
-    content: { type: 'string' },
-    note: { type: 'string', optional: true, description: '创建此可互动对象时需注意的地方。'},
+    content: { type: 'JSON array of string', optional: true, description: '创建时填充哪个或哪些内容物表，`query_template`函数查询模板时会附上其所有可用内容物表。'},
+    note: { type: 'string', optional: true, description: '此可互动对象的零碎细节如使用痕迹等。'},
   }
 }
 
@@ -139,7 +139,7 @@ const DRAFT_FURNITURE_TOOL: GameStateToolDef = {
  * 创建 Cardboard Item 的游戏工具，来源必须是完全可见的信息（不能创建看不到的物品）
  */
 const DRAFT_ITEM_TOOL: GameStateToolDef = {
-
+  
 }
 
 //#region 渐进式披露工具
