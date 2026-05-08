@@ -118,14 +118,22 @@ const ADJUST_PLAYER_VISIBLE_LOCATION_TOOL: GameStateToolDef = {
 }
 
 /**
- * 创建 Cardboard Furniture 的游戏工具，来源必须是完全可见的信息（不能创建看不到的家具）
+ * 
+ * 创建 Cardboard XXX 的游戏工具，来源必须是完全可见的信息（不能创建看不到的东西）
  * 暴露给 Book Composer 时不能说是草稿/Cardboard, 就说是 xxx info 好了
+ * 
+ * 创建 Cardboard Furniture 时：
+ * 此工具会根据模板与变种自动决定包含哪些功能并设置对应的 Cardboard Item
+ * 而 Cardboard Loots 有些会被自动设置，有些需要 LLM 指定
+ * 
+ * 创建 Cardboard Item 时:
+ * 不用来创建 Cardboard Furniture/Vehicle 的功能物品
  */
-const DRAFT_FURNITURE_TOOL: GameStateToolDef = {
-  name: "draft_furniture_tool",
+const DRAFT_OBJECT_TOOL: GameStateToolDef = {
+  name: "draft_object_tool",
   description: [
-    '`Furniture`解释：在此游戏中，不只是家具，大型机器、固定装置等等带功能的固定物体也都算作`Furniture`，可通过`list_template`函数获取例子来理解有哪些东西算作`Furniture`。',
-    '如果用户的行动需要与`Furniture`互动，但现有游戏状态机没有可供互动的对象，或者互动对象仅存在于细节记录中，则使用此工具在游戏状态机中创建可互动的对象。',
+    '如果用户的行动需要与物体互动，但现有游戏状态机没有可供互动的对象，或者互动对象仅存在于细节记录中，则使用此工具在游戏状态机中创建可互动的对象。',
+    '可通过`list_template`函数获取例子来理解有哪些东西模板可用。',
   ],
   arguments: {
     template: { type: 'string', optional: false, description: '创建时所使用的模板, 可通过`query_template`函数输入中文关键字查询可使用的模板(以及变种)。'},
@@ -133,13 +141,6 @@ const DRAFT_FURNITURE_TOOL: GameStateToolDef = {
     content: { type: 'JSON array of string', optional: true, description: '创建时填充哪个或哪些内容物表，`query_template`函数查询模板时会附上其所有可用内容物表。'},
     note: { type: 'string', optional: true, description: '此可互动对象的零碎细节如使用痕迹等。'},
   }
-}
-
-/**
- * 创建 Cardboard Item 的游戏工具，来源必须是完全可见的信息（不能创建看不到的物品）
- */
-const DRAFT_ITEM_TOOL: GameStateToolDef = {
-  
 }
 
 //#region 渐进式披露工具
