@@ -140,6 +140,43 @@ export async function ensureBuildingRecord(featureId: FeatureId, state: GameStat
   return record;
 }
 
+/**
+ * 根据玩家室内位置从 BuildingRecord 中定位到具体的房间（BuildingRoom 或 BuildingSubRoom），
+ * 以便向该房间添加物品/家具。
+ */
+export function findRoomInBuilding(
+  record: BuildingRecord,
+  location: { level: number; sectorName: string; locationType: string; suiteId?: string; roomId: string },
+): BuildingRoom | BuildingSubRoom | null {
+  const level = record.levels[location.level];
+  if (!level) {
+    return null;
+  }
+
+  const sector = level.sectors[location.sectorName];
+  if (!sector) {
+    return null;
+  }
+
+  // 目标位于套房的子房间内
+  if (location.locationType === "subRoom" && location.suiteId) {
+    const suiteEntry = sector.rooms[location.suiteId];
+    if (!suiteEntry || !("subRooms" in suiteEntry)) {
+      return null;
+    }
+
+    return suiteEntry.subRooms[location.roomId] ?? null;
+  }
+
+  // 目标位于普通房间内
+  const roomEntry = sector.rooms[location.roomId];
+  if (roomEntry && !("subRooms" in roomEntry)) {
+    return roomEntry;
+  }
+
+  return null;
+}
+
 //#region 蓝图生成建筑
 
 /**
