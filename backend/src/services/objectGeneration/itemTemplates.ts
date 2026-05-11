@@ -1,20 +1,11 @@
+import { CardboardObjectRecord, CardboardObjectTemplate, ObjectRecord } from "./objectGeneraterShared.js";
 
 
 /**
  * 兼容尚未细化完的部分
  * 质量、体积（对于软性物品）、长度（对于可改装物品）会随着 parts 和 content 实时更新
  */
-export interface ItemRecord {
-  uuid: string;
-  name: string;
-  mass: number; // 单位为 kg
-  volume: number; // 单位为 L
-  length: number; // 单位为 cm
-  selfMass: number;
-  selfVolume: number;
-  selfLength: number;
-  description: string;
-  // 物品特有
+export interface ItemRecord extends ObjectRecord {
   parts: Record<string, PartRecord>; // 键为 uuid
   shape?: string;
   material?: string;
@@ -48,36 +39,29 @@ export interface ContentInsertingMethod {
 
 }
 
-export interface CardboardItemRecord {
-  uuid: string;
-  name: string;
-  aprxMass: number; // 单位为 kg
-  aprxVolume: number; // 单位为 L
-  aprxLength: number; // 单位为 cm
-  description: string;
-  note: string;
-}
+// export interface CardboardItemRecord extends CardboardObjectRecord {}
+export type CardboardItemRecord = CardboardObjectRecord
 
 /**
  * TODO 暂时做成和 Cardboard Item 一模一样
  */
-export interface CardboardLootsRecord {
-  uuid: string;
-  name: string;
-  aprxMass: number; // 单位为 kg
-  aprxVolume: number; // 单位为 L
-  aprxLength: number; // 单位为 cm
-  description: string;
-  note: string;
-}
+export type CardboardLootsRecord = CardboardObjectRecord
+// export interface CardboardLootsRecord extends CardboardObjectRecord {}
 
-/**
- * 给 LLM 看的
- */
-interface CardboardItemTemplate {
-  id: string;
-  keyword: string; // 用来给搜索引擎比对的
-  description: string;
-  varients: {id: string, description: string}[];
-  availableLootsId: {id: string, description: string}[]
-}
+// /**
+//  * 给 LLM 看的
+//  */
+// interface CardboardItemTemplate extends CardboardObjectTemplate {}
+
+export const CARDBOARD_ITEM_TEMPLATES: CardboardObjectTemplate[] = [
+  {
+    id: "fried_chips",
+    keyword: "膨化食品油炸薯片",
+    description: "包装好的薯片，好吃但没营养，通常意义上的垃圾食品。",
+    varients: [
+      {id: "plain", description: "只加了盐的原味薯片"},
+      {id: "barbecue_flavored", description: "烧烤酱口味的薯片"},
+    ],
+    availableLootsId: [],
+  }
+]

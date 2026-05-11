@@ -5,6 +5,7 @@ import {
   DeepSeekMessage,
   DeepSeekTool,
   DeepSeekToolCall,
+  GeneralSource,
   NormalizedLlmResponse,
   NormalizedLlmStreamEvent,
   OpenRouterChatRequest,
@@ -105,14 +106,14 @@ export async function generateJsonReplySingleMessage(
  * @param systemPrompt
  * @param message 单个用户消息
  * @param tools
- * @param source 工具返回的内容的来源（目前是占位）
+ * @param source 工具返回的内容的来源
  * @returns
  */
-export async function generateJsonReplyWithTools(
+export async function generateJsonReplyWithSource(
   systemPrompt: string,
   message: string,
   tools: LlmToolDef[],
-  source: string,
+  source: GeneralSource[],
 ): Promise<ResponseWithReasoning> {
   // 单消息模式初始化
   const messages = buildSingleMessageRequestMessages(systemPrompt, message);
@@ -128,7 +129,7 @@ export async function generateJsonReplyWithTools(
       };
     }
 
-    // 处理工具调用：真实记录 tool_calls，虚假返回 source
+    // 处理工具调用：真实记录 tool_calls
     if (response.toolCalls?.length) {
       messages.push({
         role: 'assistant',
@@ -136,11 +137,17 @@ export async function generateJsonReplyWithTools(
         reasoning_content: response.reasoning,
         tool_calls: response.toolCalls,
       });
+
+      const query: string[] = JSON.parse(response.reply)
+      const filteredSource = source.filter( s => {
+        return query.every( q => s.keyword.includes(q))
+      })
+
       response.toolCalls.forEach( toolCall => {
         messages.push({
           role: 'tool',
           tool_call_id: toolCall.id,
-          content: source,
+          content: JSON.stringify(filteredSource, null, 2),
         });
       })
 

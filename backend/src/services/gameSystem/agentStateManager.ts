@@ -5,13 +5,14 @@ import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatV
 import type { BuildingLevel, BuildingRecord, BuildingRoom, BuildingSector } from "../buildingGeneration/buildingRecord.js";
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
 import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, SectorVisualDescriptionRecord } from "./gameSessionStore.js";
-import { generateJsonReplyWithTools } from "./llm.js";
+import { generateJsonReplyWithSource } from "./llm.js";
 import { BUILD_GAME_STATE_MANAGER_SYSTEM } from "./systemPrompts.js";
 import { applySetPlayerIndoorLocationTool } from "./toolIndoorPosition.js";
 import { applyMovePlayerTool } from "./toolMovePlayer.js";
 import type { AgentStateRouteCandidate } from "./agentStateRouter.js";
 import { buildPlayerActionContextPrompt } from "./agentUtils.js";
 import { applySyncActiveIndoorLocationsTool } from "./toolActiveIndoorLocations.js";
+import { CARDBOARD_TEMPLATES } from "../objectGeneration/objectGeneraterShared.js";
 
 export interface GameStateToolCall {
   name: string;
@@ -133,31 +134,31 @@ const DRAFT_OBJECT_TOOL: GameStateToolDef = {
   name: "draft_object_tool",
   description: [
     '如果用户的行动需要与物体互动，但现有游戏状态机没有可供互动的对象，或者互动对象仅存在于细节记录中，则使用此工具在游戏状态机中创建可互动的对象。',
-    '可通过`list_template`函数获取例子来理解有哪些东西模板可用。',
+    '可通过`query_template`函数获取例子来理解有哪些东西模板可用。',
   ],
   arguments: {
-    template: { type: 'string', optional: false, description: '创建时所使用的模板, 可通过`query_template`函数输入中文关键字查询可使用的模板(以及变种)。'},
-    varient: { type: 'string', optional: true, description: '创建时使用模板的哪种变种，`query_template`函数查询模板时会附上其所有可用变种。'},
-    content: { type: 'JSON array of string', optional: true, description: '创建时填充哪个或哪些内容物表，`query_template`函数查询模板时会附上其所有可用内容物表。'},
+    template: { type: 'string', optional: false, description: '创建时所使用的模板的id, 可通过`query_template`函数输入中文关键字查询可使用的模板(以及变种)。'},
+    varient: { type: 'string', optional: true, description: '创建时使用模板的哪种变种的id，`query_template`函数查询模板时会附上其所有可用变种。'},
+    content: { type: 'JSON array of string', optional: true, description: '创建时填充哪个或哪些内容物表的id，`query_template`函数查询模板时会附上其所有可用内容物表。'},
     note: { type: 'string', optional: true, description: '此可互动对象的零碎细节如使用痕迹等。'},
   }
 }
 
 //#region 渐进式披露工具
 
-const LIST_TEMPLATE_LLM_TOOL: LlmToolDef = {
-  name: "list_template",
-  description: "列举某个大类的或者全部的，创建‘供用户行动用的对象’的模板。",
-  parameters: {
-    type: "object",
-    properties: {
-      "kind": {
-        type: "string",
-        description: "需要列举模板的大类（目前仅`Furniture`可用），留空以列举所有大类的模板。",
-      }
-    },
-  }
-}
+// const LIST_TEMPLATE_LLM_TOOL: LlmToolDef = {
+//   name: "list_template",
+//   description: "列举某个大类的或者全部的，创建‘供用户行动用的对象’的模板。",
+//   parameters: {
+//     type: "object",
+//     properties: {
+//       "kind": {
+//         type: "string",
+//         description: "需要列举模板的大类（目前仅`Furniture`可用），留空以列举所有大类的模板。",
+//       }
+//     },
+//   }
+// }
 
 const QUERY_TEMPLATE_LLM_TOOL: LlmToolDef = {
   name: "query_template",
@@ -166,8 +167,8 @@ const QUERY_TEMPLATE_LLM_TOOL: LlmToolDef = {
     type: "object",
     properties: {
       "query": {
-        type: "string",
-        description: "简略中文关键字，无需附加'模板'等冗余字段。",
+        type: "JSON array of string",
+        description: "一个或多个简略中文关键字，返回结果仅有包含全部关键字的模板，无需附加'模板'等冗余字段。",
       }
     },
   }
@@ -219,16 +220,15 @@ export async function gameStateManager(
 
   const tools = [
     QUERY_TEMPLATE_LLM_TOOL,
-    LIST_TEMPLATE_LLM_TOOL,
   ]
 
   try {
     // 获取 LLM 返回（支持工具调用循环）
-    const response = await generateJsonReplyWithTools(
+    const response = await generateJsonReplyWithSource(
       systemPrompt,
       message,
       tools,
-      "目前尚在测试阶段，模板只有冰箱模板可用，id是`fridge`且没有变种"
+      CARDBOARD_TEMPLATES
     );
     // // MOCK
     // const response = {reply: '[]', reasoning: ''}

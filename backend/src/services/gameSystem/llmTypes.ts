@@ -115,3 +115,12 @@ export type NormalizedLlmStreamEvent = {
   reasoningDelta?: string
   done: boolean
 }
+
+/**
+ * 所有 LLM 可查询信息的地方都扩展此处
+ */
+export interface GeneralSource {
+  id: string;
+  keyword: string; // 用来给搜索引擎比对的
+  description: string;
+}
