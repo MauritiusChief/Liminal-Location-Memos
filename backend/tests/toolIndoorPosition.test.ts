@@ -18,7 +18,7 @@ import {
   applySetPlayerIndoorLocationTool,
   chooseBuildingEntranceIndoorLocation,
 } from "../src/services/gameSystem/toolIndoorPosition";
-import { applySyncActiveIndoorLocationsTool } from "../src/services/gameSystem/toolActiveIndoorLocations";
+import { applySyncPlayerIndoorLocationsTool } from "../src/services/gameSystem/toolActiveIndoorLocations";
 import { generateBuildingRecord } from "../src/services/buildingGeneration/buildingRecord";
 import type { BuildingSchema } from "../src/services/buildingGeneration/buildingSchema";
 import type { GameState } from "../src/services/gameSystem/gameSessionStore";
@@ -231,7 +231,7 @@ describe("applySetPlayerIndoorLocationTool", () => {
   });
 });
 
-describe("applySyncActiveIndoorLocationsTool", () => {
+describe("applySyncPlayerIndoorLocationsTool", () => {
   it("reveals valid extra indoor locations and does not hide the current location", () => {
     const state = buildGameState();
     state.playerIndoorLocation = {
@@ -261,13 +261,13 @@ describe("applySyncActiveIndoorLocationsTool", () => {
       roomDescription: "大堂",
     }];
 
-    applySyncActiveIndoorLocationsTool(state, {
+    applySyncPlayerIndoorLocationsTool(state, {
       edit: "reveal",
       level: 1,
       suiteId: "lvl1_suite",
       roomId: "lvl1_suite/bedroom",
     });
-    applySyncActiveIndoorLocationsTool(state, {
+    applySyncPlayerIndoorLocationsTool(state, {
       edit: "hide",
       level: 1,
       roomId: "lobby",

@@ -45,7 +45,7 @@ function createWorldState(overrides: Partial<WorldState>): WorldState {
     playerVisionRange: 500,
     recentMessageHistory: [],
     playerBuildingRecords: {},
-    activeVisibleLocations: [],
+    playerVisibleLocations: [],
     activeFieldVisualDescriptions: {},
     activeExteriorVisualDescriptions: {},
     activeSectorVisualDescriptions: {},

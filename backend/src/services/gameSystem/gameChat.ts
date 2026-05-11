@@ -13,7 +13,7 @@ import {
 import {chooseRandomIndoorLocation} from './toolIndoorPosition.js';
 import { streamInitialBookMessage, streamRegularBookMessage } from './agentBookComposer.js';
 import { updateActiveVisualDescriptionRefs, upsertVisualDescriptions } from './agentVisualDescriber.js';
-import { fillBasicActiveIndoorLocations } from './toolActiveIndoorLocations.js';
+import { fillBasicPlayerIndoorLocations } from './toolActiveIndoorLocations.js';
 import { applyGameStateToolCalls, gameStateManager } from './agentStateManager.js';
 import { ensureBuildingRecord, findContainingBuildingFeatureId } from '../buildingGeneration/buildingRecord.js';
 import { gameStateRouter } from './agentStateRouter.js';
@@ -49,7 +49,7 @@ export async function streamGameStart(emit: EmitGameEvent): Promise<GameSession>
   const session = await createRuntimeSession();
   const workingState = cloneGameState(session.gameState);
   await initializeOpeningIndoorState(workingState);
-  fillBasicActiveIndoorLocations(workingState);
+  fillBasicPlayerIndoorLocations(workingState);
 
   const openingMessage = await streamInitialBookMessage(workingState, emit);
 
@@ -270,7 +270,7 @@ async function initializeOpeningIndoorState(state: GameState): Promise<void> {
   // 建筑命中查询拿到的 tags 需要稳定保留在 record 中，供开局与后续回合复用。
   record.tags = containingBuilding.tags;
   state.playerIndoorLocation = chooseRandomIndoorLocation(record);
-  fillBasicActiveIndoorLocations(state)
+  fillBasicPlayerIndoorLocations(state)
 }
 
 /**

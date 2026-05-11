@@ -11,8 +11,9 @@ import { applySetPlayerIndoorLocationTool } from "./toolIndoorPosition.js";
 import { applyMovePlayerTool } from "./toolMovePlayer.js";
 import type { AgentStateRouteCandidate } from "./agentStateRouter.js";
 import { buildPlayerActionContextPrompt } from "./agentUtils.js";
-import { applySyncActiveIndoorLocationsTool } from "./toolActiveIndoorLocations.js";
+import { applySyncPlayerIndoorLocationsTool } from "./toolActiveIndoorLocations.js";
 import { CARDBOARD_TEMPLATES } from "../objectGeneration/objectGeneraterShared.js";
+import { applyCreateCardboardObject } from "./toolCreateCardboard.js";
 
 export interface GameStateToolCall {
   name: string;
@@ -280,8 +281,11 @@ export async function applyGameStateToolCalls(state: GameState, toolCalls: GameS
         await applySetPlayerIndoorLocationTool(state, args);
         break;
       case ADJUST_PLAYER_VISIBLE_LOCATION_TOOL.name:
-        applySyncActiveIndoorLocationsTool(state, args);
+        applySyncPlayerIndoorLocationsTool(state, args);
         break;
+      case DRAFT_OBJECT_TOOL.name:
+        applyCreateCardboardObject(state, args);
+        break
     }
 
   }

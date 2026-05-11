@@ -5,12 +5,12 @@ import { dedupeVisibleLocations, findLocationContext, listSectorVisibleLocations
 
 
 /**
- * 在基板的 Active Indoor Locations 基础上更新玩家可见范围的函数，刻意不去考虑基板重算之后的情况
+ * 在基板的 Player Indoor Locations 基础上更新玩家可见范围的函数，刻意不去考虑基板重算之后的情况
  * @param state
  * @param args
  * @returns
  */
-export function applySyncActiveIndoorLocationsTool(state: GameState, args: any): void {
+export function applySyncPlayerIndoorLocationsTool(state: GameState, args: any): void {
   const location = state.playerIndoorLocation;
   if (!location) {
     return;
@@ -55,7 +55,7 @@ export function applySyncActiveIndoorLocationsTool(state: GameState, args: any):
  * 在普通房间时只可见所在 sector 内的普通房间与 suite 外部，在 suite 时则只有子房间可见。
  * @param state
  */
-export function fillBasicActiveIndoorLocations(state: GameState): void {
+export function fillBasicPlayerIndoorLocations(state: GameState): void {
   const location = state.playerIndoorLocation;
   if (!location) return
 
