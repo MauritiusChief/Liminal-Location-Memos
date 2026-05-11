@@ -10,11 +10,14 @@ export interface ItemRecord {
   mass: number; // 单位为 kg
   volume: number; // 单位为 L
   length: number; // 单位为 cm
+  selfMass: number;
+  selfVolume: number;
+  selfLength: number;
   description: string;
   // 物品特有
   parts: Record<string, PartRecord>; // 键为 uuid
-  shape: string;
-  material: string;
+  shape?: string;
+  material?: string;
   content: Record<string, ContentRecord>; // 键为 uuid 值
 }
 

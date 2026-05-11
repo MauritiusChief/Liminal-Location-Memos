@@ -10,6 +10,9 @@ export interface FurnitureRecord {
   mass: number; // 单位为 kg
   volume: number; // 单位为 L
   length: number; // 单位为 cm
+  selfMass: number;
+  selfVolume: number;
+  selfLength: number;
   description: string;
   // Furniture 特有
   parts: Record<string, PartRecord>; // 键为 uuid
@@ -25,7 +28,7 @@ export interface CardboardFurnitureRecord {
   description: string;
   note: string;
   // Furniture 特有
-  parts: Record<string, string>; // 键为 uuid 值为功能物品描述
+  parts: Record<string, string>; // 键为 uuid, 值为功能物品描述
   loots: Record<string, CardboardLootsRecord | CardboardItemRecord>; // 键为 uuid 值
 }
 
