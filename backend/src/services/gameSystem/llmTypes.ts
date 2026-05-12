@@ -57,6 +57,11 @@ export type DeepSeekChatResponse = {
 
 //#region Openrouter 类型
 
+/**
+ * TODO tools 定义疑似不同，需要修改
+ * https://openrouter.ai/docs/guides/features/tool-calling
+ * https://api-docs.deepseek.com/guides/function_calling
+ */
 export type OpenRouterTool = DeepSeekTool
 
 export type OpenRouterToolCall = DeepSeekToolCall

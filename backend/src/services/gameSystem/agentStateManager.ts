@@ -168,7 +168,8 @@ const QUERY_TEMPLATE_LLM_TOOL: LlmToolDef = {
     type: "object",
     properties: {
       "query": {
-        type: "JSON array of string",
+        type: "array",
+        items: {type: "string", description: "一个中文关键字"},
         description: "一个或多个简略中文关键字，返回结果仅有包含全部关键字的模板，无需附加'模板'等冗余字段。",
       }
     },

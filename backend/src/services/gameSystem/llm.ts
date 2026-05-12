@@ -130,7 +130,7 @@ export async function generateJsonReplyWithSource(
     }
 
     // 处理工具调用：真实记录 tool_calls
-    if (response.toolCalls?.length) {
+    if (response.toolCalls?.length > 0) {
       messages.push({
         role: 'assistant',
         content: response.reply,
@@ -138,12 +138,14 @@ export async function generateJsonReplyWithSource(
         tool_calls: response.toolCalls,
       });
 
-      const query: string[] = JSON.parse(response.reply)
-      const filteredSource = source.filter( s => {
-        return query.every( q => s.keyword.includes(q))
-      })
-
       response.toolCalls.forEach( toolCall => {
+        // TODO 兼容多种 toolCall
+        const toolArgs: {query: string[]} = JSON.parse(toolCall.function.arguments)
+        const query = toolArgs["query"]
+        const filteredSource = source.filter( s => {
+          return query.every( q => s.keyword.includes(q))
+        })
+
         messages.push({
           role: 'tool',
           tool_call_id: toolCall.id,
