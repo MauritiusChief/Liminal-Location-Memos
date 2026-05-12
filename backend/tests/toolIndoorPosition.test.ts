@@ -29,16 +29,26 @@ function buildGameState(): GameState {
     playerOrientation: 0,
     playerIndoorLocation: null,
     playerVisionRange: 500,
+    playerStatus: {
+      health: 100,
+      blood_loss: 0, infection: 0, poisonous: 0, nerv_mis: 0,
+      hydration: 100, calorie: 100, protein: 100,
+      exceeded_heat: 0, essential_heat: 100,
+      fatigue: 0,
+      endurance: 100,
+    },
+    playerVisibleLocations: [],
     messageHistory: [],
+    buildingSchemas: {},
+    buildingRecords: {},
+    weatherAnchors: [],
+    chunckRecords: [],
     activeFieldVisualDescriptions: [],
     fieldVisualDescriptions: {},
     activeExteriorVisualDescriptions: [],
     exteriorVisualDescriptions: {},
-    buildingSchemas: {},
-    buildingRecords: {},
-    activeVisibleLocations: [],
-    sectorVisualDescriptions: {},
     activeSectorVisualDescriptions: [],
+    sectorVisualDescriptions: {},
   };
 }
 
@@ -252,7 +262,7 @@ describe("applySyncPlayerIndoorLocationsTool", () => {
         },
       },
     }));
-    state.activeVisibleLocations = [{
+    state.playerVisibleLocations = [{
       buildingId: "way/5",
       level: 1,
       sectorName: "main",
@@ -273,7 +283,7 @@ describe("applySyncPlayerIndoorLocationsTool", () => {
       roomId: "lobby",
     });
 
-    expect(state.activeVisibleLocations).toEqual([
+    expect(state.playerVisibleLocations).toEqual([
       {
         buildingId: "way/5",
         level: 1,

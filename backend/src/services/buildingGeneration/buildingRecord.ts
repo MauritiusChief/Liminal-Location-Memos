@@ -1,7 +1,7 @@
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { pickRandom } from "../utils.js";
 import { BuildingSchema, ensureBuildingSchema, RoomSchema, SuiteSchema } from "./buildingSchema.js";
-import { GameState, Position } from "../gameSystem/gameSessionStore.js";
+import { GameState, PlayerIndoorLocation, Position } from "../gameSystem/gameSessionStore.js";
 import { query } from "@/db/client.js";
 import { DbBuildingFeatureDetailRow, FeatureId, mapBuildingDetailRowToFeatureDetail } from "../featureDetail.js";
 import { CardboardItemRecord, ItemRecord } from "../objectGeneration/itemTemplates.js";
@@ -146,7 +146,7 @@ export async function ensureBuildingRecord(featureId: FeatureId, state: GameStat
  */
 export function findRoomInBuilding(
   record: BuildingRecord,
-  location: { level: number; sectorName: string; locationType: string; suiteId?: string; roomId: string },
+  location: PlayerIndoorLocation,
 ): BuildingRoom | BuildingSubRoom | null {
   const level = record.levels[location.level];
   if (!level) {
