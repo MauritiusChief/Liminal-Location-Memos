@@ -184,6 +184,24 @@ async function respondReplyOrTool(
   }
 
   const payload = await chatCompletion(requestBody);
+
+  console.log(JSON.stringify(payload, null, 2))
+  /*
+  从控制台粘贴的打印结果
+  {
+    "choices": [
+      {
+        "message": {
+          "role": "assistant",
+          "content": "[{\"name\": \"query_template\", \"arguments\": {\"query\": [\"冰箱\"]}}]",
+          "reasoning_content": "玩家想要执行的动作是：“检查冰箱是否有电”。\n当前玩家位于：level 1 - main - 套房 standard_suite_lvl1_idx7 - 房间 standard_suite_lvl1_idx7/kitchen - 厨房。\n房间内可互动物体显示：（所有物体均属于场景一部分，不可互动）。\n这意味着厨房里的冰箱目前不是可互动的对象。\n为了执行“检查冰箱是否有电”这个动作，我需要先使用 `draft_object_tool` 创建一个冰箱作为可互动对象。\n\n查询模板：\n关键词：冰箱\n调用 `query_template` with `[\"冰箱\"]`.\n\n接下来我需要用工具创建对象。\n根据初筛候选，这是一个 `surrounding_interact` 类型的行为。\n\n先调用函数查询冰箱模板。然后基于查询结果输出 JSON。\n\n函数调用：\n`query_template([\"冰箱\"])`\n\n然后等待返回结果，再决定具体的 `draft_object_tool` 参数，或者如果没有合适的模板则可能需要调整。\n\n现在先发送函数调用。"
+        },
+        "finish_reason": "stop"
+      }
+    ]
+  }
+   */
+
   const message = payload.choices[0]?.message;
   const reply = message?.content ?? '[错误] 模型返回空内容！';
   const reasoning = message?.reasoning_content;

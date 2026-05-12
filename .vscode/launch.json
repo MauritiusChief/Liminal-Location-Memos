@@ -7,7 +7,7 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Launch Program via NPM",
+      "name": "Launch Backend via NPM",
       // 指定调试器运行的物理目录
       "cwd": "${workspaceFolder}/backend", 
       "runtimeExecutable": "npm",

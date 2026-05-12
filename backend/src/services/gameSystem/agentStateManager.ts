@@ -197,6 +197,7 @@ export async function gameStateManager(
     MOVE_PLAYER_TOOL,
     SET_PLAYER_INDOOR_LOCATION_TOOL,
     ADJUST_PLAYER_VISIBLE_LOCATION_TOOL,
+    DRAFT_OBJECT_TOOL,
   ].map((def) => toToolPrompt(def));
   const systemPrompt = BUILD_GAME_STATE_MANAGER_SYSTEM(toolDefs);
   const { lat, lon } = state.playerPosition;
@@ -316,7 +317,12 @@ function formatRouteCandidatesPrompt(routeCandidates: AgentStateRouteCandidate[]
     return '[]（初筛为空；可能代表无状态变化，也可能代表初筛失败，请仍结合完整游戏状态判断。）';
   }
 
-  return JSON.stringify(routeCandidates, null, 2);
+  const sanitized = routeCandidates.map(c => ({
+    candidate_type: c.action,
+    confidence: c.confidence,
+    reason: c.reason,
+  }));
+  return JSON.stringify(sanitized, null, 2);
 }
 
 export function pickWorldState(state: GameState): WorldState {
