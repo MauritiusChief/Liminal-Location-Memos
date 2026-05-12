@@ -142,7 +142,7 @@ export async function ensureBuildingRecord(featureId: FeatureId, state: GameStat
 
 /**
  * 根据玩家室内位置从 BuildingRecord 中定位到具体的房间（BuildingRoom 或 BuildingSubRoom），
- * 以便向该房间添加物品/家具。
+ * 需要传递具体的 JS Object 以便向该房间添加物品/家具。
  */
 export function findRoomInBuilding(
   record: BuildingRecord,
