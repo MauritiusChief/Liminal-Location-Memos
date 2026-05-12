@@ -429,7 +429,7 @@ function toToolPrompt(toolDef: GameStateToolDef): string {
   ].join('\n'));
 
   return [
-    `**工具名**: \`${toolDef.name}\``,
+    `**方案名**: \`${toolDef.name}\``,
     '介绍：',
     toolDef.description.join('\n'),
     '参数：',
