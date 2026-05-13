@@ -1,83 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { GameState } from "./gameSessionStore.js";
 import { CARDBOARD_TEMPLATES, CardboardObjectTemplate } from "../objectGeneration/objectGeneraterShared.js";
-import { CardboardFurnitureRecord } from "../objectGeneration/furnitureTemplates.js";
+import { CardboardFurnitureRecord, FURNITURE_VARIANT_CARDBOARDS } from "../objectGeneration/furnitureTemplates.js";
 import { CardboardItemRecord, CardboardLootsRecord } from "../objectGeneration/itemTemplates.js";
 import { findRoomInBuilding } from "../buildingGeneration/buildingRecord.js";
-
-interface FurnitureVariantDefault {
-  name: string;
-  aprxMass: number;
-  aprxVolume: number;
-  aprxLength: number;
-  partDescriptions: string[];
-}
-
-const FURNITURE_VARIANT_DEFAULTS: Record<string, Record<string, FurnitureVariantDefault>> = {
-  home_refrigerator: {
-    regular: {
-      name: "家用冰箱",
-      aprxMass: 75,
-      aprxVolume: 500,
-      aprxLength: 180,
-      partDescriptions: [
-        "冰箱外壳 - 构成冰箱外部轮廓的硬质外壳",
-        "压缩机 - 将制冷剂压缩为高温高压气体的核心制冷部件",
-        "制冷剂罐 - 储存制冷剂（如R600a）的压力容器",
-        "冷凝管 - 将高温高压气态制冷剂散热冷凝为液态的管路",
-        "温控器 - 调节冰箱内部温度的控制器",
-        "冷藏层搁架(上) - 冷藏层上方的玻璃搁架",
-        "冷藏层搁架(中) - 冷藏层中部的玻璃搁架",
-        "冷藏层搁架(下) - 冷藏层底部的玻璃搁架",
-        "冷冻层搁架 - 冷冻层内的搁架",
-        "冷藏门 - 冷藏层的门，内侧可放置瓶罐",
-        "冷冻门 - 冷冻层的门",
-        "冷藏门搁架(上) - 冷藏门内侧上方的搁架，适合放瓶罐",
-        "冷藏门搁架(下) - 冷藏门内侧下方的搁架，适合放瓶罐",
-      ],
-    },
-    prime: {
-      name: "豪华家用冰箱",
-      aprxMass: 100,
-      aprxVolume: 600,
-      aprxLength: 180,
-      partDescriptions: [
-        "冰箱外壳 - 构成冰箱外部轮廓的硬质外壳",
-        "压缩机 - 将制冷剂压缩为高温高压气体的核心制冷部件",
-        "制冷剂罐 - 储存制冷剂（如R600a）的压力容器",
-        "冷凝管 - 将高温高压气态制冷剂散热冷凝为液态的管路",
-        "温控器 - 调节冰箱内部温度的控制器",
-        "冷藏层搁架(上) - 冷藏层上方的玻璃搁架",
-        "冷藏层搁架(中) - 冷藏层中部的玻璃搁架",
-        "冷藏层搁架(下) - 冷藏层底部的玻璃搁架",
-        "冷冻层搁架 - 冷冻层内的搁架",
-        "冷藏门 - 冷藏层的门，内侧可放置瓶罐",
-        "冷冻门 - 冷冻层的门",
-        "冷藏门搁架(上) - 冷藏门内侧上方的搁架，适合放瓶罐",
-        "冷藏门搁架(下) - 冷藏门内侧下方的搁架，适合放瓶罐",
-        "制冰机 - 位于冷藏门上的自动制冰装置",
-      ],
-    },
-    mini: {
-      name: "迷你冰箱",
-      aprxMass: 20,
-      aprxVolume: 50,
-      aprxLength: 50,
-      partDescriptions: [
-        "冰箱外壳 - 构成迷你冰箱外部轮廓的紧凑外壳",
-        "压缩机 - 小型压缩机",
-        "制冷剂罐 - 小型制冷剂储存容器",
-        "冷凝管 - 小型冷凝管路",
-        "温控器 - 温度控制器",
-        "冷藏层搁架(上) - 冷藏层上方的搁架",
-        "冷藏层搁架(下) - 冷藏层下方的搁架",
-        "小型冷冻层 - 位于冷藏层内部上方的小型冷冻隔间",
-        "单门 - 冷冻与冷藏共用的门",
-        "门搁架 - 门内侧的搁架，适合放瓶罐",
-      ],
-    },
-  },
-};
 
 /**
  * 真实创建 Game State 中的物体
@@ -122,15 +48,15 @@ export function applyCreateCardboardObject(state: GameState, args: any): void {
   const note = typeof args?.note === "string" ? args.note : "";
   const uuid = randomUUID();
 
-  const defaults = FURNITURE_VARIANT_DEFAULTS[templateId];
-  if (defaults) {
-    const variantDefaults = defaults[variantId];
-    if (!variantDefaults) {
+  const cardboards = FURNITURE_VARIANT_CARDBOARDS[templateId];
+  if (cardboards) {
+    const variantCardboard = cardboards[variantId];
+    if (!variantCardboard) {
       return;
     }
 
     const parts: Record<string, string> = {};
-    for (const desc of variantDefaults.partDescriptions) {
+    for (const desc of variantCardboard.partDescriptions) {
       parts[randomUUID()] = desc;
     }
 
@@ -138,10 +64,10 @@ export function applyCreateCardboardObject(state: GameState, args: any): void {
 
     const furnitureRecord: CardboardFurnitureRecord = {
       uuid,
-      name: variantDefaults.name,
-      aprxMass: variantDefaults.aprxMass,
-      aprxVolume: variantDefaults.aprxVolume,
-      aprxLength: variantDefaults.aprxLength,
+      name: variantCardboard.name,
+      aprxMass: variantCardboard.aprxMass,
+      aprxVolume: variantCardboard.aprxVolume,
+      aprxLength: variantCardboard.aprxLength,
       description: variant.description,
       note,
       parts,
@@ -152,6 +78,7 @@ export function applyCreateCardboardObject(state: GameState, args: any): void {
       room.content = {};
     }
     room.content[uuid] = furnitureRecord;
+  // TODO 物品创建摘出去，不要依靠 FURNITURE_VARIANT_CARDBOARDS 是否存在模板来判断是否是物品
   } else {
     const itemRecord: CardboardItemRecord = {
       uuid,

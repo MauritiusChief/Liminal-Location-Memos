@@ -36,3 +36,64 @@ export const CARDBOAD_FURNITURE_TEMPLATES: CardboardObjectTemplate[] = [
     ],
   }
 ]
+
+interface FurnitureVariantCardboard {
+  name: string;
+  aprxMass: number;
+  aprxVolume: number;
+  aprxLength: number;
+  partDescriptions: string[];
+}
+
+export const FURNITURE_VARIANT_CARDBOARDS: Record<string, Record<string, FurnitureVariantCardboard>> = {
+  home_refrigerator: {
+    regular: {
+      name: "家用冰箱",
+      aprxMass: 75,
+      aprxVolume: 500,
+      aprxLength: 180,
+      partDescriptions: [
+        "冰箱外壳",
+        "压缩机",
+        "制冷剂罐",
+        "冷凝管",
+        "温控器",
+        "冷藏层搁架",
+        "冷冻层搁架",
+        "冷藏门搁架",
+      ],
+    },
+    prime: {
+      name: "豪华家用冰箱",
+      aprxMass: 100,
+      aprxVolume: 600,
+      aprxLength: 180,
+      partDescriptions: [
+        "冰箱外壳",
+        "压缩机",
+        "制冷剂罐",
+        "冷凝管",
+        "温控器",
+        "冷藏层搁架",
+        "冷冻层搁架",
+        "冷藏门搁架",
+        "制冰机",
+      ],
+    },
+    mini: {
+      name: "迷你冰箱",
+      aprxMass: 20,
+      aprxVolume: 50,
+      aprxLength: 50,
+      partDescriptions: [
+        "冰箱外壳",
+        "压缩机",
+        "制冷剂罐",
+        "冷凝管",
+        "温控器",
+        "冷藏层搁架",
+        "单门搁架",
+      ],
+    },
+  },
+};

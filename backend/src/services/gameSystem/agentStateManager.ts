@@ -440,7 +440,7 @@ function toToolPrompt(toolDef: GameStateToolDef): string {
 //#region 建筑细节函数
 
 /**
- * 描述某一建筑完整的细节
+ * 描述某一建筑裁剪过的细节
  * @param record
  * @returns
  */
