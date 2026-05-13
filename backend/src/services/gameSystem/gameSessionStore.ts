@@ -5,6 +5,7 @@ import type { BuildingSchema } from '../buildingGeneration/buildingSchema.js';
 import { FeatureId } from '../featureDetail.js';
 import type { BuildingRecord } from '../buildingGeneration/buildingRecord.js';
 import { GameStateToolCall } from './agentStateManager.js';
+import { CardboardItemRecord, ItemRecord } from '../objectGeneration/itemTemplates.js';
 
 export interface Position {
   lat: number;
@@ -87,20 +88,27 @@ export interface PlayerVisibleLocation {
  * 不包含流式请求、后台任务、排队消息等运行时字段。
  */
 export interface GameState {
+  // 玩家信息
   playerPosition: Position;
   playerOrientation: number;
   playerIndoorLocation: PlayerIndoorLocation | null;
   playerVisionRange: number;
+  playerStatus: PlayerStatus;
+  playerVisibleLocations: PlayerVisibleLocation[];
+  // 完整聊天信息
   messageHistory: GameMessage[];
+  // 建筑、载具（未完成）、物品（未完成）信息
+  buildingSchemas: Record<string, BuildingSchema>;
+  buildingRecords: Record<string, BuildingRecord>; // 建筑的长期信息存储（包括未来可能会有的物品信息）
+  weatherAnchors: WeatherAnchor[];
+  chunckRecords: ChunckRecord[];
+  // 来自LLM的视觉事实信息落盘
   activeFieldVisualDescriptions: string[];
   fieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: string[];
   exteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
-  buildingSchemas: Record<string, BuildingSchema>;
-  buildingRecords: Record<string, BuildingRecord>; // 建筑的长期信息存储（包括未来可能会有的物品信息）
-  activeVisibleLocations: PlayerVisibleLocation[];
-  sectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
   activeSectorVisualDescriptions: string[];
+  sectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
 }
 
 /**
@@ -140,6 +148,49 @@ export interface GameClientSessionSnapshot extends GameState {
   hasQueuedPlayerMessage: boolean;
 }
 
+interface PlayerStatus {
+  // HP相关
+  health: number; // 笼统的健康条，由100减去会致死的四条（blood_loss/infection/poisonous/nerv_mis）中的最大值得到
+  blood_loss: number; // 字面意义的血量，特指外伤/内伤出血，涨满表示失血过多而死
+  infection: number; // 特指病毒/细菌感染，涨满表示败血症引发多器官衰竭而死
+  poisonous: number; // 特指中毒，涨满表示肝衰竭/肾衰竭而死
+  nerv_mis: number; // 神经系统功能损失，涨满表示心跳骤停/呼吸麻痹等神经失去功能导致的死亡
+  // 重要状态，可间接至死
+  hydration: number; // 饮水值，归零代表失水过多，将增加 poisonous（血流不足引起肾衰竭）
+  calorie: number; // 卡路里，归零代表糖原、脂肪消耗均殆尽，将开始消耗 protein
+  protein: number; // 蛋白质量，归零代表体内蛋白质跌破正常生存所需量，将增加 infection（低蛋白质引起免疫系统崩溃）
+  exceeded_heat: number; // 特指人体正常生活以外的热量，涨满会消耗 hydration 为代价抵消其额外增长（出汗）；如果 hydration 归零或者某种原因无法出汗，会减少 protein 值（蛋白质高温失活）
+  essential_heat: number; // 特指人体所需的必要热量，归零会消耗 calorie 为代价抵消其额外下降（发抖）；如果 calorie 归零，会增加 nerv_mis（中枢神经抑制）
+  // 次级状态
+  fatigue: number; // 疲劳值，任何行动都会增加疲劳，且只有睡觉可以恢复
+  endurance: number; // 体力值，任何行动都需要体力值允许
+}
+
+/**
+ * 每 10km 创建一个新的天气锚定参数
+ */
+interface WeatherAnchor {
+  center: Position;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 把载具/物品...经纬度按 0.01° 取整，得到的就是所处的 chunck id
+ */
+interface ChunckRecord {
+  id: Position;
+}
+
+interface FieldItemRecord extends ItemRecord {
+  position: Position;
+}
+
+interface FieldCardboardItemRecord extends CardboardItemRecord {
+  position: Position;
+}
+
+
 //#region 常量
 
 // const testPosition = [39.90310484384369, -83.44964892561046]
@@ -152,6 +203,17 @@ const DEFAULT_START_POSITION: Position = {
   lat: testPosition[0],
   lon: testPosition[1],
 };
+
+const DEFAULT_START_TIME = new Date()
+
+const INITIAL_PLAYER_STATUS: PlayerStatus = {
+  health: 100,
+  blood_loss: 0, infection: 0, poisonous: 0, nerv_mis: 0,
+  hydration: 100, calorie: 100, protein: 100,
+  exceeded_heat: 0, essential_heat: 100,
+  fatigue: 0,
+  endurance: 100,
+}
 
 const SAVE_DIRECTORY = path.resolve(process.cwd(), 'data', 'game-saves');
 
@@ -290,16 +352,22 @@ function createDefaultGameState(): GameState {
     playerOrientation: Math.floor(Math.random() * 360),
     playerIndoorLocation: null,
     playerVisionRange: 500,
+    playerStatus: INITIAL_PLAYER_STATUS,
+    playerVisibleLocations: [],
+
     messageHistory: [],
+
+    buildingSchemas: {},
+    buildingRecords: {},
+    weatherAnchors: [],
+    chunckRecords: [],
+
     activeFieldVisualDescriptions: [],
     fieldVisualDescriptions: {},
     activeExteriorVisualDescriptions: [],
     exteriorVisualDescriptions: {},
-    buildingSchemas: {},
-    buildingRecords: {},
-    activeVisibleLocations: [],
-    sectorVisualDescriptions: {},
     activeSectorVisualDescriptions: [],
+    sectorVisualDescriptions: {},
   };
 }
 

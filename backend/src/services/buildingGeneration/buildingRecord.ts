@@ -1,10 +1,15 @@
 import { loadServiceSql } from "@/db/sqlLoader.js";
 import { pickRandom } from "../utils.js";
-import { BuildingSchema, ensureBuildingSchema, generateBuildingSchema, RoomSchema, SuiteSchema } from "./buildingSchema.js";
-import { GameState, Position } from "../gameSystem/gameSessionStore.js";
+import { BuildingSchema, ensureBuildingSchema, RoomSchema, SuiteSchema } from "./buildingSchema.js";
+import { GameState, PlayerIndoorLocation, Position } from "../gameSystem/gameSessionStore.js";
 import { query } from "@/db/client.js";
 import { DbBuildingFeatureDetailRow, FeatureId, mapBuildingDetailRowToFeatureDetail } from "../featureDetail.js";
+import { CardboardItemRecord, ItemRecord } from "../objectGeneration/itemTemplates.js";
+import { CardboardFurnitureRecord, FurnitureRecord } from "../objectGeneration/furnitureTemplates.js";
 
+/**
+ * 内部（指 BuildingRoom/BuildingSubRoom）兼做物品/家具/载具在建筑内的存储地
+ */
 export interface BuildingRecord {
   featureId: string;
   category: string;
@@ -26,10 +31,14 @@ export interface BuildingSector {
   rooms: Record<string, BuildingRoom | BuildingSuite>; // key 为普通房间或套房容器的 id
 }
 
+/**
+ * 兼做物品/家具/载具在建筑内的存储地。
+ */
 export interface BuildingRoom {
   roomId: string;
   description: string;
   access?: "entrance" | "vertical" | "internal";
+  content?: Record<string, CardboardItemRecord | CardboardFurnitureRecord | ItemRecord | FurnitureRecord>; // 键为 uuid
 }
 
 /**
@@ -45,10 +54,12 @@ export interface BuildingSuite {
 /**
  * 特意无 access。
  * subRoom 才是套房内部可实际落脚的位置，因此保留 roomId。
+ * 兼做物品/家具/载具在建筑内的存储地。
  */
 export interface BuildingSubRoom {
   roomId: string;
   description: string;
+  content?: Record<string, CardboardItemRecord | CardboardFurnitureRecord | ItemRecord | FurnitureRecord>; // 键为 uuid
 }
 
 interface DbContainingBuildingRow extends DbBuildingFeatureDetailRow {
@@ -127,6 +138,43 @@ export async function ensureBuildingRecord(featureId: FeatureId, state: GameStat
   const record = generateBuildingRecord(schema);
   state.buildingRecords[featureId] = record;
   return record;
+}
+
+/**
+ * 根据玩家室内位置从 BuildingRecord 中定位到具体的房间（BuildingRoom 或 BuildingSubRoom），
+ * 需要传递具体的 JS Object 以便向该房间添加物品/家具。
+ */
+export function findRoomInBuilding(
+  record: BuildingRecord,
+  location: PlayerIndoorLocation,
+): BuildingRoom | BuildingSubRoom | null {
+  const level = record.levels[location.level];
+  if (!level) {
+    return null;
+  }
+
+  const sector = level.sectors[location.sectorName];
+  if (!sector) {
+    return null;
+  }
+
+  // 目标位于套房的子房间内
+  if (location.locationType === "subRoom" && location.suiteId) {
+    const suiteEntry = sector.rooms[location.suiteId];
+    if (!suiteEntry || !("subRooms" in suiteEntry)) {
+      return null;
+    }
+
+    return suiteEntry.subRooms[location.roomId] ?? null;
+  }
+
+  // 目标位于普通房间内
+  const roomEntry = sector.rooms[location.roomId];
+  if (roomEntry && !("subRooms" in roomEntry)) {
+    return roomEntry;
+  }
+
+  return null;
 }
 
 //#region 蓝图生成建筑

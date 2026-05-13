@@ -1,0 +1,21 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Backend via NPM",
+      // 指定调试器运行的物理目录
+      "cwd": "${workspaceFolder}/backend", 
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"], // 对应 package.json 中的脚本
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "console": "integratedTerminal"
+    }
+  ]
+}

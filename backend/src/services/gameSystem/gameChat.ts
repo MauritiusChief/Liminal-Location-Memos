@@ -13,9 +13,10 @@ import {
 import {chooseRandomIndoorLocation} from './toolIndoorPosition.js';
 import { streamInitialBookMessage, streamRegularBookMessage } from './agentBookComposer.js';
 import { updateActiveVisualDescriptionRefs, upsertVisualDescriptions } from './agentVisualDescriber.js';
-import { fillBasicActiveIndoorLocations } from './toolActiveIndoorLocations.js';
+import { fillBasicPlayerIndoorLocations } from './toolActiveIndoorLocations.js';
 import { applyGameStateToolCalls, gameStateManager } from './agentStateManager.js';
 import { ensureBuildingRecord, findContainingBuildingFeatureId } from '../buildingGeneration/buildingRecord.js';
+import { gameStateRouter } from './agentStateRouter.js';
 
 export type GameStreamEvent =
   | { type: 'player_message_accepted'; text: string }
@@ -48,7 +49,7 @@ export async function streamGameStart(emit: EmitGameEvent): Promise<GameSession>
   const session = await createRuntimeSession();
   const workingState = cloneGameState(session.gameState);
   await initializeOpeningIndoorState(workingState);
-  fillBasicActiveIndoorLocations(workingState);
+  fillBasicPlayerIndoorLocations(workingState);
 
   const openingMessage = await streamInitialBookMessage(workingState, emit);
 
@@ -138,10 +139,11 @@ export async function streamGameTurn(
  *
  * 流程是：
  * 1. 写入玩家消息；
- * 2. 让 Game State Manager 判断需要做哪些状态变化；
- * 3. 应用这些变化；
- * 4. 流式生成 Book；
- * 5. 进入 commitBookMessage() 做提交与后台收尾。
+ * 2. 让 Game State Router 对玩家行为做快速初筛；
+ * 3. 让 Game State Manager 结合初筛结果与完整状态判断需要做哪些状态变化；
+ * 4. 应用这些变化；
+ * 5. 流式生成 Book；
+ * 6. 进入 commitBookMessage() 做提交与后台收尾。
  */
 async function executeTurnStream(
   session: GameSession,
@@ -158,8 +160,9 @@ async function executeTurnStream(
       content: playerMessage,
     });
 
-    // 先让专门的 agent 决定“这句玩家输入会触发哪些状态操作”。
-    const toolCalls = await gameStateManager(workingState);
+    // Router 只做快速意图初筛；Manager 再结合完整 worldState 决定最终工具与参数。
+    const routeCandidates = await gameStateRouter(workingState);
+    const toolCalls = await gameStateManager(workingState, routeCandidates);
     await applyGameStateToolCalls(workingState, toolCalls);
     // 在生成当前回合 Book 之前，刷新 prompt 依赖的指向 Xxx Visual Description 的索引
     updateActiveVisualDescriptionRefs(workingState);
@@ -258,7 +261,7 @@ async function initializeOpeningIndoorState(state: GameState): Promise<void> {
   const containingBuilding = await findContainingBuildingFeatureId(state.playerPosition);
   if (!containingBuilding) {
     state.playerIndoorLocation = null;
-    state.activeVisibleLocations = [];
+    state.playerVisibleLocations = [];
     return;
   }
 
@@ -267,7 +270,7 @@ async function initializeOpeningIndoorState(state: GameState): Promise<void> {
   // 建筑命中查询拿到的 tags 需要稳定保留在 record 中，供开局与后续回合复用。
   record.tags = containingBuilding.tags;
   state.playerIndoorLocation = chooseRandomIndoorLocation(record);
-  fillBasicActiveIndoorLocations(state)
+  fillBasicPlayerIndoorLocations(state)
 }
 
 /**

@@ -18,7 +18,7 @@ import {
   applySetPlayerIndoorLocationTool,
   chooseBuildingEntranceIndoorLocation,
 } from "../src/services/gameSystem/toolIndoorPosition";
-import { applySyncActiveIndoorLocationsTool } from "../src/services/gameSystem/toolActiveIndoorLocations";
+import { applySyncPlayerIndoorLocationsTool } from "../src/services/gameSystem/toolActiveIndoorLocations";
 import { generateBuildingRecord } from "../src/services/buildingGeneration/buildingRecord";
 import type { BuildingSchema } from "../src/services/buildingGeneration/buildingSchema";
 import type { GameState } from "../src/services/gameSystem/gameSessionStore";
@@ -29,16 +29,26 @@ function buildGameState(): GameState {
     playerOrientation: 0,
     playerIndoorLocation: null,
     playerVisionRange: 500,
+    playerStatus: {
+      health: 100,
+      blood_loss: 0, infection: 0, poisonous: 0, nerv_mis: 0,
+      hydration: 100, calorie: 100, protein: 100,
+      exceeded_heat: 0, essential_heat: 100,
+      fatigue: 0,
+      endurance: 100,
+    },
+    playerVisibleLocations: [],
     messageHistory: [],
+    buildingSchemas: {},
+    buildingRecords: {},
+    weatherAnchors: [],
+    chunckRecords: [],
     activeFieldVisualDescriptions: [],
     fieldVisualDescriptions: {},
     activeExteriorVisualDescriptions: [],
     exteriorVisualDescriptions: {},
-    buildingSchemas: {},
-    buildingRecords: {},
-    activeVisibleLocations: [],
-    sectorVisualDescriptions: {},
     activeSectorVisualDescriptions: [],
+    sectorVisualDescriptions: {},
   };
 }
 
@@ -231,7 +241,7 @@ describe("applySetPlayerIndoorLocationTool", () => {
   });
 });
 
-describe("applySyncActiveIndoorLocationsTool", () => {
+describe("applySyncPlayerIndoorLocationsTool", () => {
   it("reveals valid extra indoor locations and does not hide the current location", () => {
     const state = buildGameState();
     state.playerIndoorLocation = {
@@ -252,7 +262,7 @@ describe("applySyncActiveIndoorLocationsTool", () => {
         },
       },
     }));
-    state.activeVisibleLocations = [{
+    state.playerVisibleLocations = [{
       buildingId: "way/5",
       level: 1,
       sectorName: "main",
@@ -261,19 +271,19 @@ describe("applySyncActiveIndoorLocationsTool", () => {
       roomDescription: "大堂",
     }];
 
-    applySyncActiveIndoorLocationsTool(state, {
+    applySyncPlayerIndoorLocationsTool(state, {
       edit: "reveal",
       level: 1,
       suiteId: "lvl1_suite",
       roomId: "lvl1_suite/bedroom",
     });
-    applySyncActiveIndoorLocationsTool(state, {
+    applySyncPlayerIndoorLocationsTool(state, {
       edit: "hide",
       level: 1,
       roomId: "lobby",
     });
 
-    expect(state.activeVisibleLocations).toEqual([
+    expect(state.playerVisibleLocations).toEqual([
       {
         buildingId: "way/5",
         level: 1,

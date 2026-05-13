@@ -57,6 +57,11 @@ export type DeepSeekChatResponse = {
 
 //#region Openrouter 类型
 
+/**
+ * TODO tools 定义疑似不同，需要修改
+ * https://openrouter.ai/docs/guides/features/tool-calling
+ * https://api-docs.deepseek.com/guides/function_calling
+ */
 export type OpenRouterTool = DeepSeekTool
 
 export type OpenRouterToolCall = DeepSeekToolCall
@@ -114,4 +119,13 @@ export type NormalizedLlmStreamEvent = {
   replyDelta?: string
   reasoningDelta?: string
   done: boolean
+}
+
+/**
+ * 所有 LLM 可查询信息的地方都扩展此处
+ */
+export interface GeneralSource {
+  id: string;
+  keyword: string; // 用来给搜索引擎比对的
+  description: string;
 }

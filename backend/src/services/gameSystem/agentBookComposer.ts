@@ -4,6 +4,9 @@ import { buildSceneFromRequest, SceneObject } from "../scene/sceneObject.js";
 import { buildScenePrompt } from "../scene/scenePrompt.js";
 import { WorldState } from "./agentStateManager.js";
 import type { BuildingRecord } from "../buildingGeneration/buildingRecord.js";
+import { findRoomInBuilding } from "../buildingGeneration/buildingRecord.js";
+import type { CardboardFurnitureRecord, FurnitureRecord } from "../objectGeneration/furnitureTemplates.js";
+import type { CardboardItemRecord, ItemRecord, PartRecord } from "../objectGeneration/itemTemplates.js";
 import { EmitGameEvent } from "./gameChat.js";
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
 import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, SectorVisualDescriptionRecord } from "./gameSessionStore.js";
@@ -20,8 +23,8 @@ export interface PlayerState {
   playerVisionRange: number;
   recentMessageHistory: GameMessage[];
   // 下列内容经过筛选，只包含玩家可见部分
-  activeBuildingRecords: Record<string, BuildingRecord>;
-  activeVisibleLocations: PlayerVisibleLocation[];
+  playerBuildingRecords: Record<string, BuildingRecord>;
+  playerVisibleLocations: PlayerVisibleLocation[];
   // 只包含玩家可见的 Visual Description
   activeFieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>
@@ -162,9 +165,9 @@ const PLAYER_STATE_BUILDING_RECORD_RANGE = 300
 //#region 内部逻辑
 
 export function pickPlayerState(state: GameState): PlayerState {
-  const {playerPosition, playerOrientation, playerIndoorLocation, playerVisionRange, activeVisibleLocations} = state
+  const {playerPosition, playerOrientation, playerIndoorLocation, playerVisionRange, playerVisibleLocations} = state
   // TODO 也许需要动用数据库，判断建筑的最近点而非建筑的中心
-  const activeBuildingRecords = Object.fromEntries(Object.entries(state.buildingRecords).filter(
+  const playerBuildingRecords = Object.fromEntries(Object.entries(state.buildingRecords).filter(
     ([featureId, record]) => {
       const {lon: recordLon, lat: recordLat} = record.centerPosition
       const {lon: playerLon, lat: playerLat} = state.playerPosition
@@ -187,8 +190,8 @@ export function pickPlayerState(state: GameState): PlayerState {
     playerIndoorLocation,
     playerVisionRange,
     recentMessageHistory: state.messageHistory.slice(-12),
-    activeVisibleLocations,
-    activeBuildingRecords,
+    playerVisibleLocations,
+    playerBuildingRecords,
     activeFieldVisualDescriptions,
     activeExteriorVisualDescriptions,
     activeSectorVisualDescriptions,
@@ -210,7 +213,7 @@ export function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): st
     .map((record) => [`建筑ID：${record.buildingId}`, record.content].join('\n'))
     .join('\n');
   const visibleLocationPrompt = state.playerIndoorLocation
-    ? state.activeVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
+    ? state.playerVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
     : null;
 
   const indoorLocationPrompt = formatIndoorLocationPrompt(state)
@@ -281,6 +284,33 @@ export function formatVisibleLocationPrompt(visibleLocation: PlayerVisibleLocati
   ].join(' - ');
 }
 
+type ContentItem = CardboardItemRecord | CardboardFurnitureRecord | ItemRecord | FurnitureRecord;
+
+function formatRoomContentLine(item: ContentItem): string {
+  let partNamesStr = "";
+
+  if ("parts" in item) {
+    const parts = item.parts as Record<string, string | PartRecord>;
+    const partValues = Object.values(parts);
+    if (partValues.length > 0) {
+      const names = partValues.map((pv) => {
+        if (typeof pv === "string") {
+          return pv.split(" - ")[0] ?? pv;
+        }
+        const content = pv.content;
+        if (typeof content === "string") {
+          return content;
+        }
+        return content?.name ?? "?";
+      });
+      partNamesStr = ` 零件(${names.length})：${names.join("、")}`;
+    }
+  }
+
+  const kind = partNamesStr ? "家具" : "物品";
+  return `* ${kind}：${item.name} — ${item.description}${partNamesStr}`;
+}
+
 /**
  * 专门描述玩家所在的房间，以及顺带的此房间所在的楼层、区域、建筑信息
  * @param state
@@ -291,7 +321,13 @@ export function formatIndoorLocationPrompt(state: PlayerState | WorldState): str
   if (!location) {
     return null;
   }
-  const record = state.activeBuildingRecords[location.buildingId];
+  const record = state.playerBuildingRecords[location.buildingId];
+
+  const room = findRoomInBuilding(record, location);
+  const contentEntries = room?.content ? Object.values(room.content) : [];
+  const roomContentPrompt = contentEntries.length > 0
+    ? `房间内可互动物体：\n${contentEntries.map(formatRoomContentLine).join("\n")}\n（其他物体只是不可互动，并非不存在）`
+    : "房间内可互动物体：（所有物体均属于场景一部分，不可互动）";
 
   return [
     `建筑ID：${record.featureId}`,
@@ -303,5 +339,6 @@ export function formatIndoorLocationPrompt(state: PlayerState | WorldState): str
     location.suiteId
       ? `当前房间：套房 ${location.suiteId} - 房间 ${location.roomId} - ${location.roomDescription}`
       : `当前房间：房间 ${location.roomId} - ${location.roomDescription}`,
+    roomContentPrompt,
   ].join('\n')
 }
