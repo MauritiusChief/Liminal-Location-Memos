@@ -7,7 +7,7 @@ import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatV
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
 import { FieldVisualDescriptionRecord, GameState, PlayerIndoorLocation, Position } from "./gameSessionStore.js";
 import { generateJsonReplySingleMessage, generateReplySingleMessage } from "./llm.js";
-import { EXTERIOR_VISUAL_DESCRIPTION_SYSTEM, FIELD_VISUAL_DESCRIPTION_SYSTEM, SECTOR_VISUAL_DESCRIPTION_SYSTEM } from "./systemPrompts.js";
+import { EXTERIOR_VISUAL_DESCRIPTION_SYSTEM, FIELD_VISUAL_DESCRIPTION_SYSTEM, ROOM_VISUAL_DESCRIPTION_SYSTEM } from "./systemPrompts.js";
 
 interface ExtractedExteriorVisualDescription {
   buildingId: FeatureId;
@@ -91,7 +91,7 @@ export async function upsertVisualDescriptions(state: GameState, bookMessage: st
     ])
     extracted.field = fieldVD
     extracted.exterior = exteriorVD
-    extracted.sector = NO_VISUAL_DESCRIPTION_UPDATE
+    extracted.room = NO_VISUAL_DESCRIPTION_UPDATE
   }
 
   const now = new Date().toISOString();
@@ -137,7 +137,7 @@ export async function upsertVisualDescriptions(state: GameState, bookMessage: st
       buildingId: location.buildingId,
       level: location.level,
       roomId: location.roomId,
-      content: extracted.sector,
+      content: extracted.room,
       createdAt: existing?.record.createdAt ?? now,
       updatedAt: now,
     };
@@ -368,13 +368,13 @@ async function extractRoomVisualDescriptions(
   await writeGameDebugRequest({
     mode: 'user-message',
     functionName: 'extractRoomVisualDescriptions',
-    systemPrompt: SECTOR_VISUAL_DESCRIPTION_SYSTEM,
+    systemPrompt: ROOM_VISUAL_DESCRIPTION_SYSTEM,
     userMessage: message,
   });
 
   try {
     const response = await generateReplySingleMessage(
-      SECTOR_VISUAL_DESCRIPTION_SYSTEM,
+      ROOM_VISUAL_DESCRIPTION_SYSTEM,
       message,
     );
     const extracted = response.reply;

@@ -31,7 +31,7 @@ export interface ExteriorVisualDescriptionRecord {
 export interface RoomVisualDescriptionRecord {
   buildingId: string;
   level: number;
-  sectorName: string;
+  roomId: string;
   content: string;
   createdAt: string;
   updatedAt: string;

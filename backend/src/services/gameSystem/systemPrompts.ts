@@ -124,7 +124,7 @@ export const EXTERIOR_VISUAL_DESCRIPTION_SYSTEM = `
 若本轮无需更新，则输出空的 JSON Array
 `
 
-export const SECTOR_VISUAL_DESCRIPTION_SYSTEM = `
+export const ROOM_VISUAL_DESCRIPTION_SYSTEM = `
 你是一个文字探索游戏的房间事实性细节(Room Visual Description)记录者。你的任务是从一段文本中判断出可明确对应到当前房间且之后应该继续视为事实的细节。若有则相应输出，若没有则输出\`__NO_UPDATE__\`。
 如果已有旧的 Room Visual Description，这些记录也会被一并输入作为参考。
 

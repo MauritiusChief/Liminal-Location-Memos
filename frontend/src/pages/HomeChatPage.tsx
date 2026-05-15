@@ -174,13 +174,13 @@ export function HomeChatPage() {
           <div>
             {activeRoomVisualDescriptions.length ? activeRoomVisualDescriptions.map((record, index) => (
               <article
-                key={`${record.buildingId}-${record.level}-${record.sectorName}-${index}`}
+                key={`${record.buildingId}-${record.level}-${record.roomId}-${index}`}
                 style={{ marginBottom: '12px' }}
               >
                 <div>
                   <strong>{record.buildingId}</strong>
                 </div>
-                <div>Level {record.level} / Sector {record.sectorName}</div>
+                <div>Level {record.level} / Room {record.roomId}</div>
                 <pre style={{ margin: '4px 0', whiteSpace: 'pre-wrap' }}>{record.content}</pre>
               </article>
             )) : 'No active room visual descriptions yet.'}
