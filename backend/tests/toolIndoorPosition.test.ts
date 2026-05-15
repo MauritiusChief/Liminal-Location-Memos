@@ -47,8 +47,8 @@ function buildGameState(): GameState {
     fieldVisualDescriptions: {},
     activeExteriorVisualDescriptions: [],
     exteriorVisualDescriptions: {},
-    activeSectorVisualDescriptions: [],
-    sectorVisualDescriptions: {},
+    activeRoomVisualDescriptions: [],
+    roomVisualDescriptions: {},
   };
 }
 

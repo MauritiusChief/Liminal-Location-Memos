@@ -4,7 +4,7 @@ import { buildScenePrompt } from "../scene/scenePrompt.js";
 import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatVisibleLocationPrompt } from "./agentBookComposer.js";
 import type { BuildingLevel, BuildingRecord, BuildingRoom, BuildingSector } from "../buildingGeneration/buildingRecord.js";
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
-import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, SectorVisualDescriptionRecord } from "./gameSessionStore.js";
+import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, RoomVisualDescriptionRecord } from "./gameSessionStore.js";
 import { generateJsonReplyWithSource } from "./llm.js";
 import { BUILD_GAME_STATE_MANAGER_SYSTEM } from "./systemPrompts.js";
 import { applySetPlayerIndoorLocationTool } from "./toolIndoorPosition.js";
@@ -59,7 +59,7 @@ export interface WorldState {
   // 只包含玩家可见的 Visual Description
   activeFieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>
-  activeSectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
+  activeRoomVisualDescriptions: Record<string, RoomVisualDescriptionRecord>;
 }
 
 const WORLD_STATE_RADIUS_METERS = 500;
@@ -343,8 +343,8 @@ export function pickWorldState(state: GameState): WorldState {
   const activeExteriorVisualDescriptions = Object.fromEntries(Object.entries(state.exteriorVisualDescriptions).filter(
     ([featureId, _]) => state.activeExteriorVisualDescriptions.includes(featureId)
   ))
-  const activeSectorVisualDescriptions = Object.fromEntries(Object.entries(state.sectorVisualDescriptions).filter(
-    ([uuid, _]) => state.activeSectorVisualDescriptions.includes(uuid)
+  const activeRoomVisualDescriptions = Object.fromEntries(Object.entries(state.roomVisualDescriptions).filter(
+    ([uuid, _]) => state.activeRoomVisualDescriptions.includes(uuid)
   ))
   return {
     playerPosition,
@@ -356,7 +356,7 @@ export function pickWorldState(state: GameState): WorldState {
     playerBuildingRecords,
     activeFieldVisualDescriptions,
     activeExteriorVisualDescriptions,
-    activeSectorVisualDescriptions,
+    activeRoomVisualDescriptions,
   }
 }
 
@@ -379,8 +379,8 @@ export async function toWorldStatePrompt(state: WorldState, scene?: SceneObject)
   // 室内相关的信息
   const indoorLocationPrompt = formatIndoorLocationPrompt(state)
 
-  const sectorVisualDescriptionPrompt = Object.values(state.activeSectorVisualDescriptions)
-    .map((record) => [`建筑ID：${record.buildingId}`, `区域：level ${record.level} - ${record.sectorName}`, record.content].join('\n'))
+  const roomVisualDescriptionPrompt = Object.values(state.activeRoomVisualDescriptions)
+    .map((record) => [`建筑ID：${record.buildingId}`, `房间：level ${record.level} - ${record.roomId}`, record.content].join('\n'))
     .join('\n\n');
   const visibleLocationPrompt = state.playerIndoorLocation
     ? state.playerVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
@@ -408,8 +408,8 @@ export async function toWorldStatePrompt(state: WorldState, scene?: SceneObject)
     '玩家可见室内场景摘要：',
     visibleLocationPrompt || '（当前未提供室内摘要）',
     '---',
-    '玩家所处室内区域细节记录：',
-    sectorVisualDescriptionPrompt || '（暂无）',
+    '玩家所处房间细节记录：',
+    roomVisualDescriptionPrompt || '（暂无）',
   ];
 
   return sections.join('\n');

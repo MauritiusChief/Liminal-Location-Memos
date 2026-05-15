@@ -95,8 +95,8 @@ function buildGameState(): GameState {
     buildingSchemas: {},
     buildingRecords: {},
     activeVisibleLocations: [],
-    sectorVisualDescriptions: {},
-    activeSectorVisualDescriptions: [],
+    roomVisualDescriptions: {},
+    activeRoomVisualDescriptions: [],
   };
 }
 
