@@ -120,9 +120,13 @@ const ADJUST_PLAYER_VISIBLE_LOCATION_TOOL: GameStateToolDef = {
 }
 
 /**
+ * TODO：改名或者细化描述，让模型不要误以为细化时也使用此方案
  * 
  * 创建 Cardboard XXX 的游戏工具，来源必须是完全可见的信息（不能创建看不到的东西）
  * 暴露给 Book Composer 时不能说是草稿/Cardboard, 就说是 xxx info 好了
+ * 
+ * 其特性决定了，创建的一定是房间中/户外地上的“表层” Cardboard xxx。
+ * 因为任何内部的 Cardboard 都是在“表层”Cardboard xxx 细化得来的。
  * 
  * 创建 Cardboard Furniture 时：
  * 此工具会根据模板与变种自动决定包含哪些功能并设置对应的 Cardboard Item
@@ -141,9 +145,17 @@ const DRAFT_OBJECT_TOOL: GameStateToolDef = {
     template: { type: 'string', optional: false, description: '创建时所使用的模板的id, 可通过`query_template`函数输入中文关键字查询可使用的模板(以及变种)。'},
     varient: { type: 'string', optional: true, description: '创建时使用模板的哪种变种的id，`query_template`函数查询模板时会附上其所有可用变种。'},
     content: { type: 'JSON array of string', optional: true, description: '创建时填充哪个或哪些内容物表的id，`query_template`函数查询模板时会附上其所有可用内容物表。'},
-    note: { type: 'string', optional: true, description: '此可互动对象的零碎细节如使用痕迹等。'},
+    note: { type: 'string', optional: true, description: '该可互动对象的其他外观细节。'},
   }
 }
+
+/**
+ * TODO
+ * 需要新增的方案：
+ * - 直接移动 Cardboard Object（到地上或者到背包里等）的方案
+ * - 从 Cardboard Loots 里拿单独 Cardboard Item 的方案（Cardboard Loots 的质量、体积随之减小）
+ * - 单纯细化 Cardboard Object 的方案
+ */
 
 //#region 渐进式披露工具
 
