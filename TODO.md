@@ -12,8 +12,6 @@
 
 * 添加 LLM 在游戏过程中生成 template 甚至 building pattern 的功能
 
-* 所处房间的可互动物品，拆分为 world state 和 player state，避免玩家看到不应该看到的内容
-
 * 提示 LLM 如果信息不足，不要总是令玩家行为得逞，而是间接提示玩家需要更多信息
 
 * 添加建筑生成功能，具体在 buildingGeneration/_note 中

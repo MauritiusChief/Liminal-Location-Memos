@@ -216,7 +216,14 @@ export function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): st
     ? state.playerVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
     : null;
 
+  // 分离后：室内位置基础信息（建筑/楼层/区域/房间） + 房间内物体（面向 Book Composer）
   const indoorLocationPrompt = formatIndoorLocationPrompt(state)
+  const location = state.playerIndoorLocation;
+  const record = location ? state.playerBuildingRecords[location.buildingId] : undefined;
+  const room = record && location ? findRoomInBuilding(record, location) : null;
+  const contentEntries = room?.content ? Object.values(room.content) : [];
+  const roomContentPrompt = formatRoomContentPrompt(contentEntries);
+  const fullIndoorPrompt = [indoorLocationPrompt, roomContentPrompt].filter(Boolean).join('\n');
 
   const roomVisualDescriptionPrompt = Object.values(state.activeRoomVisualDescriptions)
     .map((record) => [`建筑ID：${record.buildingId}`, `房间：level ${record.level} - ${record.roomId}`, record.content].join('\n'))
@@ -233,7 +240,7 @@ export function toPlayerStatePrompt(state: PlayerState, scene?: SceneObject): st
     exteriorVisualDescriptionPrompt || '（暂无）',
     '---',
     '玩家所处房间：',
-    indoorLocationPrompt || '（当前未提供室内位置）',
+    fullIndoorPrompt || '（当前未提供室内位置）',
     '---',
     '玩家可见室内场景摘要：',
     visibleLocationPrompt || '（当前未提供室内摘要）',
@@ -284,10 +291,11 @@ export function formatVisibleLocationPrompt(visibleLocation: PlayerVisibleLocati
   ].join(' - ');
 }
 
-type GeneralRoomContent = CardboardItemRecord | CardboardFurnitureRecord | ItemRecord | FurnitureRecord;
+export type GeneralRoomContent = CardboardItemRecord | CardboardFurnitureRecord | ItemRecord | FurnitureRecord;
 
 /**
- * 专门描述玩家所在的房间，以及顺带的此房间所在的楼层、区域、建筑信息
+ * 仅揭露玩家所在房间的基本位置信息（建筑、楼层、区域、房间），不包含房间内物体。
+ * 房间内物体由 formatRoomContentPrompt / formatWorldStateRoomContentPrompt 分别提供。
  * @param state
  * @returns
  */
@@ -297,12 +305,6 @@ export function formatIndoorLocationPrompt(state: PlayerState | WorldState): str
     return null;
   }
   const record = state.playerBuildingRecords[location.buildingId];
-
-  const room = findRoomInBuilding(record, location);
-  const contentEntries = room?.content ? Object.values(room.content) : [];
-  const roomContentPrompt = contentEntries.length > 0
-    ? `房间内可互动物体：\n${contentEntries.map(formatRoomContentLine).join("\n")}\n（其他物体只是不可互动，并非不存在）`
-    : "房间内可互动物体：（所有物体均属于场景一部分，不可互动）";
 
   return [
     `建筑ID：${record.featureId}`,
@@ -314,22 +316,28 @@ export function formatIndoorLocationPrompt(state: PlayerState | WorldState): str
     location.suiteId
       ? `当前房间：套房 ${location.suiteId} - 房间 ${location.roomId} - ${location.roomDescription}`
       : `当前房间：房间 ${location.roomId} - ${location.roomDescription}`,
-    roomContentPrompt,
   ].join('\n')
 }
 
 /**
- * 返回
- * @param content 
- * @returns 
+ * 组装面向 Book Composer / Visual Describer（非游戏状态机）的房间内物体提示词。
+ * 不事先按"家具"/"物品"分类，统一按名称+描述+零件逐条排列（物品名称已足矣表达类别）。
+ * @param contentValues 按 uuid 索引的房间内物体记录
+ * @returns
  */
-function formatRoomContentPrompt(content: GeneralRoomContent[], ): string {
-  return ''
+export function formatRoomContentPrompt(contentValues: GeneralRoomContent[]): string {
+  if (contentValues.length === 0) {
+    return "房间内可互动物体：（所有物体均属于场景一部分，不可互动）";
+  }
+  return [
+    "房间内可互动物体：",
+    ...contentValues.map(formatRoomContentLine),
+    "（其他物体只是不可互动，并非不存在）",
+  ].join('\n');
 }
 
 function formatRoomContentLine(item: GeneralRoomContent): string {
   let partNamesStr = "";
-
   if ("parts" in item) {
     const parts = item.parts as Record<string, string | PartRecord>;
     const partValues = Object.values(parts);
@@ -348,6 +356,6 @@ function formatRoomContentLine(item: GeneralRoomContent): string {
     }
   }
 
-  const kind = partNamesStr ? "家具" : "物品";
-  return `* ${kind}：${item.name} — ${item.description}${partNamesStr}`;
+  // 不再区分"家具"/"物品"类别——物品名称本身已充分表明类别。
+  return `* ${item.name} — ${item.description}${partNamesStr}`;
 }

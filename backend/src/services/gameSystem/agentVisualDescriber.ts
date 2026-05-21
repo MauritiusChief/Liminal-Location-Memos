@@ -3,7 +3,8 @@ import { FeatureId } from "../featureDetail.js";
 import { distanceToPosition } from "../geometry.js";
 import { buildSceneFromRequest, SceneObject } from "../scene/sceneObject.js";
 import { buildScenePrompt } from "../scene/scenePrompt.js";
-import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatVisibleLocationPrompt, pickPlayerState, PlayerState, toPlayerStatePrompt } from "./agentBookComposer.js";
+import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatRoomContentPrompt, formatVisibleLocationPrompt, pickPlayerState, PlayerState, toPlayerStatePrompt } from "./agentBookComposer.js";
+import { findRoomInBuilding } from "../buildingGeneration/buildingRecord.js";
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
 import { FieldVisualDescriptionRecord, GameState, PlayerIndoorLocation, Position } from "./gameSessionStore.js";
 import { generateJsonReplySingleMessage, generateReplySingleMessage } from "./llm.js";
@@ -344,7 +345,14 @@ async function extractRoomVisualDescriptions(
 ): Promise<string> {
   console.log(`[${new Date().toISOString()}] 开始 extractRoomVisualDescriptions()`);
 
+  // 分离后：室内位置基础信息（建筑/楼层/区域/房间） + 房间内物体（面向 Visual Describer）
   const indoorLocationPrompt = formatIndoorLocationPrompt(state)
+  const location = state.playerIndoorLocation;
+  const record = location ? state.playerBuildingRecords[location.buildingId] : undefined;
+  const room = record && location ? findRoomInBuilding(record, location) : null;
+  const contentEntries = room?.content ? Object.values(room.content) : [];
+  const roomContentPrompt = formatRoomContentPrompt(contentEntries);
+  const fullIndoorPrompt = [indoorLocationPrompt, roomContentPrompt].filter(Boolean).join('\n');
 
   const visibleLocationPrompt = state.playerIndoorLocation
       ? state.playerVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
@@ -354,7 +362,7 @@ async function extractRoomVisualDescriptions(
     .join('\n\n');
   const message = [
     '玩家所处房间：',
-    indoorLocationPrompt || '（当前未提供室内位置）',
+    fullIndoorPrompt || '（当前未提供室内位置）',
     '---',
     '玩家可见室内场景摘要：',
     visibleLocationPrompt || '（当前未提供室内摘要）',
