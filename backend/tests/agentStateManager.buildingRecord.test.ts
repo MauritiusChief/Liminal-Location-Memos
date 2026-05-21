@@ -35,6 +35,27 @@ jest.mock("../src/services/gameSystem/toolMovePlayer.js", () => ({
   applyMovePlayerTool: jest.fn(),
 }), { virtual: true });
 
+jest.mock("../src/services/gameSystem/agentUtils.js", () => ({
+  buildPlayerActionContextPrompt: jest.fn(() => ""),
+}), { virtual: true });
+
+jest.mock("../src/services/gameSystem/toolActiveIndoorLocations.js", () => ({
+  applySyncPlayerIndoorLocationsTool: jest.fn(),
+}), { virtual: true });
+
+jest.mock("../src/services/gameSystem/toolCreateCardboard.js", () => ({
+  applyCreateCardboardObject: jest.fn(),
+}), { virtual: true });
+
+jest.mock("../src/services/buildingGeneration/buildingRecord.js", () => ({
+  findRoomInBuilding: jest.fn(),
+}), { virtual: true });
+
+jest.mock("../src/services/objectGeneration/objectGeneraterShared.js", () => ({
+  CARDBOARD_TEMPLATES: [],
+  GeneralContent: {},
+}), { virtual: true });
+
 import { toWorldStatePrompt, type WorldState } from "../src/services/gameSystem/agentStateManager";
 
 function createWorldState(overrides: Partial<WorldState>): WorldState {
