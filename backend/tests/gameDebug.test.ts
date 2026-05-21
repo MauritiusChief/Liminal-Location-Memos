@@ -52,7 +52,7 @@ describe("buildGameDebugRequestArtifacts", () => {
     expect(snapshot).toContain("## 2. assistant");
     expect(snapshot).toContain("## 3. assistant");
     expect(snapshot).toContain("## 4. tool");
-    expect(snapshot).toContain("\"name\": \"refresh_game_state\"");
+    expect(snapshot).toContain("\"name\": \"refresh_world_state\"");
     expect(snapshot).toContain("\"content\": \"\"");
     expect(snapshot).toContain("```md\n玩家周遭环境数据\n细节 A\n```");
   });

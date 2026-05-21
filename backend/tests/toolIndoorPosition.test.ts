@@ -38,6 +38,7 @@ function buildGameState(): GameState {
       endurance: 100,
     },
     playerVisibleLocations: [],
+    playerInventory: {},
     messageHistory: [],
     buildingSchemas: {},
     buildingRecords: {},

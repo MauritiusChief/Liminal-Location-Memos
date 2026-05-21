@@ -77,14 +77,14 @@ describe("buildFullMessagesRequestMessages", () => {
         content: "",
         reasoning_content: "",
         tool_calls: [{
-          id: "synthetic_get_game_state",
+          id: "synthetic_get_world_state",
           type: "function",
-          function: { name: "refresh_game_state", arguments: "{}" },
+          function: { name: "refresh_world_state", arguments: "{}" },
         }],
       },
       {
         role: "tool",
-        tool_call_id: "synthetic_get_game_state",
+        tool_call_id: "synthetic_get_world_state",
         content: "state",
       },
     ]);
@@ -124,14 +124,14 @@ describe("buildFullMessagesRequestMessages", () => {
         content: "",
         reasoning_content: "",
         tool_calls: [{
-          id: "synthetic_get_game_state",
+          id: "synthetic_get_world_state",
           type: "function",
-          function: { name: "refresh_game_state", arguments: "{}" },
+          function: { name: "refresh_world_state", arguments: "{}" },
         }],
       },
       {
         role: "tool",
-        tool_call_id: "synthetic_get_game_state",
+        tool_call_id: "synthetic_get_world_state",
         content: "state",
       },
     ]);
@@ -159,7 +159,7 @@ describe("buildFullMessagesRequestMessages", () => {
     expect(toolIds).toEqual([
       "synthetic_player_state_change_0",
       "synthetic_player_state_change_2",
-      "synthetic_get_game_state",
+      "synthetic_get_world_state",
     ]);
   });
 
@@ -176,14 +176,14 @@ describe("buildFullMessagesRequestMessages", () => {
         content: "",
         reasoning_content: "",
         tool_calls: [{
-          id: "synthetic_get_game_state",
+          id: "synthetic_get_world_state",
           type: "function",
-          function: { name: "refresh_game_state", arguments: "{}" },
+          function: { name: "refresh_world_state", arguments: "{}" },
         }],
       },
       {
         role: "tool",
-        tool_call_id: "synthetic_get_game_state",
+        tool_call_id: "synthetic_get_world_state",
         content: "state",
       },
     ]);

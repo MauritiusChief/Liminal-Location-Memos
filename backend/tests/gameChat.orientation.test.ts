@@ -8,6 +8,23 @@ jest.mock("../src/services/scene/scenePrompt", () => ({
   buildScenePrompt: jest.fn(() => ""),
 }));
 
+jest.mock("../src/services/gameSystem/agentUtils", () => ({
+  buildPlayerActionContextPrompt: jest.fn(() => ""),
+}));
+
+jest.mock("../src/services/gameSystem/agentStateRouter", () => ({
+  gameStateRouter: jest.fn(async () => []),
+}));
+
+jest.mock("../src/services/gameSystem/toolCreateCardboard", () => ({
+  applyCreateCardboardObject: jest.fn(),
+}));
+
+jest.mock("../src/services/objectGeneration/objectGeneraterShared", () => ({
+  CARDBOARD_TEMPLATES: [],
+  GeneralContent: {},
+}));
+
 jest.mock("../src/services/gameSystem/systemPrompts", () => ({
   BUILD_GAME_STATE_MANAGER_SYSTEM: jest.fn(() => ""),
   INDOOR_INITIAL_BOOK_MESSAGE_SYSTEM: "",
@@ -23,6 +40,7 @@ jest.mock("../src/services/gameSystem/gameDebug", () => ({
 
 jest.mock("../src/services/gameSystem/llm", () => ({
   generateJsonReplySingleMessage: jest.fn(),
+  generateJsonReplyWithSource: jest.fn(),
   generateReplySingleMessage: jest.fn(),
   streamReplyFullMessages: jest.fn(),
   streamReplySingleMessage: jest.fn(),
@@ -62,6 +80,7 @@ import { buildSceneFromRequest } from "../src/services/scene/sceneObject";
 import { findContainingBuildingFeatureId } from "../src/services/buildingGeneration/buildingRecord";
 import {
   generateJsonReplySingleMessage,
+  generateJsonReplyWithSource,
   generateReplySingleMessage,
   streamReplyFullMessages,
 } from "../src/services/gameSystem/llm";
@@ -74,6 +93,7 @@ import {
   updateRuntimeSession,
 } from "../src/services/gameSystem/gameSessionStore";
 import { OsmCoverageSyncRetryExhaustedError } from "../src/services/osmNormalization/osmGate";
+import { gameStateRouter } from "../src/services/gameSystem/agentStateRouter";
 import { streamGameTurn } from "../src/services/gameSystem/gameChat";
 import { applyGameStateToolCalls } from "../src/services/gameSystem/agentStateManager";
 import { movePosition } from "../src/services/gameSystem/toolMovePlayer";
@@ -87,6 +107,14 @@ function buildGameState(): GameState {
     playerOrientation: 15,
     playerIndoorLocation: null,
     playerVisionRange: 500,
+    playerStatus: {
+      health: 100,
+      blood_loss: 0, infection: 0, poisonous: 0, nerv_mis: 0,
+      hydration: 100, calorie: 100, protein: 100,
+      exceeded_heat: 0, essential_heat: 100,
+      fatigue: 0,
+      endurance: 100,
+    },
     messageHistory: [],
     activeFieldVisualDescriptions: [],
     fieldVisualDescriptions: {},
@@ -94,7 +122,10 @@ function buildGameState(): GameState {
     exteriorVisualDescriptions: {},
     buildingSchemas: {},
     buildingRecords: {},
-    activeVisibleLocations: [],
+    weatherAnchors: [],
+    chunckRecords: [],
+    playerVisibleLocations: [],
+    playerInventory: {},
     roomVisualDescriptions: {},
     activeRoomVisualDescriptions: [],
   };
@@ -187,6 +218,7 @@ describe("applyGameStateToolCalls", () => {
 describe("streamGameTurn", () => {
   const mockedBuildSceneFromRequest = jest.mocked(buildSceneFromRequest);
   const mockedGenerateJsonReplySingleMessage = jest.mocked(generateJsonReplySingleMessage);
+  const mockedGenerateJsonReplyWithSource = jest.mocked(generateJsonReplyWithSource);
   const mockedGenerateReplySingleMessage = jest.mocked(generateReplySingleMessage);
   const mockedStreamReplyFullMessages = jest.mocked(streamReplyFullMessages);
   const mockedWriteGameDebugRequest = jest.mocked(writeGameDebugRequest);
@@ -196,6 +228,8 @@ describe("streamGameTurn", () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    jest.mocked(gameStateRouter).mockResolvedValue([]);
+    mockedGenerateJsonReplyWithSource.mockResolvedValue({ reply: '[]', reasoning: '' });
   });
 
   it("does not mutate the cached session when coverage sync fails", async () => {
@@ -262,10 +296,10 @@ describe("streamGameTurn", () => {
     expect(mockedWriteGameDebugRequest).toHaveBeenCalledTimes(4);
     expect(mockedWriteGameDebugResult).toHaveBeenCalledTimes(4);
     expect(mockedWriteGameDebugRequest.mock.invocationCallOrder[0]).toBeLessThan(
-      mockedGenerateJsonReplySingleMessage.mock.invocationCallOrder[0],
+      mockedGenerateJsonReplyWithSource.mock.invocationCallOrder[0],
     );
     expect(mockedWriteGameDebugResult.mock.invocationCallOrder[0]).toBeGreaterThan(
-      mockedGenerateJsonReplySingleMessage.mock.invocationCallOrder[0],
+      mockedGenerateJsonReplyWithSource.mock.invocationCallOrder[0],
     );
     expect(mockedWriteGameDebugRequest.mock.invocationCallOrder[1]).toBeLessThan(
       mockedStreamReplyFullMessages.mock.invocationCallOrder[0],
@@ -339,9 +373,6 @@ describe("streamGameTurn", () => {
       polarView: undefined,
     });
     mockedGenerateJsonReplySingleMessage.mockResolvedValueOnce({
-      reply: "[]",
-      reasoning: "",
-    }).mockResolvedValueOnce({
       reply: JSON.stringify([{ buildingId: "way/123", content: "exterior notes" }]),
       reasoning: "",
     });
