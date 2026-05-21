@@ -1,6 +1,6 @@
 import { GeneralSource } from "../gameSystem/llmTypes.js";
-import { CARDBOAD_FURNITURE_TEMPLATES } from "./furnitureTemplates.js";
-import { CARDBOARD_ITEM_TEMPLATES } from "./itemTemplates.js";
+import { CARDBOAD_FURNITURE_TEMPLATES, CardboardFurnitureRecord, FurnitureRecord } from "./furnitureTemplates.js";
+import { CARDBOARD_ITEM_TEMPLATES, CardboardItemRecord, ItemRecord } from "./itemTemplates.js";
 
 /**
  * 质量、体积（对于软性物品）、长度（对于可改装物品）会随着 parts 和 content 实时更新
@@ -39,3 +39,5 @@ export const CARDBOARD_TEMPLATES: CardboardObjectTemplate[] = [
   ...CARDBOARD_ITEM_TEMPLATES,
   ...CARDBOAD_FURNITURE_TEMPLATES,
 ]
+
+export type GeneralContent = CardboardItemRecord | CardboardFurnitureRecord | ItemRecord | FurnitureRecord;

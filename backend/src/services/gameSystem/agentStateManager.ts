@@ -1,7 +1,7 @@
 import { distanceBetweenCoordinates } from "../geometry.js";
 import { buildSceneFromRequest, SceneObject } from "../scene/sceneObject.js";
 import { buildScenePrompt } from "../scene/scenePrompt.js";
-import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatVisibleLocationPrompt, type GeneralRoomContent } from "./agentBookComposer.js";
+import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatVisibleLocationPrompt } from "./agentBookComposer.js";
 import { findRoomInBuilding, type BuildingLevel, type BuildingRecord, type BuildingRoom, type BuildingSector } from "../buildingGeneration/buildingRecord.js";
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
 import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, RoomVisualDescriptionRecord } from "./gameSessionStore.js";
@@ -12,7 +12,7 @@ import { applyMovePlayerTool } from "./toolMovePlayer.js";
 import type { AgentStateRouteCandidate } from "./agentStateRouter.js";
 import { buildPlayerActionContextPrompt } from "./agentUtils.js";
 import { applySyncPlayerIndoorLocationsTool } from "./toolActiveIndoorLocations.js";
-import { CARDBOARD_TEMPLATES, type CardboardObjectRecord, type ObjectRecord } from "../objectGeneration/objectGeneraterShared.js";
+import { CARDBOARD_TEMPLATES, GeneralContent, type CardboardObjectRecord, type ObjectRecord } from "../objectGeneration/objectGeneraterShared.js";
 import { type PartRecord } from "../objectGeneration/itemTemplates.js";
 import { applyCreateCardboardObject } from "./toolCreateCardboard.js";
 
@@ -155,7 +155,19 @@ const DRAFT_OBJECT_TOOL: GameStateToolDef = {
  * 需要新增的方案：
  * - 直接移动 Cardboard Object（到地上或者到背包里等）的方案
  * - 从 Cardboard Loots 里拿单独 Cardboard Item 的方案（Cardboard Loots 的质量、体积随之减小）
- * - 单纯细化 Cardboard Object 的方案
+ * - 模板细化 Cardboard Loots 的方案
+ *   - 仅用作对没有直观描述的 Cardboard 直接细化。如果从已有直观描述的 Cardboard Loots 拿东西，用上一个方案。
+ *   - 仅可套模板，程序随机生成东西。
+ *   - 细化完成后，Cardboard Loots 直接消失。
+ *   - 每次细化都会动态更新外部的 MVL。
+ * - 模板细化 Cardboard Item/Furniture/Vehicle 的方案
+ *   - 套模板得到其材料、形状信息，或者其内部组成部分。
+ *   - MVL 信息根据材料、形状，或者其内部组成部分的 MVL 计算得出。
+ *   - 每次细化都会动态更新外部的 MVL（换言之，此方案可用于细化内部的 Cardboard Item）。
+ * - 创新细化 Cardboard Item/Furniture/Vehicle 的方案
+ *   - 与模板细化完全一致，除了其材料、形状信息或者其内部组成部分由 LLM 填写。
+ * - 直接创建 Item/Furniture/Vehicle 的方案
+ *   - 从环境信息直接创建的方案，不经过先创建 Cardboard 再细化的过程
  */
 
 //#region 渐进式披露工具
@@ -581,7 +593,7 @@ function renderRoomLine(room: BuildingRoom, indent: string): string {
  * @param contentEntries 按 uuid 索引的房间内物体记录
  * @returns
  */
-function formatWorldStateRoomContentPrompt(contentEntries: GeneralRoomContent[]): string {
+function formatWorldStateRoomContentPrompt(contentEntries: GeneralContent[]): string {
   if (contentEntries.length === 0) {
     return "房间内对象：（无）";
   }
@@ -595,7 +607,7 @@ function formatWorldStateRoomContentPrompt(contentEntries: GeneralRoomContent[])
 /**
  * 格式化单个房间内物体，附带 UUID 与质量/体积/长度等详细物理信息。
  */
-function formatWorldStateRoomContentLine(item: GeneralRoomContent): string {
+function formatWorldStateRoomContentLine(item: GeneralContent): string {
   // Cardboard 对象用粗略值（带"约"），真实对象用精算值
   const isCardboard = 'aprxMass' in item;
   const card = isCardboard ? (item as CardboardObjectRecord) : null;

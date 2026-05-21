@@ -12,6 +12,7 @@ import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
 import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, RoomVisualDescriptionRecord } from "./gameSessionStore.js";
 import { streamReplyFullMessages, streamReplySingleMessage } from "./llm.js";
 import { INDOOR_INITIAL_BOOK_MESSAGE_SYSTEM, OUTDOOR_INITIAL_BOOK_MESSAGE_SYSTEM, REGULAR_BOOK_MESSAGE_SYSTEM } from "./systemPrompts.js";
+import { GeneralContent } from "../objectGeneration/objectGeneraterShared.js";
 
 /**
  * 每次在 Book Composer 使用之前通过 Game State 生成，随即转为 Player State Prompt
@@ -291,8 +292,6 @@ export function formatVisibleLocationPrompt(visibleLocation: PlayerVisibleLocati
   ].join(' - ');
 }
 
-export type GeneralRoomContent = CardboardItemRecord | CardboardFurnitureRecord | ItemRecord | FurnitureRecord;
-
 /**
  * 仅揭露玩家所在房间的基本位置信息（建筑、楼层、区域、房间），不包含房间内物体。
  * 房间内物体由 formatRoomContentPrompt / formatWorldStateRoomContentPrompt 分别提供。
@@ -325,7 +324,7 @@ export function formatIndoorLocationPrompt(state: PlayerState | WorldState): str
  * @param contentValues 按 uuid 索引的房间内物体记录
  * @returns
  */
-export function formatRoomContentPrompt(contentValues: GeneralRoomContent[]): string {
+export function formatRoomContentPrompt(contentValues: GeneralContent[]): string {
   if (contentValues.length === 0) {
     return "房间内可互动物体：（所有物体均属于场景一部分，不可互动）";
   }
@@ -336,7 +335,7 @@ export function formatRoomContentPrompt(contentValues: GeneralRoomContent[]): st
   ].join('\n');
 }
 
-function formatRoomContentLine(item: GeneralRoomContent): string {
+function formatRoomContentLine(item: GeneralContent): string {
   let partNamesStr = "";
   if ("parts" in item) {
     const parts = item.parts as Record<string, string | PartRecord>;

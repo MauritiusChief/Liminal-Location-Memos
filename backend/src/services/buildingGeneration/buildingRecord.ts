@@ -6,6 +6,7 @@ import { query } from "@/db/client.js";
 import { DbBuildingFeatureDetailRow, FeatureId, mapBuildingDetailRowToFeatureDetail } from "../featureDetail.js";
 import { CardboardItemRecord, ItemRecord } from "../objectGeneration/itemTemplates.js";
 import { CardboardFurnitureRecord, FurnitureRecord } from "../objectGeneration/furnitureTemplates.js";
+import { GeneralContent } from "../objectGeneration/objectGeneraterShared.js";
 
 /**
  * 内部（指 BuildingRoom/BuildingSubRoom）兼做物品/家具/载具在建筑内的存储地
@@ -38,7 +39,7 @@ export interface BuildingRoom {
   roomId: string;
   description: string;
   access?: "entrance" | "vertical" | "internal";
-  content?: Record<string, CardboardItemRecord | CardboardFurnitureRecord | ItemRecord | FurnitureRecord>; // 键为 uuid
+  content?: Record<string, GeneralContent>; // 键为 uuid
 }
 
 /**

@@ -6,6 +6,7 @@ import { FeatureId } from '../featureDetail.js';
 import type { BuildingRecord } from '../buildingGeneration/buildingRecord.js';
 import { GameStateToolCall } from './agentStateManager.js';
 import { CardboardItemRecord, ItemRecord } from '../objectGeneration/itemTemplates.js';
+import { GeneralContent } from '../objectGeneration/objectGeneraterShared.js';
 
 export interface Position {
   lat: number;
@@ -95,11 +96,12 @@ export interface GameState {
   playerVisionRange: number;
   playerStatus: PlayerStatus;
   playerVisibleLocations: PlayerVisibleLocation[];
+  playerInventory: Record<string, GeneralContent>; // 键为 UUID
   // 完整聊天信息
   messageHistory: GameMessage[];
   // 建筑、载具（未完成）、物品（未完成）信息
   buildingSchemas: Record<string, BuildingSchema>;
-  buildingRecords: Record<string, BuildingRecord>; // 建筑的长期信息存储（包括未来可能会有的物品信息）
+  buildingRecords: Record<string, BuildingRecord>; // 建筑的长期信息存储（包括物品信息）
   weatherAnchors: WeatherAnchor[];
   chunckRecords: ChunckRecord[];
   // 来自LLM的视觉事实信息落盘
@@ -354,6 +356,7 @@ function createDefaultGameState(): GameState {
     playerVisionRange: 500,
     playerStatus: INITIAL_PLAYER_STATUS,
     playerVisibleLocations: [],
+    playerInventory: {},
 
     messageHistory: [],
 
