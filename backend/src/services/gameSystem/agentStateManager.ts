@@ -1,10 +1,10 @@
 import { distanceBetweenCoordinates } from "../geometry.js";
 import { buildSceneFromRequest, SceneObject } from "../scene/sceneObject.js";
 import { buildScenePrompt } from "../scene/scenePrompt.js";
-import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatVisibleLocationPrompt } from "./agentBookComposer.js";
-import type { BuildingLevel, BuildingRecord, BuildingRoom, BuildingSector } from "../buildingGeneration/buildingRecord.js";
+import { formatFieldVisualDescriptionPrompt, formatIndoorLocationPrompt, formatVisibleLocationPrompt, type GeneralRoomContent } from "./agentBookComposer.js";
+import { findRoomInBuilding, type BuildingLevel, type BuildingRecord, type BuildingRoom, type BuildingSector } from "../buildingGeneration/buildingRecord.js";
 import { writeGameDebugRequest, writeGameDebugResult } from "./gameDebug.js";
-import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, SectorVisualDescriptionRecord } from "./gameSessionStore.js";
+import { ExteriorVisualDescriptionRecord, FieldVisualDescriptionRecord, GameMessage, GameState, PlayerIndoorLocation, PlayerVisibleLocation, Position, RoomVisualDescriptionRecord } from "./gameSessionStore.js";
 import { generateJsonReplyWithSource } from "./llm.js";
 import { BUILD_GAME_STATE_MANAGER_SYSTEM } from "./systemPrompts.js";
 import { applySetPlayerIndoorLocationTool } from "./toolIndoorPosition.js";
@@ -12,7 +12,8 @@ import { applyMovePlayerTool } from "./toolMovePlayer.js";
 import type { AgentStateRouteCandidate } from "./agentStateRouter.js";
 import { buildPlayerActionContextPrompt } from "./agentUtils.js";
 import { applySyncPlayerIndoorLocationsTool } from "./toolActiveIndoorLocations.js";
-import { CARDBOARD_TEMPLATES } from "../objectGeneration/objectGeneraterShared.js";
+import { CARDBOARD_TEMPLATES, type CardboardObjectRecord, type ObjectRecord } from "../objectGeneration/objectGeneraterShared.js";
+import { type PartRecord } from "../objectGeneration/itemTemplates.js";
 import { applyCreateCardboardObject } from "./toolCreateCardboard.js";
 
 export interface GameStateToolCall {
@@ -59,7 +60,7 @@ export interface WorldState {
   // 只包含玩家可见的 Visual Description
   activeFieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>
-  activeSectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
+  activeRoomVisualDescriptions: Record<string, RoomVisualDescriptionRecord>;
 }
 
 const WORLD_STATE_RADIUS_METERS = 500;
@@ -120,9 +121,13 @@ const ADJUST_PLAYER_VISIBLE_LOCATION_TOOL: GameStateToolDef = {
 }
 
 /**
+ * TODO：改名或者细化描述，让模型不要误以为细化时也使用此方案
  * 
  * 创建 Cardboard XXX 的游戏工具，来源必须是完全可见的信息（不能创建看不到的东西）
  * 暴露给 Book Composer 时不能说是草稿/Cardboard, 就说是 xxx info 好了
+ * 
+ * 其特性决定了，创建的一定是房间中/户外地上的“表层” Cardboard xxx。
+ * 因为任何内部的 Cardboard 都是在“表层”Cardboard xxx 细化得来的。
  * 
  * 创建 Cardboard Furniture 时：
  * 此工具会根据模板与变种自动决定包含哪些功能并设置对应的 Cardboard Item
@@ -141,9 +146,17 @@ const DRAFT_OBJECT_TOOL: GameStateToolDef = {
     template: { type: 'string', optional: false, description: '创建时所使用的模板的id, 可通过`query_template`函数输入中文关键字查询可使用的模板(以及变种)。'},
     varient: { type: 'string', optional: true, description: '创建时使用模板的哪种变种的id，`query_template`函数查询模板时会附上其所有可用变种。'},
     content: { type: 'JSON array of string', optional: true, description: '创建时填充哪个或哪些内容物表的id，`query_template`函数查询模板时会附上其所有可用内容物表。'},
-    note: { type: 'string', optional: true, description: '此可互动对象的零碎细节如使用痕迹等。'},
+    note: { type: 'string', optional: true, description: '该可互动对象的其他外观细节。'},
   }
 }
+
+/**
+ * TODO
+ * 需要新增的方案：
+ * - 直接移动 Cardboard Object（到地上或者到背包里等）的方案
+ * - 从 Cardboard Loots 里拿单独 Cardboard Item 的方案（Cardboard Loots 的质量、体积随之减小）
+ * - 单纯细化 Cardboard Object 的方案
+ */
 
 //#region 渐进式披露工具
 
@@ -343,8 +356,8 @@ export function pickWorldState(state: GameState): WorldState {
   const activeExteriorVisualDescriptions = Object.fromEntries(Object.entries(state.exteriorVisualDescriptions).filter(
     ([featureId, _]) => state.activeExteriorVisualDescriptions.includes(featureId)
   ))
-  const activeSectorVisualDescriptions = Object.fromEntries(Object.entries(state.sectorVisualDescriptions).filter(
-    ([uuid, _]) => state.activeSectorVisualDescriptions.includes(uuid)
+  const activeRoomVisualDescriptions = Object.fromEntries(Object.entries(state.roomVisualDescriptions).filter(
+    ([uuid, _]) => state.activeRoomVisualDescriptions.includes(uuid)
   ))
   return {
     playerPosition,
@@ -356,7 +369,7 @@ export function pickWorldState(state: GameState): WorldState {
     playerBuildingRecords,
     activeFieldVisualDescriptions,
     activeExteriorVisualDescriptions,
-    activeSectorVisualDescriptions,
+    activeRoomVisualDescriptions,
   }
 }
 
@@ -376,11 +389,17 @@ export async function toWorldStatePrompt(state: WorldState, scene?: SceneObject)
   const exteriorVisualDescriptionPrompt =  Object.values(state.activeExteriorVisualDescriptions)
     .map((record) => [`建筑ID：${record.buildingId}`, record.content].join('\n'))
     .join('\n');
-  // 室内相关的信息
+  // 室内相关的信息——分离后：位置基础信息（formatIndoorLocationPrompt）+ 详细物体信息（面向 Game State Manager）
   const indoorLocationPrompt = formatIndoorLocationPrompt(state)
+  const location = state.playerIndoorLocation;
+  const record = location ? state.playerBuildingRecords[location.buildingId] : undefined;
+  const room = record && location ? findRoomInBuilding(record, location) : null;
+  const contentEntries = room?.content ? Object.values(room.content) : [];
+  const worldStateRoomContentPrompt = formatWorldStateRoomContentPrompt(contentEntries);
+  const fullIndoorPrompt = [indoorLocationPrompt, worldStateRoomContentPrompt].filter(Boolean).join('\n');
 
-  const sectorVisualDescriptionPrompt = Object.values(state.activeSectorVisualDescriptions)
-    .map((record) => [`建筑ID：${record.buildingId}`, `区域：level ${record.level} - ${record.sectorName}`, record.content].join('\n'))
+  const roomVisualDescriptionPrompt = Object.values(state.activeRoomVisualDescriptions)
+    .map((record) => [`建筑ID：${record.buildingId}`, `房间：level ${record.level} - ${record.roomId}`, record.content].join('\n'))
     .join('\n\n');
   const visibleLocationPrompt = state.playerIndoorLocation
     ? state.playerVisibleLocations.map(location => formatVisibleLocationPrompt(location)).join('\n')
@@ -400,7 +419,7 @@ export async function toWorldStatePrompt(state: WorldState, scene?: SceneObject)
     exteriorVisualDescriptionPrompt || '（暂无）',
     '---',
     '玩家所处房间：',
-    indoorLocationPrompt || '（当前未提供室内位置）',
+    fullIndoorPrompt || '（当前未提供室内位置）',
     '---',
     '相关建筑结构：',
     buildingRecordPrompt || '（暂无）',
@@ -408,8 +427,8 @@ export async function toWorldStatePrompt(state: WorldState, scene?: SceneObject)
     '玩家可见室内场景摘要：',
     visibleLocationPrompt || '（当前未提供室内摘要）',
     '---',
-    '玩家所处室内区域细节记录：',
-    sectorVisualDescriptionPrompt || '（暂无）',
+    '玩家所处房间细节记录：',
+    roomVisualDescriptionPrompt || '（暂无）',
   ];
 
   return sections.join('\n');
@@ -549,4 +568,78 @@ function formatSectorHeader(sector: BuildingSector): string {
 function renderRoomLine(room: BuildingRoom, indent: string): string {
   const access = room.access ? ` [通道类型：${room.access}]` : "";
   return `${indent}- 房间 ${room.roomId}: ${room.description}${access}`;
+}
+
+//#region 房间内物体提示词（面向 Game State Manager）
+
+/**
+ * 组装面向 Game State Manager 的房间内物体提示词。
+ * 相比 formatRoomContentPrompt，这里为每个物体提供 UUID、质量/体积/长度（明确或粗略）、材料、形状等详细信息，
+ * 供状态机在决定工具调用时参考。
+ *
+ * 不按"家具"/"物品"分类——物体名称已足矣表达类别。
+ * @param contentEntries 按 uuid 索引的房间内物体记录
+ * @returns
+ */
+function formatWorldStateRoomContentPrompt(contentEntries: GeneralRoomContent[]): string {
+  if (contentEntries.length === 0) {
+    return "房间内对象：（无）";
+  }
+  return [
+    "房间内对象：",
+    ...contentEntries.map(formatWorldStateRoomContentLine),
+    "（其他物体只是不可互动，并非不存在）",
+  ].join('\n');
+}
+
+/**
+ * 格式化单个房间内物体，附带 UUID 与质量/体积/长度等详细物理信息。
+ */
+function formatWorldStateRoomContentLine(item: GeneralRoomContent): string {
+  // Cardboard 对象用粗略值（带"约"），真实对象用精算值
+  const isCardboard = 'aprxMass' in item;
+  const card = isCardboard ? (item as CardboardObjectRecord) : null;
+  const real = !isCardboard ? (item as ObjectRecord) : null;
+
+  const massStr = isCardboard
+    ? `质量：约${card!.aprxMass}kg`
+    : `质量：${real!.mass}kg`;
+  const volumeStr = isCardboard
+    ? `体积：约${card!.aprxVolume}L`
+    : `体积：${real!.volume}L`;
+  const lengthStr = isCardboard
+    ? `长度：约${card!.aprxLength}cm`
+    : `长度：${real!.length}cm`;
+
+  // 材料与形状仅 ItemRecord 具备（FurnitureRecord 无此字段）
+  const materialStr = ('material' in item && item.material)
+    ? `材料：${item.material}` : '';
+  const shapeStr = ('shape' in item && item.shape)
+    ? `形状：${item.shape}` : '';
+
+  // 零件信息（CardboardFurnitureRecord 和 FurnitureRecord 具备 parts）
+  let partsStr = '';
+  if ('parts' in item) {
+    const parts = item.parts as Record<string, string | PartRecord>;
+    const partEntries = Object.values(parts);
+    if (partEntries.length > 0) {
+      const partNames = partEntries.map((pv) => {
+        if (typeof pv === "string") {
+          return pv;
+        }
+        const content = pv.content;
+        if (typeof content === "string") {
+          return content;
+        }
+        return content?.name ?? "?";
+      });
+      partsStr = `零件(${partNames.length})：${partNames.join("、")}`;
+    }
+  }
+
+  const physLine = `${massStr} / ${volumeStr} / ${lengthStr}`;
+  const extras = [materialStr, shapeStr, partsStr].filter(Boolean);
+  const extrasLine = extras.length > 0 ? '\n  ' + extras.join('；') : '';
+
+  return `* ${item.name} [UUID: ${item.uuid}] — ${item.description}\n  ${physLine}${extrasLine}`;
 }

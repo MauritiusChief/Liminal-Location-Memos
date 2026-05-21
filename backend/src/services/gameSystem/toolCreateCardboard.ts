@@ -117,6 +117,7 @@ function buildLoots(
     }
 
     const lootUuid = randomUUID();
+    // TODO 根据家具来动态决定 Mass, Volume, Length，或者干脆删掉此处 M,V,L
     result[lootUuid] = {
       uuid: lootUuid,
       name: lootId,

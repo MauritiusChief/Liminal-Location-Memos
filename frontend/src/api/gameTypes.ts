@@ -28,10 +28,10 @@ export interface ExteriorVisualDescriptionRecord {
   updatedAt: string;
 }
 
-export interface SectorVisualDescriptionRecord {
+export interface RoomVisualDescriptionRecord {
   buildingId: string;
   level: number;
-  sectorName: string;
+  roomId: string;
   content: string;
   createdAt: string;
   updatedAt: string;
@@ -85,8 +85,8 @@ export interface GameSessionSnapshot {
   fieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: string[];
   exteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
-  sectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
-  activeSectorVisualDescriptions: string[];
+  roomVisualDescriptions: Record<string, RoomVisualDescriptionRecord>;
+  activeRoomVisualDescriptions: string[];
   buildingSchemas: Record<string, BuildingSchema>;
   buildingRecords: Record<string, unknown>;
   playerVisibleLocations: PlayerVisibleLocation[];

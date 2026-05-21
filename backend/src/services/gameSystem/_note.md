@@ -27,9 +27,9 @@ Game State 术语：
   - **Exterior Visual Description**
     - 与 Field Visual Description 类似，内容为列表形式半径300米范围内 LLM 对话中与建筑相关的细节，此时 index 为建筑的id。
     - 生成途径：LLM 在概览 Book Message 时，如果某些细节与建筑有关，就会以该细节所对应的建筑id为基准进行记录（需要 LLM 辨认属于哪个建筑）
-  - **Sector Visual Description**
-    - 内容与 Field Visual Description 类似，但记录的 index 是某建筑某楼层某 Sector，且一次性涵盖整个 Sector
-    - 只有所在 Sector 的 Visual Description 才会激活
+  - **Room Visual Description**
+    - 内容与 Field Visual Description 类似，但记录的 index 是某房间
+    - 只有所在房间的 Visual Description 才会激活
 - **Visible Location**：在 Game State 的 playerVisibleLocations 中用来记载当前玩家可看到的范围。
   - playerVisibleLocations 决定关系如下：默认情况下只能看到所在 Sector 的普通房间与套房表层。特殊情况下：
     - 处在楼梯口等，可以看见相邻楼层的垂直连接处，比如楼梯间或者阁楼

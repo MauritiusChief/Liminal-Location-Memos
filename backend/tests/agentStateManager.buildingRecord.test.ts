@@ -48,7 +48,7 @@ function createWorldState(overrides: Partial<WorldState>): WorldState {
     playerVisibleLocations: [],
     activeFieldVisualDescriptions: {},
     activeExteriorVisualDescriptions: {},
-    activeSectorVisualDescriptions: {},
+    activeRoomVisualDescriptions: {},
     ...overrides,
   };
 }

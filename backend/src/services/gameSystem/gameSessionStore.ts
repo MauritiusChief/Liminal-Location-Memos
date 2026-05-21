@@ -46,13 +46,13 @@ export interface ExteriorVisualDescriptionRecord {
 }
 
 /**
- * 文本形式记录某一建筑的某一楼层某一 Sector 的事实性细节
+ * 文本形式记录某一建筑的某一楼层某一房间的事实性细节
  */
-export interface SectorVisualDescriptionRecord {
+export interface RoomVisualDescriptionRecord {
   buildingId: string;
   level: number;
-  sectorName: string
-  // ↑综合绑定特定建筑的特定 Sector
+  roomId: string;
+  // ↑综合绑定特定建筑的特定房间
   content: string; // 纯文本形式的列表
   createdAt: string;
   updatedAt: string;
@@ -107,8 +107,8 @@ export interface GameState {
   fieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: string[];
   exteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>;
-  activeSectorVisualDescriptions: string[];
-  sectorVisualDescriptions: Record<string, SectorVisualDescriptionRecord>;
+  activeRoomVisualDescriptions: string[];
+  roomVisualDescriptions: Record<string, RoomVisualDescriptionRecord>;
 }
 
 /**
@@ -366,8 +366,8 @@ function createDefaultGameState(): GameState {
     fieldVisualDescriptions: {},
     activeExteriorVisualDescriptions: [],
     exteriorVisualDescriptions: {},
-    activeSectorVisualDescriptions: [],
-    sectorVisualDescriptions: {},
+    activeRoomVisualDescriptions: [],
+    roomVisualDescriptions: {},
   };
 }
 

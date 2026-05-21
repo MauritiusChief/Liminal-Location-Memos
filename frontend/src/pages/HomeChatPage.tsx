@@ -31,9 +31,9 @@ export function HomeChatPage() {
         .map((buildingId) => session.exteriorVisualDescriptions[buildingId])
         .filter((record): record is NonNullable<typeof record> => Boolean(record))
     : [];
-  const activeSectorVisualDescriptions = session
-    ? session.activeSectorVisualDescriptions
-        .map((id) => session.sectorVisualDescriptions[id])
+  const activeRoomVisualDescriptions = session
+    ? session.activeRoomVisualDescriptions
+        .map((id) => session.roomVisualDescriptions[id])
         .filter((record): record is NonNullable<typeof record> => Boolean(record))
     : [];
 
@@ -170,20 +170,20 @@ export function HomeChatPage() {
               </article>
             )) : 'No active exterior visual descriptions yet.'}
           </div>
-          <h4>Active Sector Visual Descriptions</h4>
+          <h4>Active Room Visual Descriptions</h4>
           <div>
-            {activeSectorVisualDescriptions.length ? activeSectorVisualDescriptions.map((record, index) => (
+            {activeRoomVisualDescriptions.length ? activeRoomVisualDescriptions.map((record, index) => (
               <article
-                key={`${record.buildingId}-${record.level}-${record.sectorName}-${index}`}
+                key={`${record.buildingId}-${record.level}-${record.roomId}-${index}`}
                 style={{ marginBottom: '12px' }}
               >
                 <div>
                   <strong>{record.buildingId}</strong>
                 </div>
-                <div>Level {record.level} / Sector {record.sectorName}</div>
+                <div>Level {record.level} / Room {record.roomId}</div>
                 <pre style={{ margin: '4px 0', whiteSpace: 'pre-wrap' }}>{record.content}</pre>
               </article>
-            )) : 'No active sector visual descriptions yet.'}
+            )) : 'No active room visual descriptions yet.'}
           </div>
         </aside>
       </div>
