@@ -155,6 +155,8 @@ const DRAFT_OBJECT_TOOL: GameStateToolDef = {
  * 需要新增的方案：
  * - 直接移动 Cardboard Object（到地上或者到背包里等）的方案
  * - 从 Cardboard Loots 里拿单独 Cardboard Item 的方案（Cardboard Loots 的质量、体积随之减小）
+ *   - 可以一次拿多个
+ *   - 拿空了就删掉 Cardboard Loots
  * - 模板细化 Cardboard Loots 的方案
  *   - 仅用作对没有直观描述的 Cardboard 直接细化。如果从已有直观描述的 Cardboard Loots 拿东西，用上一个方案。
  *   - 仅可套模板，程序随机生成东西。
