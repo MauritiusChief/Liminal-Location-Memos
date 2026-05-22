@@ -11,6 +11,9 @@ export interface RelationReference {
   reltags: Record<string, string>;
 }
 
+/**
+ * 因其指向另一个 osm 地物，所以此地物必须同样存在于数据库中
+ */
 export interface OutlineReference {
   osmType: string;
   osmId: number;

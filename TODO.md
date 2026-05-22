@@ -15,6 +15,8 @@
 
 * 添加 LLM 在游戏过程中生成 template 甚至 building pattern 的功能
 
+* 检查 Polar View 会不会把建筑 outline 和建筑的 part 建筑都算上
+
 * 提示 LLM 如果信息不足，不要总是令玩家行为得逞，而是间接提示玩家需要更多信息
 
 * 添加建筑生成功能，具体在 buildingGeneration/_note 中
