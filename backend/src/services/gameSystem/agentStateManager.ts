@@ -15,6 +15,10 @@ import { applySyncPlayerIndoorLocationsTool } from "./toolActiveIndoorLocations.
 import { CARDBOARD_TEMPLATES, GeneralContent, type CardboardObjectRecord, type ObjectRecord } from "../objectGeneration/objectGeneraterShared.js";
 import { type PartRecord } from "../objectGeneration/itemTemplates.js";
 import { applyCreateCardboardObject } from "./toolCreateCardboard.js";
+import { applyMoveObjectTool } from "./toolMoveObject.js";
+import { applyRefineLootsTool } from "./toolRefineLoots.js";
+import { applyRefineCardboardByTemplateTool, applyRefineCardboardByLLMTool } from "./toolRefineCardboard.js";
+import { applyCreateObjectByTemplateTool, applyCreateObjectByLLMTool } from "./toolCreateObject.js";
 
 export interface GameStateToolCall {
   name: string;
@@ -61,6 +65,8 @@ export interface WorldState {
   activeFieldVisualDescriptions: Record<string, FieldVisualDescriptionRecord>;
   activeExteriorVisualDescriptions: Record<string, ExteriorVisualDescriptionRecord>
   activeRoomVisualDescriptions: Record<string, RoomVisualDescriptionRecord>;
+  /** 玩家背包内所有物体 */
+  playerInventory: Record<string, GeneralContent>;
 }
 
 const WORLD_STATE_RADIUS_METERS = 500;
@@ -150,27 +156,130 @@ const DRAFT_OBJECT_TOOL: GameStateToolDef = {
   }
 }
 
+//#region 物品 / 容器操作方案
+
 /**
- * TODO
- * 需要新增的方案：
- * - 直接移动 Cardboard Object（到地上或者到背包里等）的方案
- * - 从 Cardboard Loots 里拿单独 Cardboard Item 的方案（Cardboard Loots 的质量、体积随之减小）
- *   - 可以一次拿多个
- *   - 拿空了就删掉 Cardboard Loots
- * - 模板细化 Cardboard Loots 的方案
- *   - 仅用作对没有直观描述的 Cardboard 直接细化。如果从已有直观描述的 Cardboard Loots 拿东西，用上一个方案。
- *   - 仅可套模板，程序随机生成东西。
- *   - 细化完成后，Cardboard Loots 直接消失。
- *   - 每次细化都会动态更新外部的 MVL。
- * - 模板细化 Cardboard Item/Furniture/Vehicle 的方案
- *   - 套模板得到其材料、形状信息，或者其内部组成部分。
- *   - MVL 信息根据材料、形状，或者其内部组成部分的 MVL 计算得出。
- *   - 每次细化都会动态更新外部的 MVL（换言之，此方案可用于细化内部的 Cardboard Item）。
- * - 创新细化 Cardboard Item/Furniture/Vehicle 的方案
- *   - 与模板细化完全一致，除了其材料、形状信息或者其内部组成部分由 LLM 填写。
- * - 直接创建 Item/Furniture/Vehicle 的方案
- *   - 从环境信息直接创建的方案，不经过先创建 Cardboard 再细化的过程
+ * 移动任意物体。
+ * 可将物体从当前位置移到当前房间地面、背包、或另一个容器内部。
+ * 防自引用：不能将容器移入自身或其子孙。
  */
+const MOVE_OBJECT_TOOL: GameStateToolDef = {
+  name: "move_object",
+  description: [
+    "当用户明确或隐含地要求拿起、放入、移动某个物体时使用此方案。",
+    "目标位置可以是当前房间地面（`ground`）、玩家背包（`inventory`）、或目标容器的 UUID。",
+    "不可将容器移入其自身或其内部的子容器中。",
+  ],
+  arguments: {
+    object_uuid: { type: "string", optional: false, description: "要移动的物体的 UUID" },
+    destination: { type: "string", optional: false, description: "目标位置：`ground`（当前房间地面）、`inventory`（玩家背包）、或目标容器的 UUID" },
+  },
+};
+
+/**
+ * 模板细化 Cardboard Loots。
+ * 使用战利品表模板将纸板 Loots 细化为若干 Cardboard Item。
+ * 按模板物品顺序生成，受 Loots 自身的 MVL 预算限制，超预算跳过、继续尝试后续更轻物品。
+ * 生成完成后原 Loots 被删除。
+ */
+const REFINE_LOOTS_TOOL: GameStateToolDef = {
+  name: "refine_loots",
+  description: [
+    "将缺乏直观描述的 Cardboard Loots 细化为一组具体的 Cardboard Item。仅用于模糊的 Loots（如'groceries'、'beers'等）。",
+    "使用战利品表模板按顺序生成物品，受当前 Loots 的 MVL（质量、体积）预算限制。",
+    "生成完成后原 Loots 被删除，物品放入指定目标位置。",
+  ],
+  arguments: {
+    loots_uuid: { type: "string", optional: false, description: "要细化的 Cardboard Loots 的 UUID" },
+    template_id: { type: "string", optional: false, description: "战利品表模板 ID（如 groceries, beers）" },
+    destination: { type: "string", optional: false, description: "生成物品的落点：`ground` / `inventory` / 容器 UUID" },
+  },
+};
+
+/**
+ * 模板细化 Cardboard 对象。
+ * 将 Cardboard Item/Furniture 转为精算对象（ItemRecord / FurnitureRecord），
+ * MVL 和零件信息来自预制的家具模板变种。
+ */
+const REFINE_CARDBOARD_BY_TEMPLATE_TOOL: GameStateToolDef = {
+  name: "refine_cardboard_by_template",
+  description: [
+    "将 Cardboard Item/Furniture 按模板细化为精算对象。MVL（质量/体积/长度）和零件由模板变种数据决定。",
+    "细化后 isMVLApproximate 会自动设置，取决于 children 是否仍含 Cardboard。",
+  ],
+  arguments: {
+    object_uuid: { type: "string", optional: false, description: "要细化的 Cardboard 对象的 UUID" },
+    template: { type: "string", optional: false, description: "模板 ID（如 home_refrigerator）" },
+    varient: { type: "string", optional: false, description: "变种 ID（如 regular, prime, mini）" },
+  },
+};
+
+/**
+ * 创新细化 Cardboard 对象。
+ * 与模板细化不同，MVL、材料、形状、零件全部由 LLM 直接提供。
+ */
+const REFINE_CARDBOARD_BY_LLM_TOOL: GameStateToolDef = {
+  name: "refine_cardboard_by_llm",
+  description: [
+    "将 Cardboard Item/Furniture 按 LLM 指定的参数细化为精算对象。",
+    "MVL（质量/体积/长度）、材料、形状、零件均由 LLM 决定，不依赖预置模板。",
+  ],
+  arguments: {
+    object_uuid: { type: "string", optional: false, description: "要细化的 Cardboard 对象的 UUID" },
+    mass: { type: "number", optional: false, description: "精算质量（kg）" },
+    volume: { type: "number", optional: false, description: "精算体积（L）" },
+    length: { type: "number", optional: false, description: "精算长度（cm）" },
+    material: { type: "string", optional: true, description: "物体的材料" },
+    shape: { type: "string", optional: true, description: "物体的形状" },
+    parts: { type: "array of {name, description?}", optional: true, description: "物体的零件列表" },
+    is_soft_container: { type: "boolean", optional: true, description: "细化后是否为软容器" },
+  },
+};
+
+/**
+ * 模板创建精算对象（跳过 Cardboard 阶段）。
+ * 可选 source_loots_uuid 参数：从来源 Loots 扣除 MVL（相当于从 Loots 中拿取物品）。
+ */
+const CREATE_OBJECT_BY_TEMPLATE_TOOL: GameStateToolDef = {
+  name: "create_object_by_template",
+  description: [
+    "直接从模板创建精算对象（ItemRecord/FurnitureRecord），跳过先创建 Cardboard 再细化的过程。",
+    "可选指定 source_loots_uuid 参数，从来源 Loots 中扣除本次创建的 MVL（Loots 扣除耗尽后自动删除）。",
+  ],
+  arguments: {
+    template: { type: "string", optional: false, description: "模板 ID" },
+    varient: { type: "string", optional: false, description: "变种 ID" },
+    destination: { type: "string", optional: false, description: "落点：`ground` / `inventory` / 容器 UUID" },
+    source_loots_uuid: { type: "string", optional: true, description: "如需从 Loots 拿取，指定来源 Loots 的 UUID" },
+  },
+};
+
+/**
+ * 创新创建精算对象（跳过 Cardboard 阶段）。
+ * MVL、材料、形状、零件均由 LLM 直接指定。
+ * 可选 source_loots_uuid 参数：从来源 Loots 扣除 MVL。
+ */
+const CREATE_OBJECT_BY_LLM_TOOL: GameStateToolDef = {
+  name: "create_object_by_llm",
+  description: [
+    "直接从 LLM 指定的参数创建精算对象，跳过 Cardboard 阶段。",
+    "MVL（质量/体积/长度）、材料、形状、零件均由 LLM 决定。",
+    "可选指定 source_loots_uuid 参数，从来源 Loots 中扣除本次创建的 MVL。",
+  ],
+  arguments: {
+    name: { type: "string", optional: false, description: "物体名称" },
+    description: { type: "string", optional: false, description: "物体描述" },
+    mass: { type: "number", optional: false, description: "质量（kg）" },
+    volume: { type: "number", optional: false, description: "体积（L）" },
+    length: { type: "number", optional: false, description: "长度（cm）" },
+    destination: { type: "string", optional: false, description: "落点：`ground` / `inventory` / 容器 UUID" },
+    material: { type: "string", optional: true, description: "物体的材料" },
+    shape: { type: "string", optional: true, description: "物体的形状" },
+    parts: { type: "array of {name, description?}", optional: true, description: "物体的零件列表" },
+    is_soft_container: { type: "boolean", optional: true, description: "是否为软容器" },
+    source_loots_uuid: { type: "string", optional: true, description: "如需从 Loots 拿取，指定来源 Loots 的 UUID" },
+  },
+};
 
 //#region 渐进式披露工具
 
@@ -226,6 +335,12 @@ export async function gameStateManager(
     SET_PLAYER_INDOOR_LOCATION_TOOL,
     ADJUST_PLAYER_VISIBLE_LOCATION_TOOL,
     DRAFT_OBJECT_TOOL,
+    MOVE_OBJECT_TOOL,
+    REFINE_LOOTS_TOOL,
+    REFINE_CARDBOARD_BY_TEMPLATE_TOOL,
+    REFINE_CARDBOARD_BY_LLM_TOOL,
+    CREATE_OBJECT_BY_TEMPLATE_TOOL,
+    CREATE_OBJECT_BY_LLM_TOOL,
   ].map((def) => toToolPrompt(def));
   const systemPrompt = BUILD_GAME_STATE_MANAGER_SYSTEM(toolDefs);
   const { lat, lon } = state.playerPosition;
@@ -315,6 +430,24 @@ export async function applyGameStateToolCalls(state: GameState, toolCalls: GameS
       case DRAFT_OBJECT_TOOL.name:
         applyCreateCardboardObject(state, args);
         break
+      case MOVE_OBJECT_TOOL.name:
+        applyMoveObjectTool(state, args);
+        break;
+      case REFINE_LOOTS_TOOL.name:
+        applyRefineLootsTool(state, args);
+        break;
+      case REFINE_CARDBOARD_BY_TEMPLATE_TOOL.name:
+        applyRefineCardboardByTemplateTool(state, args);
+        break;
+      case REFINE_CARDBOARD_BY_LLM_TOOL.name:
+        applyRefineCardboardByLLMTool(state, args);
+        break;
+      case CREATE_OBJECT_BY_TEMPLATE_TOOL.name:
+        applyCreateObjectByTemplateTool(state, args);
+        break;
+      case CREATE_OBJECT_BY_LLM_TOOL.name:
+        applyCreateObjectByLLMTool(state, args);
+        break;
     }
 
   }
@@ -384,6 +517,7 @@ export function pickWorldState(state: GameState): WorldState {
     activeFieldVisualDescriptions,
     activeExteriorVisualDescriptions,
     activeRoomVisualDescriptions,
+    playerInventory: state.playerInventory,
   }
 }
 
@@ -422,6 +556,10 @@ export async function toWorldStatePrompt(state: WorldState, scene?: SceneObject)
     .map(record => formatBuildingRecordPrompt(record, state.playerIndoorLocation))
     .join('\n\n')
 
+  // 玩家背包内容
+  const inventoryEntries = Object.values(state.playerInventory);
+  const inventoryPrompt = formatWorldStateRoomContentPrompt(inventoryEntries, "背包内物体");
+
   const sections = [
     '玩家周遭室外环境摘要：',
     scenePrompt || '（当前未提供室外摘要）',
@@ -443,6 +581,9 @@ export async function toWorldStatePrompt(state: WorldState, scene?: SceneObject)
     '---',
     '玩家所处房间细节记录：',
     roomVisualDescriptionPrompt || '（暂无）',
+    '---',
+    '玩家背包内物体：',
+    inventoryPrompt,
   ];
 
   return sections.join('\n');
@@ -587,20 +728,22 @@ function renderRoomLine(room: BuildingRoom, indent: string): string {
 //#region 房间内物体提示词（面向 Game State Manager）
 
 /**
- * 组装面向 Game State Manager 的房间内物体提示词。
+ * 组装面向 Game State Manager 的房间内物体 / 背包内物体提示词。
  * 相比 formatRoomContentPrompt，这里为每个物体提供 UUID、质量/体积/长度（明确或粗略）、材料、形状等详细信息，
  * 供状态机在决定工具调用时参考。
  *
  * 不按"家具"/"物品"分类——物体名称已足矣表达类别。
- * @param contentEntries 按 uuid 索引的房间内物体记录
+ * @param contentEntries 按 uuid 索引的物体记录
+ * @param locationLabel 标签文本（默认 "房间内对象"）
  * @returns
  */
-function formatWorldStateRoomContentPrompt(contentEntries: GeneralContent[]): string {
+function formatWorldStateRoomContentPrompt(contentEntries: GeneralContent[], locationLabel?: string): string {
+  const label = locationLabel || "房间内对象";
   if (contentEntries.length === 0) {
-    return "房间内对象：（无）";
+    return `${label}：（无）`;
   }
   return [
-    "房间内对象：",
+    `${label}：`,
     ...contentEntries.map(formatWorldStateRoomContentLine),
     "（其他物体只是不可互动，并非不存在）",
   ].join('\n');

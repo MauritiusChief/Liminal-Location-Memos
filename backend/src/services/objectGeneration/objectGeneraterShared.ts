@@ -8,13 +8,17 @@ import { CARDBOARD_ITEM_TEMPLATES, CardboardItemRecord, ItemRecord } from "./ite
 export interface ObjectRecord {
   uuid: string;
   name: string;
-  mass: number; // 单位为 kg
-  volume: number; // 单位为 L
-  length: number; // 单位为 cm
+  mass: number; // 单位为 kg（= selfMass + children 的 mass，含 Cardboard children 的 aprxMass 在内）
+  volume: number; // 单位为 L（软容器时含 children volume，刚性容器 = selfVolume）
+  length: number; // 单位为 cm（不随内容物变化，恒 = selfLength）
   selfMass: number;
   selfVolume: number;
   selfLength: number;
   description: string;
+  /** 软容器标记：true 时放入内容物会增加容器的 volume（如背包）；默认 false（如保险箱，仅 mass 增加） */
+  isSoftContainer?: boolean;
+  /** 显式标记：true 表示 total mass/volume/length 处于近似状态，因为仍有 child 为 Cardboard */
+  isMVLApproximate?: boolean;
 }
 
 export interface CardboardObjectRecord {
@@ -25,6 +29,8 @@ export interface CardboardObjectRecord {
   aprxLength: number; // 单位为 cm
   description: string;
   note: string;
+  /** 软容器标记：纸板状态亦可标记（如已知是个麻袋） */
+  isSoftContainer?: boolean;
 }
 
 /**
